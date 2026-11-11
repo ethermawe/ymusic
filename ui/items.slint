@@ -1,5 +1,5 @@
 import { Theme, Icons, CardItem, TrackRow } from "theme.slint";
-import { Label, Icon, IconButton } from "widgets.slint";
+import { Label, Icon, IconButton, EqualizerBars } from "widgets.slint";
 
 export component CardTile inherits Rectangle {
     in property <CardItem> item;
@@ -44,6 +44,18 @@ export component CardTile inherits Rectangle {
                     height: 20px;
                     commands: root.item.kind == "artist" ? Icons.artist : (root.item.kind == "album" ? Icons.album : Icons.note);
                     fill: Theme.muted;
+                }
+
+                if ta.has-hover : Rectangle {
+                    width: parent.width;
+                    height: parent.height;
+                    background: #00000055;
+                    Icon {
+                        width: 16px;
+                        height: 16px;
+                        commands: Icons.play;
+                        fill: #ffffff;
+                    }
                 }
             }
         }
@@ -128,12 +140,28 @@ export component TrackItem inherits Rectangle {
                 if root.current : Rectangle {
                     width: parent.width;
                     height: parent.height;
-                    background: root.track.has-cover ? #00000088 : transparent;
-                    Icon {
+                    background: root.track.has-cover ? #00000099 : transparent;
+                    if root.playing : EqualizerBars {
+                        playing: true;
+                        bar-color: Theme.accent;
+                    }
+                    if !root.playing : Icon {
                         width: 18px;
                         height: 18px;
-                        commands: root.playing ? Icons.pause : Icons.play;
+                        commands: Icons.play;
                         fill: Theme.accent;
+                    }
+                }
+
+                if ta.has-hover && !root.current : Rectangle {
+                    width: parent.width;
+                    height: parent.height;
+                    background: #00000066;
+                    Icon {
+                        width: 16px;
+                        height: 16px;
+                        commands: Icons.play;
+                        fill: #ffffff;
                     }
                 }
             }

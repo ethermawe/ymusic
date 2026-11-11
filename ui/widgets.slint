@@ -93,6 +93,73 @@ export component PlayHeroButton inherits Rectangle {
     }
 }
 
+export component EqualizerBars inherits Rectangle {
+    in property <bool> playing: false;
+    in property <color> bar-color: Theme.accent;
+    width: 16px;
+    height: 14px;
+
+    property <int> step: 0;
+
+    Timer {
+        interval: 180ms;
+        running: root.playing;
+        triggered => {
+            if (root.step >= 3) {
+                root.step = 0;
+            } else {
+                root.step += 1;
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 2px;
+        alignment: center;
+
+        VerticalLayout {
+            alignment: end;
+            Rectangle {
+                width: 2px;
+                height: root.playing ? (root.step == 0 ? 12px : (root.step == 1 ? 4px : (root.step == 2 ? 14px : 7px))) : 3px;
+                border-radius: 1px;
+                background: root.bar-color;
+                animate height { duration: 150ms; easing: ease-in-out; }
+            }
+        }
+        VerticalLayout {
+            alignment: end;
+            Rectangle {
+                width: 2px;
+                height: root.playing ? (root.step == 0 ? 5px : (root.step == 1 ? 14px : (root.step == 2 ? 8px : 12px))) : 3px;
+                border-radius: 1px;
+                background: root.bar-color;
+                animate height { duration: 150ms; easing: ease-in-out; }
+            }
+        }
+        VerticalLayout {
+            alignment: end;
+            Rectangle {
+                width: 2px;
+                height: root.playing ? (root.step == 0 ? 14px : (root.step == 1 ? 7px : (root.step == 2 ? 12px : 4px))) : 3px;
+                border-radius: 1px;
+                background: root.bar-color;
+                animate height { duration: 150ms; easing: ease-in-out; }
+            }
+        }
+        VerticalLayout {
+            alignment: end;
+            Rectangle {
+                width: 2px;
+                height: root.playing ? (root.step == 0 ? 7px : (root.step == 1 ? 11px : (root.step == 2 ? 4px : 13px))) : 3px;
+                border-radius: 1px;
+                background: root.bar-color;
+                animate height { duration: 150ms; easing: ease-in-out; }
+            }
+        }
+    }
+}
+
 export component Pill inherits Rectangle {
     in property <string> text;
     in property <bool> active;
