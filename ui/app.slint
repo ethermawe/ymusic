@@ -1,12 +1,13 @@
 import { ListView } from "std-widgets.slint";
 import { Theme, Icons, TrackRow, CardItem } from "theme.slint";
-import { Label, Icon, IconButton, Pill, Field, SeekBar } from "widgets.slint";
+import { Label, Icon, IconButton, Pill, Field, SeekBar, NavItem, HomeCard } from "widgets.slint";
 import { CardTile, TrackItem } from "items.slint";
 
 export { Theme, TrackRow, CardItem }
 
 export component AppWindow inherits Window {
     title: "Ymusic";
+    icon: @image-url("../icon.svg");
     preferred-width: 1140px;
     preferred-height: 740px;
     min-width: 820px;
@@ -20,10 +21,12 @@ export component AppWindow inherits Window {
     in property <string> login-code;
     in property <string> login-url;
     in property <string> user-name;
+    in property <image> user-avatar;
+    in property <bool> user-has-avatar: false;
     in-out property <string> status;
 
     // навигация и контент
-    // page: 0 — Мне нравится, 1 — Моя волна, 2 — Плейлисты, 3 — Альбомы, 4 — Артисты, 5 — Поиск / Детальная страница
+    // page: 0 — Главная, 1 — Моя волна, 2 — Мне нравится, 3 — Плейлисты, 4 — Альбомы, 5 — Артисты, 6 — Поиск / Детальная страница
     in property <int> page;
     in property <string> list-title;
     in property <string> list-subtitle;
@@ -32,6 +35,15 @@ export component AppWindow inherits Window {
     in property <[CardItem]> cards;
     in property <[TrackRow]> tracks;
     in property <int> current-index: -1;
+
+    // данные для экрана артиста
+    in property <bool> is-artist-view: false;
+    in property <string> artist-name;
+    in property <string> artist-genres;
+    in property <string> artist-stats;
+    in property <image> artist-avatar;
+    in property <bool> artist-has-avatar: false;
+    in-out property <int> artist-tab: 0;
 
     // плеер
     in property <bool> has-track;
@@ -48,6 +60,8 @@ export component AppWindow inherits Window {
     in property <string> position-text: "0:00";
     in property <string> duration-text: "0:00";
     in-out property <float> volume: 0.7;
+    in property <int> repeat-mode: 0;
+    in property <bool> shuffle: false;
 
     callback login-device();
     callback login-token(string);
@@ -57,6 +71,7 @@ export component AppWindow inherits Window {
 
     private property <bool> code-copied: false;
 
+    callback show-home();
     callback start-wave();
     callback start-artist-wave();
     callback show-likes();
@@ -78,6 +93,9 @@ export component AppWindow inherits Window {
     callback toggle();
     callback next();
     callback prev();
+    callback toggle-repeat();
+    callback toggle-shuffle();
+    callback toggle-mute();
     callback seek(float);
     callback set-volume(float);
 
@@ -116,15 +134,32 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         padding: 32px;
                         spacing: 14px;
-                        Label {
-                            text: "Ymusic";
-                            font-size: 32px;
-                            font-weight: 800;
-                            color: Theme.accent;
-                        }
-                        Label {
-                            text: "Лёгкий клиент Яндекс Музыки";
-                            color: Theme.muted;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: start;
+                            Path {
+                                width: 48px;
+                                height: 48px;
+                                viewbox-width: 256;
+                                viewbox-height: 256;
+                                commands: Icons.logo;
+                                fill: Theme.accent;
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                Label {
+                                    text: "Ymusic";
+                                    font-size: 26px;
+                                    font-weight: 800;
+                                    color: Theme.accent;
+                                }
+                                Label {
+                                    text: "Лёгкий клиент Яндекс Музыки";
+                                    font-size: 12px;
+                                    color: Theme.muted;
+                                }
+                            }
                         }
                         Rectangle { height: 8px; }
                         if root.login-code == "" : Pill {
@@ -212,162 +247,669 @@ export component AppWindow inherits Window {
     }
 
     if root.logged-in : VerticalLayout {
-        // верхняя панель
+        spacing: 0px;
+        padding: 0px;
+
+        // Сайдбар + Область контента
         HorizontalLayout {
-            padding-left: 24px;
-            padding-right: 24px;
-            padding-top: 16px;
-            padding-bottom: 8px;
-            spacing: 8px;
-            Label {
-                text: "Ymusic";
-                font-size: 20px;
-                font-weight: 800;
-                color: Theme.accent;
-            }
-            Rectangle { width: 8px; }
-            VerticalLayout {
-                alignment: center;
-                Pill {
-                    text: "▶ Моя волна";
-                    accent: root.page == 1;
-                    active: root.page == 1;
-                    clicked => { root.start-wave(); }
-                }
-            }
-            VerticalLayout {
-                alignment: center;
-                Pill {
-                    text: "Мне нравится";
-                    active: root.page == 0;
-                    clicked => { root.show-likes(); }
-                }
-            }
-            VerticalLayout {
-                alignment: center;
-                Pill {
-                    text: "Плейлисты";
-                    active: root.page == 2;
-                    clicked => { root.show-playlists(); }
-                }
-            }
-            VerticalLayout {
-                alignment: center;
-                Pill {
-                    text: "Альбомы";
-                    active: root.page == 3;
-                    clicked => { root.show-albums(); }
-                }
-            }
-            VerticalLayout {
-                alignment: center;
-                Pill {
-                    text: "Артисты";
-                    active: root.page == 4;
-                    clicked => { root.show-artists(); }
-                }
-            }
-            Rectangle { horizontal-stretch: 1; }
-            VerticalLayout {
-                alignment: center;
-                Field {
-                    width: 260px;
-                    icon: Icons.search;
-                    placeholder: "Трек, артист, альбом";
-                    accepted(t) => { root.search(t); }
-                }
-            }
-            Label {
-                text: root.user-name;
-                color: Theme.muted;
-                overflow: elide;
-                max-width: 120px;
-            }
-            VerticalLayout {
-                alignment: center;
-                Pill {
-                    text: "Выйти";
-                    clicked => { root.logout(); }
-                }
-            }
-        }
-
-        // основная область
-        VerticalLayout {
             vertical-stretch: 1;
-            padding-left: 24px;
-            padding-right: 24px;
-            spacing: 10px;
+            spacing: 0px;
 
-            HorizontalLayout {
-                spacing: 14px;
+            // Сайдбар слева
+            Rectangle {
+                width: 220px;
+                background: Theme.surface-low;
+
+                // Разделитель справа
+                Rectangle {
+                    x: parent.width - 1px;
+                    y: 0;
+                    width: 1px;
+                    height: parent.height;
+                    background: Theme.outline;
+                    opacity: 0.3;
+                }
+
                 VerticalLayout {
-                    horizontal-stretch: 1;
-                    alignment: start;
-                    spacing: 2px;
-                    Label {
-                        text: root.list-title;
-                        font-size: 26px;
-                        font-weight: 800;
-                        overflow: elide;
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 16px;
+                    padding-bottom: 12px;
+                    spacing: 8px;
+
+                    // Логотип
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        padding-bottom: 8px;
+                        spacing: 10px;
+                        alignment: start;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Path {
+                                width: 32px;
+                                height: 32px;
+                                viewbox-width: 256;
+                                viewbox-height: 256;
+                                commands: Icons.logo;
+                                fill: Theme.accent;
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            Label {
+                                text: "Ymusic";
+                                font-size: 19px;
+                                font-weight: 800;
+                                color: Theme.accent;
+                            }
+                        }
                     }
-                    if root.list-subtitle != "" : Label {
-                        text: root.list-subtitle;
-                        font-size: 13px;
-                        color: Theme.muted;
-                        overflow: elide;
+
+                    NavItem {
+                        text: "Главная";
+                        icon: Icons.home;
+                        active: root.page == 0;
+                        clicked => { root.show-home(); }
+                    }
+
+                    NavItem {
+                        text: "Моя волна";
+                        icon: Icons.wave;
+                        active: root.page == 1;
+                        clicked => { root.start-wave(); }
+                    }
+
+                    Rectangle { height: 6px; }
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-top: 4px;
+                        padding-bottom: 2px;
+                        Label {
+                            text: "МОЯ МЕДИАТЕКА";
+                            font-size: 10px;
+                            font-weight: 800;
+                            color: Theme.muted;
+                            letter-spacing: 1px;
+                        }
+                    }
+
+                    NavItem {
+                        text: "Мне нравится";
+                        icon: Icons.heart-fill;
+                        active: root.page == 2;
+                        clicked => { root.show-likes(); }
+                    }
+
+                    NavItem {
+                        text: "Плейлисты";
+                        icon: Icons.playlist;
+                        active: root.page == 3;
+                        clicked => { root.show-playlists(); }
+                    }
+
+                    NavItem {
+                        text: "Альбомы";
+                        icon: Icons.album;
+                        active: root.page == 4;
+                        clicked => { root.show-albums(); }
+                    }
+
+                    NavItem {
+                        text: "Артисты";
+                        icon: Icons.artist;
+                        active: root.page == 5;
+                        clicked => { root.show-artists(); }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+
+                    // Профиль и кнопка выхода внизу
+                    Rectangle {
+                        height: 48px;
+                        border-radius: Theme.radius-sm;
+                        background: Theme.surface-hi;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 8px;
+                            spacing: 10px;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 30px;
+                                    height: 30px;
+                                    border-radius: 15px;
+                                    clip: true;
+                                    background: Theme.secondary-container;
+
+                                    if root.user-has-avatar : Image {
+                                        x: 0;
+                                        y: 0;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        source: root.user-avatar;
+                                        image-fit: cover;
+                                    }
+
+                                    if !root.user-has-avatar : VerticalLayout {
+                                        alignment: center;
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            Icon {
+                                                width: 16px;
+                                                height: 16px;
+                                                commands: Icons.artist;
+                                                fill: Theme.on-secondary-container;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                Label {
+                                    text: root.user-name;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: Theme.text;
+                                    overflow: elide;
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                IconButton {
+                                    width: 32px;
+                                    height: 32px;
+                                    icon: Icons.logout;
+                                    clicked => { root.logout(); }
+                                }
+                            }
+                        }
                     }
                 }
-                if root.can-start-artist-wave : VerticalLayout {
-                    alignment: center;
-                    Pill {
-                        text: "▶ Волна по артисту";
-                        accent: true;
-                        clicked => { root.start-artist-wave(); }
+            }
+
+            // Правая часть (Контент)
+            VerticalLayout {
+                horizontal-stretch: 1;
+                padding-left: 24px;
+                padding-right: 24px;
+                padding-top: 14px;
+                padding-bottom: 8px;
+                spacing: 14px;
+
+                // Верхняя строка с поиском
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    Field {
+                        width: 320px;
+                        icon: Icons.search;
+                        placeholder: "Трек, артист, альбом";
+                        accepted(t) => { root.search(t); }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
+                // Внутренний контент:
+                // Страница 0: Главная
+                if root.page == 0 : VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: 16px;
+
+                    // Hero-карточка «Моя волна»
+                    Rectangle {
+                        height: 110px;
+                        border-radius: Theme.radius-lg;
+                        background: hero-ta.has-hover ? Theme.surface-hi : Theme.surface-low;
+                        border-width: 1px;
+                        border-color: hero-ta.has-hover ? Theme.accent : Theme.outline;
+
+                        animate background { duration: Theme.anim-fast; }
+                        animate border-color { duration: Theme.anim-fast; }
+
+                        hero-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.start-wave(); }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: 24px;
+                            padding-right: 24px;
+                            spacing: 20px;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 64px;
+                                    height: 64px;
+                                    border-radius: 32px;
+                                    background: Theme.accent;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            Icon {
+                                                width: 34px;
+                                                height: 34px;
+                                                commands: Icons.wave;
+                                                fill: Theme.on-accent;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                spacing: 4px;
+                                Label {
+                                    text: "Моя волна";
+                                    font-size: 24px;
+                                    font-weight: 800;
+                                    color: Theme.text;
+                                }
+                                Label {
+                                    text: "Бесконечный персональный поток музыки под ваш вкус";
+                                    font-size: 13px;
+                                    color: Theme.muted;
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                Pill {
+                                    text: "▶ Запустить волну";
+                                    accent: true;
+                                    clicked => { root.start-wave(); }
+                                }
+                            }
+                        }
+                    }
+
+                    // Сетка быстрых переходов
+                    HorizontalLayout {
+                        spacing: 12px;
+                        HomeCard {
+                            horizontal-stretch: 1;
+                            title: "Мне нравится";
+                            subtitle: "Любимые треки";
+                            icon: Icons.heart-fill;
+                            accent: true;
+                            clicked => { root.show-likes(); }
+                        }
+                        HomeCard {
+                            horizontal-stretch: 1;
+                            title: "Плейлисты";
+                            subtitle: "Ваши подборки";
+                            icon: Icons.playlist;
+                            clicked => { root.show-playlists(); }
+                        }
+                        HomeCard {
+                            horizontal-stretch: 1;
+                            title: "Альбомы";
+                            subtitle: "Релизы артистов";
+                            icon: Icons.album;
+                            clicked => { root.show-albums(); }
+                        }
+                        HomeCard {
+                            horizontal-stretch: 1;
+                            title: "Артисты";
+                            subtitle: "Подписки";
+                            icon: Icons.artist;
+                            clicked => { root.show-artists(); }
+                        }
+                    }
+
+                    // Секция карточек коллекций/плейлистов/альбомов
+                    if root.cards.length > 0 : VerticalLayout {
+                        vertical-stretch: 1;
+                        spacing: 10px;
+
+                        Label {
+                            text: "Коллекции и альбомы";
+                            font-size: 18px;
+                            font-weight: 700;
+                            color: Theme.text;
+                        }
+
+                        ListView {
+                            vertical-stretch: 1;
+                            for card[i] in root.cards : VerticalLayout {
+                                padding-bottom: 6px;
+                                CardTile {
+                                    item: card;
+                                    clicked => { root.open-card(i); }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.list-loading && root.cards.length == 0 : VerticalLayout {
+                        alignment: center;
+                        vertical-stretch: 1;
+                        Label {
+                            text: "Загрузка коллекций…";
+                            horizontal-alignment: center;
+                            color: Theme.muted;
+                        }
+                    }
+
+                    if !root.list-loading && root.cards.length == 0 : Rectangle {
+                        vertical-stretch: 1;
                     }
                 }
-            }
 
-            if root.list-loading && root.cards.length == 0 && root.tracks.length == 0 : Label {
-                text: "Загрузка…";
-                color: Theme.muted;
-            }
+                // Страница != 0: Моя волна, Мне нравится, Плейлисты, Альбомы, Артисты, Поиск, Страница артиста
+                if root.page != 0 : VerticalLayout {
+                    vertical-stretch: 1;
+                    spacing: 12px;
 
-            if !root.list-loading && root.cards.length == 0 && root.tracks.length == 0 : Label {
-                text: "Здесь пока пусто";
-                color: Theme.muted;
-            }
-
-            // Заполнитель, чтобы заголовок и "Загрузка…" не разъезжались на весь экран, пока список пуст
-            if root.cards.length == 0 && root.tracks.length == 0 : Rectangle {
-                vertical-stretch: 1;
-            }
-
-            // список карточек (плейлисты / альбомы / артисты)
-            if root.cards.length > 0 : ListView {
-                vertical-stretch: root.tracks.length > 0 ? 0 : 1;
-                max-height: root.tracks.length > 0 ? 190px : 9999px;
-                for card[i] in root.cards : VerticalLayout {
-                    padding-bottom: 6px;
-                    CardTile {
-                        item: card;
-                        clicked => { root.open-card(i); }
+                    // Обычная шапка (если не экран артиста)
+                    if !root.is-artist-view : HorizontalLayout {
+                        spacing: 14px;
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: start;
+                            spacing: 2px;
+                            Label {
+                                text: root.list-title;
+                                font-size: 24px;
+                                font-weight: 800;
+                                overflow: elide;
+                            }
+                            if root.list-subtitle != "" : Label {
+                                text: root.list-subtitle;
+                                font-size: 13px;
+                                color: Theme.muted;
+                                overflow: elide;
+                            }
+                        }
+                        if root.can-start-artist-wave : VerticalLayout {
+                            alignment: center;
+                            Pill {
+                                text: "▶ Волна по артисту";
+                                accent: true;
+                                clicked => { root.start-artist-wave(); }
+                            }
+                        }
                     }
-                }
-            }
 
-            // список треков
-            if root.tracks.length > 0 : ListView {
-                vertical-stretch: 1;
-                for row[i] in root.tracks : TrackItem {
-                    track: row;
-                    index: i;
-                    current: i == root.current-index;
-                    playing: root.playing;
-                    activate => { root.play(i); }
-                    toggle-like => { root.toggle-track-like(i); }
-                    open-artist => { root.open-track-artist(i); }
-                    open-album => { root.open-track-album(i); }
+                    // Hero-карточка артиста (если открыта страница артиста)
+                    if root.is-artist-view : VerticalLayout {
+                        spacing: 12px;
+
+                        Rectangle {
+                            border-radius: Theme.radius-md;
+                            background: Theme.surface-low;
+                            border-width: 1px;
+                            border-color: Theme.outline;
+
+                            HorizontalLayout {
+                                padding: 16px;
+                                spacing: 18px;
+                                alignment: start;
+
+                                // Круглая аватарка артиста
+                                Rectangle {
+                                    width: 96px;
+                                    height: 96px;
+                                    border-radius: 48px;
+                                    clip: true;
+                                    background: Theme.surface-hi;
+                                    border-width: 2px;
+                                    border-color: Theme.surface-highest;
+
+                                    if root.artist-has-avatar : Image {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        source: root.artist-avatar;
+                                        image-fit: cover;
+                                    }
+
+                                    if !root.artist-has-avatar : Icon {
+                                        width: 44px;
+                                        height: 44px;
+                                        commands: Icons.artist;
+                                        fill: Theme.muted;
+                                    }
+                                }
+
+                                // Информация об артисте
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    alignment: center;
+                                    spacing: 5px;
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        alignment: start;
+                                        Rectangle {
+                                            height: 20px;
+                                            border-radius: Theme.radius-xs;
+                                            background: Theme.secondary-container;
+                                            HorizontalLayout {
+                                                padding-left: 8px;
+                                                padding-right: 8px;
+                                                alignment: center;
+                                                Label {
+                                                    text: "ИСПОЛНИТЕЛЬ";
+                                                    font-size: 10px;
+                                                    font-weight: 800;
+                                                    color: Theme.on-secondary-container;
+                                                    letter-spacing: 1px;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Label {
+                                        text: root.artist-name;
+                                        font-size: 28px;
+                                        font-weight: 800;
+                                        overflow: elide;
+                                        color: Theme.text;
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        if root.artist-genres != "" : Label {
+                                            text: root.artist-genres;
+                                            font-size: 12px;
+                                            color: Theme.muted;
+                                            overflow: elide;
+                                        }
+                                        if root.artist-stats != "" : Label {
+                                            text: (root.artist-genres != "" ? "• " : "") + root.artist-stats;
+                                            font-size: 12px;
+                                            color: Theme.accent;
+                                            font-weight: 600;
+                                            overflow: elide;
+                                        }
+                                    }
+
+                                    Rectangle { height: 2px; }
+
+                                    HorizontalLayout {
+                                        spacing: 10px;
+                                        alignment: start;
+
+                                        Pill {
+                                            text: "▶ Слушать";
+                                            accent: true;
+                                            clicked => {
+                                                if (root.tracks.length > 0) {
+                                                    root.play(0);
+                                                }
+                                            }
+                                        }
+
+                                        Pill {
+                                            text: "▶ Волна по артисту";
+                                            clicked => { root.start-artist-wave(); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Переключатель секций для артиста
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+
+                            Pill {
+                                text: "Популярные треки" + (root.tracks.length > 0 ? " (" + root.tracks.length + ")" : "");
+                                active: root.artist-tab == 0;
+                                clicked => { root.artist-tab = 0; }
+                            }
+
+                            if root.cards.length > 0 : Pill {
+                                text: "Альбомы и релизы (" + root.cards.length + ")";
+                                active: root.artist-tab == 1;
+                                clicked => { root.artist-tab = 1; }
+                            }
+                        }
+                    }
+
+                    // Моя волна: специальное красивое состояние ожидания / настройки потока
+                    if root.page == 1 && root.tracks.length == 0 : VerticalLayout {
+                        alignment: center;
+                        vertical-stretch: 1;
+                        spacing: 14px;
+
+                        HorizontalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 72px;
+                                height: 72px;
+                                border-radius: 36px;
+                                background: Theme.secondary-container;
+                                VerticalLayout {
+                                    alignment: center;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Icon {
+                                            width: 36px;
+                                            height: 36px;
+                                            commands: Icons.wave;
+                                            fill: Theme.accent;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            Label {
+                                text: root.list-loading ? "Настраиваем поток Моей волны…" : "Поток завершён";
+                                font-size: 16px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                color: Theme.text;
+                            }
+                            Label {
+                                text: root.list-loading ? "Подбираем персональные рекомендации под ваши предпочтения" : "Нажмите кнопку, чтобы запустить новый поток рекомендаций";
+                                font-size: 13px;
+                                horizontal-alignment: center;
+                                color: Theme.muted;
+                            }
+                        }
+
+                        if !root.list-loading : HorizontalLayout {
+                            alignment: center;
+                            Pill {
+                                text: "▶ Запустить заново";
+                                accent: true;
+                                clicked => { root.start-wave(); }
+                            }
+                        }
+                    }
+
+                    // Индикаторы загрузки для остальных страниц
+                    if root.page != 1 && root.list-loading && root.cards.length == 0 && root.tracks.length == 0 : VerticalLayout {
+                        alignment: center;
+                        vertical-stretch: 1;
+                        Label {
+                            text: "Загрузка…";
+                            horizontal-alignment: center;
+                            color: Theme.muted;
+                        }
+                    }
+
+                    if root.page != 1 && !root.list-loading && root.cards.length == 0 && root.tracks.length == 0 : VerticalLayout {
+                        alignment: center;
+                        vertical-stretch: 1;
+                        Label {
+                            text: "Здесь пока пусто";
+                            horizontal-alignment: center;
+                            color: Theme.muted;
+                        }
+                    }
+
+                    // На экране артиста: переключение между треками и альбомами
+                    if root.is-artist-view && root.artist-tab == 0 && root.tracks.length > 0 : ListView {
+                        vertical-stretch: 1;
+                        for row[i] in root.tracks : TrackItem {
+                            track: row;
+                            index: i;
+                            current: i == root.current-index;
+                            playing: root.playing;
+                            activate => { root.play(i); }
+                            toggle-like => { root.toggle-track-like(i); }
+                            open-artist => { root.open-track-artist(i); }
+                            open-album => { root.open-track-album(i); }
+                        }
+                    }
+
+                    if root.is-artist-view && root.artist-tab == 1 && root.cards.length > 0 : ListView {
+                        vertical-stretch: 1;
+                        for card[i] in root.cards : VerticalLayout {
+                            padding-bottom: 6px;
+                            CardTile {
+                                item: card;
+                                clicked => { root.open-card(i); }
+                            }
+                        }
+                    }
+
+                    // На обычных экранах (плейлисты / альбомы / артисты / поиск)
+                    if !root.is-artist-view && root.cards.length > 0 : ListView {
+                        vertical-stretch: root.tracks.length > 0 ? 0 : 1;
+                        max-height: root.tracks.length > 0 ? 190px : 9999px;
+                        for card[i] in root.cards : VerticalLayout {
+                            padding-bottom: 6px;
+                            CardTile {
+                                item: card;
+                                clicked => { root.open-card(i); }
+                            }
+                        }
+                    }
+
+                    if !root.is-artist-view && root.tracks.length > 0 : ListView {
+                        vertical-stretch: 1;
+                        for row[i] in root.tracks : TrackItem {
+                            track: row;
+                            index: i;
+                            current: i == root.current-index;
+                            playing: root.playing;
+                            activate => { root.play(i); }
+                            toggle-like => { root.toggle-track-like(i); }
+                            open-artist => { root.open-track-artist(i); }
+                            open-album => { root.open-track-album(i); }
+                        }
+                    }
                 }
             }
         }
@@ -386,152 +928,218 @@ export component AppWindow inherits Window {
             }
             HorizontalLayout {
                 padding-left: 16px;
-                padding-right: 24px;
-                spacing: 16px;
+                padding-right: 16px;
+                spacing: 12px;
 
-                HorizontalLayout {
-                    width: 340px;
-                    spacing: 12px;
-                    VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            width: 58px;
-                            height: 58px;
-                            border-radius: Theme.radius-sm;
-                            clip: true;
-                            background: Theme.surface-hi;
-                            if root.has-cover : Image {
-                                width: parent.width;
-                                height: parent.height;
-                                source: root.now-cover;
-                                image-fit: cover;
-                            }
-                            if !root.has-cover : Icon {
-                                width: 24px;
-                                height: 24px;
-                                commands: Icons.note;
-                                fill: Theme.muted;
-                            }
-                        }
-                    }
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        alignment: center;
-                        spacing: 2px;
-                        Rectangle {
-                            height: 20px;
-                            now-album-ta := TouchArea {
-                                enabled: root.has-track && root.now-has-album;
-                                mouse-cursor: root.now-has-album ? pointer : default;
-                                clicked => { root.open-now-album(); }
-                            }
-                            Label {
-                                width: parent.width;
-                                height: parent.height;
-                                text: root.has-track ? root.now-title : "Ничего не играет";
-                                font-weight: 600;
-                                color: now-album-ta.has-hover ? Theme.accent : Theme.text;
-                                overflow: elide;
-                            }
-                        }
-                        Rectangle {
-                            height: 18px;
-                            now-artist-ta := TouchArea {
-                                enabled: root.has-track && root.now-has-artist;
-                                mouse-cursor: root.now-has-artist ? pointer : default;
-                                clicked => { root.open-now-artist(); }
-                            }
-                            Label {
-                                width: parent.width;
-                                height: parent.height;
-                                text: root.buffering ? "Загрузка…" : root.now-artists;
-                                font-size: 13px;
-                                color: now-artist-ta.has-hover ? Theme.text : Theme.muted;
-                                overflow: elide;
-                            }
-                        }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        HorizontalLayout {
-                            spacing: 4px;
-                            IconButton {
-                                width: 32px;
-                                height: 32px;
-                                enabled: root.has-track;
-                                icon: root.now-liked ? Icons.heart-fill : Icons.heart-outline;
-                                active: root.now-liked;
-                                clicked => { root.toggle-now-like(); }
-                            }
-                            IconButton {
-                                width: 32px;
-                                height: 32px;
-                                enabled: root.has-track;
-                                icon: Icons.dislike;
-                                clicked => { root.dislike-now(); }
-                            }
-                        }
-                    }
-                }
-
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    alignment: center;
-                    spacing: 4px;
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: 14px;
-                        VerticalLayout {
-                            alignment: center;
-                            IconButton {
-                                icon: Icons.prev;
-                                enabled: root.has-track;
-                                clicked => { root.prev(); }
-                            }
-                        }
-                        IconButton {
-                            width: 44px;
-                            height: 44px;
-                            morphing: true;
-                            active: root.playing;
-                            enabled: root.has-track && !root.buffering;
-                            icon: root.playing ? Icons.pause : Icons.play;
-                            clicked => { root.toggle(); }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            IconButton {
-                                icon: Icons.next;
-                                enabled: root.has-track;
-                                clicked => { root.next(); }
-                            }
-                        }
-                    }
-                    HorizontalLayout {
-                        spacing: 10px;
-                        Label {
-                            width: 44px;
-                            text: root.position-text;
-                            font-size: 12px;
-                            color: Theme.muted;
-                            horizontal-alignment: right;
-                        }
-                        SeekBar {
-                            value: root.progress;
-                            enabled: root.has-track && !root.buffering;
-                            changed(v) => { root.seek(v); }
-                        }
-                        Label {
-                            width: 44px;
-                            text: root.duration-text;
-                            font-size: 12px;
-                            color: Theme.muted;
-                        }
-                    }
-                }
-
+                // Левая колонка (информация о треке) — строго у левого края
                 Rectangle {
-                    width: 180px;
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    preferred-width: 0px;
+
+                    HorizontalLayout {
+                        x: 0;
+                        width: min(parent.width, 340px);
+                        height: parent.height;
+                        spacing: 12px;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 58px;
+                                height: 58px;
+                                border-radius: Theme.radius-sm;
+                                clip: true;
+                                background: Theme.surface-hi;
+                                if root.has-cover : Image {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    source: root.now-cover;
+                                    image-fit: cover;
+                                }
+                                if !root.has-cover : Icon {
+                                    width: 24px;
+                                    height: 24px;
+                                    commands: Icons.note;
+                                    fill: Theme.muted;
+                                }
+                            }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            min-width: 0px;
+                            alignment: center;
+                            spacing: 2px;
+                            Rectangle {
+                                height: 20px;
+                                now-album-ta := TouchArea {
+                                    enabled: root.has-track && root.now-has-album;
+                                    mouse-cursor: root.now-has-album ? pointer : default;
+                                    clicked => { root.open-now-album(); }
+                                }
+                                Label {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: root.has-track ? root.now-title : "Ничего не играет";
+                                    font-weight: 600;
+                                    color: now-album-ta.has-hover ? Theme.accent : Theme.text;
+                                    overflow: elide;
+                                }
+                            }
+                            if root.has-track || root.buffering : Rectangle {
+                                height: 18px;
+                                now-artist-ta := TouchArea {
+                                    enabled: root.has-track && root.now-has-artist;
+                                    mouse-cursor: root.now-has-artist ? pointer : default;
+                                    clicked => { root.open-now-artist(); }
+                                }
+                                Label {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: root.buffering ? "Загрузка…" : root.now-artists;
+                                    font-size: 13px;
+                                    color: now-artist-ta.has-hover ? Theme.text : Theme.muted;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                spacing: 4px;
+                                IconButton {
+                                    width: 32px;
+                                    height: 32px;
+                                    enabled: root.has-track;
+                                    icon: root.now-liked ? Icons.heart-fill : Icons.heart-outline;
+                                    active: root.now-liked;
+                                    clicked => { root.toggle-now-like(); }
+                                }
+                                IconButton {
+                                    width: 32px;
+                                    height: 32px;
+                                    enabled: root.has-track;
+                                    icon: Icons.dislike;
+                                    clicked => { root.dislike-now(); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Центральная колонка (кнопки воспроизведения и дорожка) — строго по центру окна
+                Rectangle {
+                    horizontal-stretch: 2;
+                    min-width: 0px;
+                    preferred-width: 0px;
+
+                    VerticalLayout {
+                        width: min(parent.width, 640px);
+                        x: (parent.width - self.width) / 2;
+                        height: parent.height;
+                        alignment: center;
+                        spacing: 6px;
+
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 12px;
+
+                            VerticalLayout {
+                                alignment: center;
+                                IconButton {
+                                    width: 32px;
+                                    height: 32px;
+                                    icon: Icons.shuffle;
+                                    active: root.shuffle;
+                                    has-dot: true;
+                                    enabled: root.has-track;
+                                    clicked => { root.toggle-shuffle(); }
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                IconButton {
+                                    icon: Icons.prev;
+                                    enabled: root.has-track;
+                                    clicked => { root.prev(); }
+                                }
+                            }
+
+                            IconButton {
+                                width: 44px;
+                                height: 44px;
+                                morphing: true;
+                                active: root.playing;
+                                enabled: root.has-track && !root.buffering;
+                                icon: root.playing ? Icons.pause : Icons.play;
+                                clicked => { root.toggle(); }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                IconButton {
+                                    icon: Icons.next;
+                                    enabled: root.has-track;
+                                    clicked => { root.next(); }
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                IconButton {
+                                    width: 32px;
+                                    height: 32px;
+                                    icon: root.repeat-mode == 2 ? Icons.repeat-one : Icons.repeat;
+                                    active: root.repeat-mode > 0;
+                                    has-dot: true;
+                                    enabled: root.has-track;
+                                    clicked => { root.toggle-repeat(); }
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 10px;
+                            VerticalLayout {
+                                alignment: center;
+                                Label {
+                                    width: 40px;
+                                    text: root.position-text;
+                                    font-size: 12px;
+                                    color: Theme.muted;
+                                    horizontal-alignment: right;
+                                }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                SeekBar {
+                                    value: root.progress;
+                                    enabled: root.has-track && !root.buffering;
+                                    changed(v) => { root.seek(v); }
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Label {
+                                    width: 40px;
+                                    text: root.duration-text;
+                                    font-size: 12px;
+                                    color: Theme.muted;
+                                    horizontal-alignment: left;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Правая колонка (громкость) — строго у правого края
+                Rectangle {
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    preferred-width: 0px;
+
                     TouchArea {
                         scroll-event(e) => {
                             if (e.delta-y != 0px) {
@@ -542,28 +1150,34 @@ export component AppWindow inherits Window {
                             reject
                         }
                     }
+
                     HorizontalLayout {
-                        width: parent.width;
+                        x: parent.width - self.width;
+                        width: 160px;
                         height: parent.height;
-                        spacing: 10px;
+                        spacing: 8px;
                         alignment: end;
+
                         VerticalLayout {
                             alignment: center;
-                            Icon {
-                                width: 20px;
-                                height: 20px;
-                                commands: Icons.volume;
-                                fill: Theme.muted;
+                            IconButton {
+                                width: 28px;
+                                height: 28px;
+                                icon: root.volume == 0 ? Icons.volume-mute : Icons.volume;
+                                clicked => { root.toggle-mute(); }
                             }
                         }
-                        SeekBar {
-                            width: 120px;
-                            live: true;
-                            scroll-step: 0.05;
-                            value: root.volume;
-                            changed(v) => {
-                                root.volume = v;
-                                root.set-volume(v);
+                        VerticalLayout {
+                            alignment: center;
+                            SeekBar {
+                                width: 120px;
+                                live: true;
+                                scroll-step: 0.05;
+                                value: root.volume;
+                                changed(v) => {
+                                    root.volume = v;
+                                    root.set-volume(v);
+                                }
                             }
                         }
                     }

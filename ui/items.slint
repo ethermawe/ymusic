@@ -18,9 +18,34 @@ export component CardTile inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding-left: 16px;
+        padding-left: 10px;
         padding-right: 16px;
         spacing: 12px;
+
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 42px;
+                height: 42px;
+                border-radius: root.item.kind == "artist" ? 21px : Theme.radius-xs;
+                clip: true;
+                background: Theme.surface-hi;
+
+                if root.item.has-cover : Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: root.item.cover;
+                    image-fit: cover;
+                }
+
+                if !root.item.has-cover : Icon {
+                    width: 20px;
+                    height: 20px;
+                    commands: root.item.kind == "artist" ? Icons.artist : (root.item.kind == "album" ? Icons.album : Icons.note);
+                    fill: Theme.muted;
+                }
+            }
+        }
 
         VerticalLayout {
             horizontal-stretch: 1;
@@ -166,17 +191,7 @@ export component TrackItem inherits Rectangle {
             }
         }
 
-        Rectangle {
-            width: 42px;
-            if root.track.cached : Label {
-                width: parent.width;
-                height: parent.height;
-                text: "кэш";
-                font-size: 11px;
-                color: Theme.accent;
-                horizontal-alignment: right;
-            }
-        }
+
 
         VerticalLayout {
             alignment: center;

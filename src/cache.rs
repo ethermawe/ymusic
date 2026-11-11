@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -257,8 +257,8 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
         .context("сервер вернул ошибку при загрузке аудио")?;
 
     let total_len = resp.content_length();
-    let capacity = total_len.unwrap_or(8 * 1024 * 1024) as usize;
-    let mut initial = Vec::with_capacity(capacity.min(32 * 1024 * 1024));
+    // Начинаем с компактного буфера под предзагрузку, не аллоцируя весь трек заранее
+    let mut initial = Vec::with_capacity(PREBUFFER_BYTES * 2);
 
     while initial.len() < PREBUFFER_BYTES {
         match resp.chunk().await? {
@@ -285,13 +285,41 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
 
     if !is_complete {
         let shared_bg = shared.clone();
+        // Подготавливаем временный файл для постепенной записи трека на диск без дублирования буфера в RAM
+        let mut disk_cache_file = track_path(&track_id).and_then(|path| {
+            let dir = path.parent()?;
+            fs::create_dir_all(dir).ok()?;
+            static SEQ: AtomicU64 = AtomicU64::new(0);
+            let tmp = path.with_extension(format!(
+                "{}-{}.part",
+                std::process::id(),
+                SEQ.fetch_add(1, Ordering::Relaxed)
+            ));
+            let mut f = File::create(&tmp).ok()?;
+            let st = shared_bg.state.lock().unwrap();
+            if !st.buf.is_empty() {
+                f.write_all(&st.buf).ok()?;
+            }
+            Some((tmp, path, f))
+        });
+
         tokio::spawn(async move {
             loop {
                 match resp.chunk().await {
                     Ok(Some(chunk)) => {
                         let mut st = shared_bg.state.lock().unwrap();
+                        if st.cancelled {
+                            if let Some((tmp, _, f)) = disk_cache_file.take() {
+                                drop(f);
+                                let _ = fs::remove_file(&tmp);
+                            }
+                            break;
+                        }
                         st.buf.extend_from_slice(&chunk);
                         shared_bg.cvar.notify_all();
+                        if let Some((_, _, ref mut f)) = disk_cache_file {
+                            let _ = f.write_all(&chunk);
+                        }
                     }
                     Ok(None) => {
                         {
@@ -300,13 +328,15 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
                             st.total_len = Some(st.buf.len() as u64);
                         }
                         shared_bg.cvar.notify_all();
-                        // После done буфер больше не меняется, но копируем без удержания
-                        // блокировки, чтобы не тормозить аудиопоток на мегабайтах.
-                        let bytes = {
-                            let st = shared_bg.state.lock().unwrap();
-                            Arc::new(st.buf.clone())
-                        };
-                        tokio::task::spawn_blocking(move || save_track(&track_id, &bytes[..]));
+                        if let Some((tmp, path, mut f)) = disk_cache_file.take() {
+                            let _ = f.flush();
+                            drop(f);
+                            if fs::rename(&tmp, &path).is_ok() {
+                                if let Some(dir) = path.parent() {
+                                    trim_cache(dir);
+                                }
+                            }
+                        }
                         break;
                     }
                     Err(e) => {
@@ -314,6 +344,10 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
                         st.error = Some(e.to_string());
                         st.done = true;
                         shared_bg.cvar.notify_all();
+                        if let Some((tmp, _, f)) = disk_cache_file.take() {
+                            drop(f);
+                            let _ = fs::remove_file(&tmp);
+                        }
                         break;
                     }
                 }

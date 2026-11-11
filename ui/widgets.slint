@@ -16,6 +16,7 @@ export component IconButton inherits Rectangle {
     in property <bool> primary;
     in property <bool> morphing;
     in property <bool> active;
+    in property <bool> has-dot: false;
     in property <bool> enabled: true;
     callback clicked;
 
@@ -29,7 +30,9 @@ export component IconButton inherits Rectangle {
             : (ta.has-hover ? Theme.surface-highest : Theme.secondary-container))
         : primary
             ? (ta.has-hover ? Theme.on-secondary-container : Theme.accent)
-            : (ta.has-hover ? Theme.surface-hi : transparent);
+            : active
+                ? (ta.has-hover ? Theme.surface-highest : Theme.secondary-container)
+                : (ta.has-hover ? Theme.surface-hi : transparent);
 
     animate background { duration: Theme.anim-fast; easing: ease-out; }
     animate border-radius { duration: Theme.anim-normal; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
@@ -49,7 +52,16 @@ export component IconButton inherits Rectangle {
             ? (root.active ? Theme.on-accent : Theme.on-secondary-container)
             : root.primary
                 ? Theme.on-accent
-                : root.active ? Theme.accent : Theme.text;
+                : root.active ? Theme.accent : (ta.has-hover ? Theme.text : Theme.muted);
+    }
+
+    if root.active && root.has-dot : Rectangle {
+        y: root.height - 4px;
+        x: (root.width - self.width) / 2;
+        width: 4px;
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.accent;
     }
 }
 
@@ -155,7 +167,7 @@ export component SeekBar inherits Rectangle {
     property <float> pointer-pos: clamp(ta.mouse-x / max(1px, self.width), 0, 1);
     property <float> smooth-value: clamp(value, 0, 1);
     animate smooth-value {
-        duration: root.live ? 90ms : 60ms;
+        duration: root.dragging ? 0ms : (root.live ? 90ms : 60ms);
         easing: linear;
     }
     property <float> shown: dragging ? pointer-pos : smooth-value;
@@ -239,6 +251,148 @@ export component SeekBar inherits Rectangle {
                 return accept;
             }
             reject
+        }
+    }
+}
+
+export component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <bool> active;
+    in property <string> badge: "";
+    callback clicked;
+
+    height: 38px;
+    border-radius: Theme.radius-sm;
+    background: active
+        ? Theme.secondary-container
+        : (ta.has-hover ? Theme.surface-hi : transparent);
+
+    animate background { duration: Theme.anim-fast; easing: ease-out; }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        alignment: start;
+
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                width: 18px;
+                height: 18px;
+                commands: root.icon;
+                fill: root.active ? Theme.accent : (ta.has-hover ? Theme.text : Theme.muted);
+                animate fill { duration: Theme.anim-fast; }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Label {
+                text: root.text;
+                font-size: 13px;
+                font-weight: root.active ? 700 : 500;
+                color: root.active ? Theme.on-secondary-container : (ta.has-hover ? Theme.text : Theme.muted);
+                overflow: elide;
+                animate color { duration: Theme.anim-fast; }
+            }
+        }
+
+        if root.badge != "" : VerticalLayout {
+            alignment: center;
+            Rectangle {
+                height: 18px;
+                border-radius: 9px;
+                background: root.active ? Theme.accent : Theme.surface-highest;
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-right: 6px;
+                    alignment: center;
+                    Label {
+                        text: root.badge;
+                        font-size: 10px;
+                        font-weight: 700;
+                        color: root.active ? Theme.on-accent : Theme.muted;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component HomeCard inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> icon;
+    in property <bool> accent: false;
+    callback clicked;
+
+    height: 60px;
+    border-radius: Theme.radius-md;
+    background: ta.has-hover ? Theme.surface-highest : Theme.surface-low;
+    border-width: 1px;
+    border-color: ta.has-hover ? Theme.accent : Theme.outline;
+
+    animate background { duration: Theme.anim-fast; easing: ease-out; }
+    animate border-color { duration: Theme.anim-fast; easing: ease-out; }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 14px;
+        spacing: 12px;
+        alignment: start;
+
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 38px;
+                height: 38px;
+                border-radius: Theme.radius-sm;
+                background: root.accent ? Theme.accent : Theme.secondary-container;
+                VerticalLayout {
+                    alignment: center;
+                    HorizontalLayout {
+                        alignment: center;
+                        Icon {
+                            width: 20px;
+                            height: 20px;
+                            commands: root.icon;
+                            fill: root.accent ? Theme.on-accent : Theme.on-secondary-container;
+                        }
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+            Label {
+                text: root.title;
+                font-size: 13px;
+                font-weight: 700;
+                overflow: elide;
+                color: Theme.text;
+            }
+            if root.subtitle != "" : Label {
+                text: root.subtitle;
+                font-size: 11px;
+                color: Theme.muted;
+                overflow: elide;
+            }
         }
     }
 }

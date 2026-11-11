@@ -24,6 +24,7 @@ pub enum SourceData {
 
 enum Cmd {
     Load(u64, SourceData),
+    #[allow(dead_code)]
     Play,
     Pause,
     Toggle,
@@ -52,6 +53,7 @@ impl Audio {
         let _ = self.tx.send(Cmd::Load(generation, data));
     }
 
+    #[allow(dead_code)]
     pub fn play(&self) {
         let _ = self.tx.send(Cmd::Play);
     }

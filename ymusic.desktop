@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Ymusic
+GenericName=Music Player
+GenericName[ru]=Музыкальный плеер
+Comment=Lightweight native Yandex Music client
+Comment[ru]=Лёгкий нативный клиент Яндекс Музыки
+Exec=ymusic
+Icon=ymusic
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Player;Music;
+StartupNotify=true
+StartupWMClass=ymusic

@@ -52,6 +52,8 @@ pub struct PlaylistCard {
     pub kind: u64,
     pub title: String,
     pub subtitle: String,
+    #[serde(default)]
+    pub cover_uri: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +63,7 @@ pub struct AlbumCard {
     pub artists: String,
     pub year: Option<u64>,
     pub track_count: u64,
+    #[serde(default)]
     pub cover_uri: Option<String>,
 }
 
@@ -69,6 +72,10 @@ pub struct ArtistCard {
     pub id: String,
     pub name: String,
     pub genres: String,
+    #[serde(default)]
+    pub cover_uri: Option<String>,
+    #[serde(default)]
+    pub stats: String,
 }
 
 #[derive(Clone, Debug)]
@@ -96,6 +103,7 @@ pub struct RotorSession {
 pub struct Account {
     pub uid: u64,
     pub name: String,
+    pub avatar_url: Option<String>,
 }
 
 pub struct DeviceCode {
@@ -181,7 +189,74 @@ impl Api {
             .or(acc["login"].as_str())
             .unwrap_or("Пользователь")
             .to_string();
-        Ok(Account { uid, name })
+
+        let mut avatar_url = None;
+        let avatar_id = acc["defaultAvatarId"]
+            .as_str()
+            .or(acc["default_avatar_id"].as_str())
+            .or(r["default_avatar_id"].as_str())
+            .or(r["defaultAvatarId"].as_str());
+        if let Some(id) = avatar_id {
+            if !id.is_empty() && id != "0/0-0" {
+                avatar_url = Some(format!("https://avatars.yandex.net/get-yapic/{id}/islands-200"));
+            }
+        }
+        if avatar_url.is_none() {
+            if let Some(uri) = acc["avatarUrl"]
+                .as_str()
+                .or(acc["avatar"].as_str())
+                .or(r["avatarUrl"].as_str())
+            {
+                if !uri.is_empty() {
+                    let full = if uri.starts_with("//") {
+                        format!("https:{uri}")
+                    } else if !uri.starts_with("http") {
+                        format!("https://{uri}")
+                    } else {
+                        uri.to_string()
+                    };
+                    avatar_url = Some(full.replace("%%", "200x200"));
+                }
+            }
+        }
+        if avatar_url.is_none() {
+            if let Ok(resp) = self
+                .auth(self.http.get("https://login.yandex.ru/info?format=json"))
+                .send()
+                .await
+            {
+                if let Ok(info) = resp.json::<Value>().await {
+                    let is_empty = info["is_avatar_empty"].as_bool().unwrap_or(false);
+                    if !is_empty {
+                        if let Some(id) = info["default_avatar_id"].as_str() {
+                            if !id.is_empty() && id != "0/0-0" {
+                                avatar_url = Some(format!(
+                                    "https://avatars.yandex.net/get-yapic/{id}/islands-200"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if avatar_url.is_none() {
+            if let Ok(user_info) = self.get(&format!("/users/{uid}"), &[]).await {
+                let u = &user_info["user"];
+                let id = u["defaultAvatarId"]
+                    .as_str()
+                    .or(u["default_avatar_id"].as_str())
+                    .or(user_info["defaultAvatarId"].as_str());
+                if let Some(id) = id {
+                    if !id.is_empty() && id != "0/0-0" {
+                        avatar_url = Some(format!(
+                            "https://avatars.yandex.net/get-yapic/{id}/islands-200"
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(Account { uid, name, avatar_url })
     }
 
     /// Возвращает список `(track_id, composite_id)` лайкнутых треков.
@@ -403,16 +478,35 @@ impl Api {
         let r = self
             .get(&format!("/artists/{artist_id}/brief-info"), &[])
             .await?;
-        let artist = parse_artist(&r["artist"])
+        let mut artist = parse_artist(&r["artist"])
             .ok_or_else(|| anyhow!("не удалось разобрать страницу артиста"))?;
+        if artist.cover_uri.is_none() {
+            artist.cover_uri = r["allCovers"]
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|c| c["uri"].as_str())
+                .map(str::to_string);
+        }
+        if artist.stats.is_empty() {
+            artist.stats = format_artist_stats(&r["stats"], r["artist"]["likesCount"].as_u64());
+        }
         let popular_tracks = r["popularTracks"]
             .as_array()
             .map(|arr| arr.iter().filter_map(parse_track).collect())
             .unwrap_or_default();
-        let albums = r["albums"]
+        let mut albums: Vec<AlbumCard> = r["albums"]
             .as_array()
             .map(|arr| arr.iter().filter_map(parse_album).collect())
             .unwrap_or_default();
+        if let Some(also) = r["alsoAlbums"].as_array() {
+            let existing: HashSet<String> = albums.iter().map(|a| a.id.clone()).collect();
+            albums.extend(
+                also.iter()
+                    .filter_map(parse_album)
+                    .filter(|a| !existing.contains(&a.id)),
+            );
+        }
+        albums.sort_by(|a, b| b.year.unwrap_or(0).cmp(&a.year.unwrap_or(0)));
         Ok(ArtistPage {
             artist,
             popular_tracks,
@@ -636,11 +730,22 @@ fn parse_playlist(v: &Value) -> Option<PlaylistCard> {
     } else {
         format!("{owner} • {count} тр.")
     };
+    let cover_uri = v["cover"]["uri"]
+        .as_str()
+        .or_else(|| {
+            v["cover"]["itemsUri"]
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|u| u.as_str())
+        })
+        .or(v["ogImage"].as_str())
+        .map(str::to_string);
     Some(PlaylistCard {
         uid,
         kind,
         title,
         subtitle,
+        cover_uri,
     })
 }
 
@@ -688,7 +793,38 @@ fn parse_artist(v: &Value) -> Option<ArtistCard> {
                 .join(", ")
         })
         .unwrap_or_default();
-    Some(ArtistCard { id, name, genres })
+    let cover_uri = v["cover"]["uri"]
+        .as_str()
+        .or(v["ogImage"].as_str())
+        .map(str::to_string);
+    let stats = format_artist_stats(&v["stats"], v["likesCount"].as_u64());
+    Some(ArtistCard {
+        id,
+        name,
+        genres,
+        cover_uri,
+        stats,
+    })
+}
+
+fn format_artist_stats(stats: &Value, likes_count: Option<u64>) -> String {
+    if let Some(m) = stats["lastMonthListeners"].as_u64().filter(|&n| n > 0) {
+        return format!("{} слушателей в месяц", fmt_compact_num(m));
+    }
+    if let Some(l) = likes_count.or_else(|| stats["likesCount"].as_u64()).filter(|&n| n > 0) {
+        return format!("{} лайков", fmt_compact_num(l));
+    }
+    String::new()
+}
+
+fn fmt_compact_num(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1} млн", n as f64 / 1_000_000.0).replace(".0", "")
+    } else if n >= 1_000 {
+        format!("{} тыс.", n / 1_000)
+    } else {
+        n.to_string()
+    }
 }
 
 fn id_str(v: &Value) -> Option<String> {

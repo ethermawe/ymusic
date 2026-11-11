@@ -3,8 +3,11 @@ use std::io;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use slint::Color;
+
+use crate::api::Track;
 
 fn token_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("ymusic").join("token"))
@@ -102,4 +105,71 @@ pub fn clear_token() {
     if let Some(path) = token_path() {
         let _ = fs::remove_file(path);
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SavedWaveState {
+    pub seed: String,
+    pub title: String,
+    pub session_id: String,
+    pub batch_id: String,
+    pub tracks: Vec<Track>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SavedSession {
+    pub queue: Vec<Track>,
+    pub current_index: usize,
+    pub position_secs: f64,
+    pub wave: Option<SavedWaveState>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UserSettings {
+    #[serde(default = "default_volume")]
+    pub volume: f32,
+    #[serde(default)]
+    pub session: Option<SavedSession>,
+    #[serde(default)]
+    pub user_avatar_url: Option<String>,
+    #[serde(default)]
+    pub repeat_mode: u8,
+    #[serde(default)]
+    pub shuffle: bool,
+}
+
+fn default_volume() -> f32 {
+    0.7
+}
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self {
+            volume: default_volume(),
+            session: None,
+            user_avatar_url: None,
+            repeat_mode: 0,
+            shuffle: false,
+        }
+    }
+}
+
+fn settings_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("ymusic").join("settings.json"))
+}
+
+pub fn load_settings() -> UserSettings {
+    let Some(path) = settings_path() else { return UserSettings::default() };
+    let Ok(data) = fs::read_to_string(path) else { return UserSettings::default() };
+    serde_json::from_str(&data).unwrap_or_default()
+}
+
+pub fn save_settings(settings: &UserSettings) -> io::Result<()> {
+    let path = settings_path().ok_or_else(|| io::Error::other("нет каталога конфигурации"))?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let data = serde_json::to_string_pretty(settings)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    fs::write(path, data)
 }

@@ -7,10 +7,13 @@ mod dns;
 mod mpris;
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -27,9 +30,34 @@ slint::include_modules!();
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum CardTarget {
-    Playlist { uid: u64, kind: u64, title: String },
+    Playlist {
+        uid: u64,
+        kind: u64,
+        title: String,
+        #[serde(default)]
+        cover_uri: Option<String>,
+    },
     Album(AlbumCard),
     Artist(ArtistCard),
+}
+
+impl CardTarget {
+    fn cover_uri(&self) -> Option<&str> {
+        match self {
+            CardTarget::Playlist { cover_uri, .. } => cover_uri.as_deref(),
+            CardTarget::Album(a) => a.cover_uri.as_deref(),
+            CardTarget::Artist(ar) => ar.cover_uri.as_deref(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct ArtistViewInfo {
+    id: String,
+    name: String,
+    genres: String,
+    stats: String,
+    cover_uri: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -39,6 +67,8 @@ struct CachedView {
     cards: Vec<CardTarget>,
     tracks: Vec<Track>,
     viewed_artist_id: Option<(String, String)>,
+    #[serde(default)]
+    artist_view: Option<ArtistViewInfo>,
 }
 
 #[derive(Clone, Debug)]
@@ -62,6 +92,8 @@ struct State {
     cards: Vec<CardTarget>,
     /// Если открыта страница артиста — его ID для запуска волны по артисту.
     viewed_artist_id: Option<(String, String)>,
+    /// Данные артиста, если сейчас открыта карточка артиста.
+    viewed_artist: Option<ArtistViewInfo>,
     /// Треки, которые сейчас показаны в списке.
     list: Vec<Track>,
     /// Очередь воспроизведения.
@@ -79,14 +111,91 @@ struct State {
     view_id: u64,
     /// URI обложек, которые уже загружены или загружаются в фоновом режиме.
     covers_loaded: HashSet<String>,
+    audio_started: bool,
+    last_saved_sec: u64,
+    repeat_mode: u8,
+    shuffle: bool,
+    unshuffled_queue: Option<Vec<Track>>,
+    last_unmuted_volume: f32,
+    last_seek_time: Option<std::time::Instant>,
+    seek_target_secs: f64,
+}
+
+const COVER_LRU_CAPACITY: usize = 64;
+
+struct LruImageCache {
+    map: HashMap<String, slint::Image>,
+    order: VecDeque<String>,
+    capacity: usize,
+}
+
+impl LruImageCache {
+    fn new(capacity: usize) -> Self {
+        Self {
+            map: HashMap::with_capacity(capacity),
+            order: VecDeque::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    fn get(&mut self, key: &str) -> Option<slint::Image> {
+        let img = self.map.get(key)?.clone();
+        if let Some(pos) = self.order.iter().position(|k| k == key) {
+            self.order.remove(pos);
+            self.order.push_back(key.to_string());
+        }
+        Some(img)
+    }
+
+    fn insert(&mut self, key: String, img: slint::Image) {
+        if self.map.contains_key(&key) {
+            if let Some(pos) = self.order.iter().position(|k| k == &key) {
+                self.order.remove(pos);
+            }
+            self.order.push_back(key.clone());
+            self.map.insert(key, img);
+            return;
+        }
+        while self.map.len() >= self.capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                self.map.remove(&oldest);
+            } else {
+                break;
+            }
+        }
+        self.order.push_back(key.clone());
+        self.map.insert(key, img);
+    }
 }
 
 thread_local! {
     /// Модель списка треков живёт в UI-потоке; строки обновляются точечно,
     /// чтобы не сбрасывать прокрутку.
     static TRACK_MODEL: RefCell<Option<Rc<VecModel<TrackRow>>>> = const { RefCell::new(None) };
-    /// Декодированные миниатюры обложек для строк списка (по `cover_uri`).
-    static COVER_IMAGES: RefCell<HashMap<String, slint::Image>> = RefCell::new(HashMap::new());
+    /// Модель карточек (плейлисты / альбомы / артисты)
+    static CARD_MODEL: RefCell<Option<Rc<VecModel<CardItem>>>> = const { RefCell::new(None) };
+    /// Ограниченный LRU-кэш декодированных миниатюр обложек в памяти (до 64 шт).
+    static COVER_IMAGES: RefCell<LruImageCache> = RefCell::new(LruImageCache::new(COVER_LRU_CAPACITY));
+}
+
+fn resolve_cover_image(cover_uri: Option<&str>, size: u32) -> (slint::Image, bool) {
+    let Some(uri) = cover_uri else {
+        return (slint::Image::default(), false);
+    };
+    if let Some(img) = COVER_IMAGES.with(|c| c.borrow_mut().get(uri)) {
+        return (img, true);
+    }
+    if let Some(url) = api::cover_url(Some(uri), size) {
+        if let Some(bytes) = cache::read_cached_cover(&url) {
+            if let Ok(img) = slint::Image::load_from_data(&bytes, None) {
+                COVER_IMAGES.with(|c| {
+                    c.borrow_mut().insert(uri.to_string(), img.clone());
+                });
+                return (img, true);
+            }
+        }
+    }
+    (slint::Image::default(), false)
 }
 
 struct RowMeta {
@@ -105,19 +214,7 @@ impl RowMeta {
     }
 
     fn into_row(self) -> TrackRow {
-        let cover = self.track.cover_uri.as_deref().and_then(|uri| {
-            if let Some(img) = COVER_IMAGES.with(|c| c.borrow().get(uri).cloned()) {
-                return Some(img);
-            }
-            let url = self.track.cover_url(100)?;
-            let bytes = cache::read_cached_cover(&url)?;
-            let img = slint::Image::load_from_data(&bytes, None).ok()?;
-            COVER_IMAGES.with(|c| {
-                c.borrow_mut().insert(uri.to_string(), img.clone());
-            });
-            Some(img)
-        });
-        let has_cover = cover.is_some();
+        let (cover, has_cover) = resolve_cover_image(self.track.cover_uri.as_deref(), 100);
         TrackRow {
             title: self.track.title.as_str().into(),
             artists: self.track.artists.as_str().into(),
@@ -128,10 +225,40 @@ impl RowMeta {
             cached: self.cached,
             has_artist: self.track.artist_id.is_some(),
             has_album: self.track.album_id.is_some(),
-            cover: cover.unwrap_or_default(),
+            cover,
             has_cover,
         }
     }
+}
+
+fn sync_card_items(ui: &AppWindow, items: Vec<CardItem>) {
+    CARD_MODEL.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if let Some(model) = slot.as_ref() && items.len() >= model.row_count() {
+            let old_len = model.row_count();
+            for (i, item) in items.into_iter().enumerate() {
+                if i < old_len {
+                    if model.row_data(i).as_ref() != Some(&item) {
+                        model.set_row_data(i, item);
+                    }
+                } else {
+                    model.push(item);
+                }
+            }
+            return;
+        }
+        let model = Rc::new(VecModel::from(items));
+        ui.set_cards(ModelRc::from(model.clone()));
+        *slot = Some(model);
+    });
+}
+
+fn reset_card_items(ui: &AppWindow, items: Vec<CardItem>) {
+    CARD_MODEL.with(|cell| {
+        let model = Rc::new(VecModel::from(items));
+        ui.set_cards(ModelRc::from(model.clone()));
+        *cell.borrow_mut() = Some(model);
+    });
 }
 
 /// Обновляет строки списка: точечно, если число строк не изменилось, и добавлением в конец, если выросло.
@@ -179,6 +306,11 @@ struct App {
 }
 
 fn main() -> Result<()> {
+    // Немедленно возвращаем освобожденную память операционной системе
+    if std::env::var("MIMALLOC_PURGE_DELAY").is_err() {
+        unsafe { std::env::set_var("MIMALLOC_PURGE_DELAY", "0"); }
+    }
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -210,9 +342,27 @@ fn main() -> Result<()> {
         }
     });
 
-    let initial_vol = ui.get_volume();
+    let settings = config::load_settings();
+    let initial_vol = settings.volume;
+    ui.set_volume(initial_vol);
+    ui.set_repeat_mode(settings.repeat_mode as i32);
+    ui.set_shuffle(settings.shuffle);
     app.audio.set_volume(perceptual(initial_vol));
     app.mpris.set_volume(initial_vol);
+    {
+        let mut st = app.state.lock().unwrap();
+        st.repeat_mode = settings.repeat_mode;
+        st.shuffle = settings.shuffle;
+        st.last_unmuted_volume = if initial_vol > 0.001 { initial_vol } else { 0.7 };
+    }
+    if let Some(ref url) = settings.user_avatar_url {
+        if let Some(bytes) = cache::read_cached_cover(url)
+            && let Ok(img) = slint::Image::load_from_data(&bytes, None)
+        {
+            ui.set_user_avatar(img);
+            ui.set_user_has_avatar(true);
+        }
+    }
     bind_callbacks(&ui, &app);
     spawn_theme_watcher(&ui, &rt);
 
@@ -221,6 +371,7 @@ fn main() -> Result<()> {
     }
 
     ui.run()?;
+    app.persist_session();
     app.audio.stop();
     app.discord.set_stopped();
     // Не ждём зависшие сетевые запросы при выходе.
@@ -244,6 +395,8 @@ fn bind_callbacks(ui: &AppWindow, app: &Arc<App>) {
     let a = app.clone();
     ui.on_logout(move || a.logout());
 
+    let a = app.clone();
+    ui.on_show_home(move || a.clone().load_home());
     let a = app.clone();
     ui.on_start_wave(move || {
         a.clone()
@@ -330,8 +483,15 @@ fn bind_callbacks(ui: &AppWindow, app: &Arc<App>) {
                 && st.list.iter().zip(&st.queue).all(|(x, y)| x.id == y.id);
             if !same_as_queue {
                 st.wave = None;
+                st.unshuffled_queue = None;
+                st.queue = st.list.clone();
+                if st.shuffle && (i as usize + 1) < st.queue.len() {
+                    st.unshuffled_queue = Some(st.list.clone());
+                    let mut tail = st.queue.split_off(i as usize + 1);
+                    shuffle_slice(&mut tail);
+                    st.queue.extend(tail);
+                }
             }
-            st.queue = st.list.clone();
         }
         a.clone().play_index(i as usize, true);
     });
@@ -343,22 +503,43 @@ fn bind_callbacks(ui: &AppWindow, app: &Arc<App>) {
     ui.on_dislike_now(move || a.clone().dislike_now());
 
     let a = app.clone();
-    ui.on_toggle(move || a.audio.toggle());
+    ui.on_toggle(move || a.clone().toggle());
     let a = app.clone();
     ui.on_next(move || a.clone().step(1, true));
     let a = app.clone();
     ui.on_prev(move || a.clone().step(-1, true));
     let a = app.clone();
+    ui.on_toggle_repeat(move || a.clone().toggle_repeat());
+    let a = app.clone();
+    ui.on_toggle_shuffle(move || a.clone().toggle_shuffle());
+    let a = app.clone();
+    ui.on_toggle_mute(move || a.clone().toggle_mute());
+    let a = app.clone();
+    let weak = ui.as_weak();
     ui.on_seek(move |fraction| {
+        let frac = fraction.clamp(0.0, 1.0);
         let duration = a.state.lock().unwrap().duration_secs;
         if duration > 0.0 {
-            a.audio.seek(f64::from(fraction) * duration);
+            let secs = f64::from(frac) * duration;
+            a.audio.seek(secs);
+            {
+                let mut st = a.state.lock().unwrap();
+                st.position_secs = secs;
+                st.seek_target_secs = secs;
+                st.last_seek_time = Some(std::time::Instant::now());
+            }
+            if let Some(ui) = weak.upgrade() {
+                ui.set_progress(frac);
+                ui.set_position_text(fmt_time(secs).into());
+            }
+            a.persist_session();
         }
     });
     let a = app.clone();
     ui.on_set_volume(move |v| {
         a.audio.set_volume(perceptual(v));
         a.mpris.set_volume(v);
+        a.save_volume(v);
     });
 }
 
@@ -444,11 +625,37 @@ impl App {
                         st.uid = account.uid;
                     }
                     let name = account.name;
+                    let avatar_url = account.avatar_url;
                     self.ui(move |ui| {
                         ui.set_user_name(name.into());
                         ui.set_logged_in(true);
                     });
-                    self.load_likes();
+                    if let Some(ref url) = avatar_url {
+                        self.apply_user_avatar(url);
+                        let rt = self.rt.clone();
+                        let url_clone = url.clone();
+                        rt.spawn_blocking(move || {
+                            let mut settings = config::load_settings();
+                            settings.user_avatar_url = Some(url_clone);
+                            let _ = config::save_settings(&settings);
+                        });
+                    } else {
+                        self.ui(|ui| {
+                            ui.set_user_has_avatar(false);
+                            ui.set_user_avatar(slint::Image::default());
+                        });
+                        let rt = self.rt.clone();
+                        rt.spawn_blocking(move || {
+                            let mut settings = config::load_settings();
+                            if settings.user_avatar_url.is_some() {
+                                settings.user_avatar_url = None;
+                                let _ = config::save_settings(&settings);
+                            }
+                        });
+                    }
+                    self.clone().load_home();
+                    self.clone().prefetch_likes();
+                    self.clone().restore_session();
                 }
                 Err(e) => self.error(format!("Не удалось войти: {e}")),
             }
@@ -457,6 +664,7 @@ impl App {
 
     fn logout(&self) {
         config::clear_token();
+        self.clear_saved_session();
         {
             let mut st = self.state.lock().unwrap();
             *st = State {
@@ -471,7 +679,12 @@ impl App {
         self.discord.set_stopped();
         self.ui(|ui| {
             ui.set_logged_in(false);
-            ui.set_cards(ModelRc::default());
+            ui.set_user_name("".into());
+            ui.set_user_has_avatar(false);
+            ui.set_user_avatar(slint::Image::default());
+            ui.set_is_artist_view(false);
+            ui.set_artist_has_avatar(false);
+            reset_card_items(ui, Vec::new());
             reset_track_rows(ui, Vec::new());
             ui.set_current_index(-1);
             ui.set_has_track(false);
@@ -480,13 +693,21 @@ impl App {
             ui.set_has_cover(false);
             ui.set_progress(0.0);
         });
+        let rt = self.rt.clone();
+        rt.spawn_blocking(move || {
+            let mut settings = config::load_settings();
+            settings.user_avatar_url = None;
+            let _ = config::save_settings(&settings);
+        });
     }
 
     /// Переключает экран и возвращает его id для отсева устаревших ответов.
     /// Если `key` есть в кэше (в памяти или на диске), мгновенно отображает кэшированные данные.
     fn begin_cached_view(&self, key: Option<&str>, page: i32, title: String, subtitle: String) -> u64 {
+        let is_artist = key.is_some_and(|k| k.starts_with("artist:"));
         let mut cached_tracks = Vec::new();
-        let (view, has_cache, eff_title, eff_subtitle, card_items, metas, current_idx, can_wave) = {
+        let mut cached_cards = Vec::new();
+        let (view, has_cache, eff_title, eff_subtitle, cards_for_ui, metas, current_idx, can_wave, artist_info) = {
             let mut st = self.state.lock().unwrap();
             st.view_id += 1;
             let view = st.view_id;
@@ -504,25 +725,52 @@ impl App {
                 if key == Some("likes") && st.liked_ids.is_empty() {
                     st.liked_ids = c.tracks.iter().map(|t| t.id.clone()).collect();
                 }
-                let card_items: Vec<CardItem> = c.cards.iter().map(card_item).collect();
                 let metas: Vec<RowMeta> = c
                     .tracks
                     .iter()
                     .map(|t| RowMeta::from_track(t, &st.liked_ids))
                     .collect();
                 let can_wave = c.viewed_artist_id.is_some();
-                st.cards = c.cards;
+                st.cards = c.cards.clone();
                 st.list = c.tracks.clone();
                 st.viewed_artist_id = c.viewed_artist_id;
+                st.viewed_artist = c.artist_view.clone();
                 cached_tracks = c.tracks;
+                cached_cards = c.cards.clone();
                 let cur = current_list_index(&st);
-                (view, true, c.title, c.subtitle, card_items, metas, cur, can_wave)
+                (view, true, c.title, c.subtitle, c.cards, metas, cur, can_wave, c.artist_view)
             } else {
                 st.cards.clear();
                 st.list.clear();
                 st.viewed_artist_id = None;
-                (view, false, title, subtitle, Vec::new(), Vec::new(), -1, false)
+                st.viewed_artist = None;
+                (view, false, title, subtitle, Vec::new(), Vec::new(), -1, false, None)
             }
+        };
+
+        let artist_avatar_to_fetch = if let Some(ref info) = artist_info {
+            let cover_uri = info.cover_uri.clone();
+            let to_fetch = info.cover_uri.clone();
+            let name = info.name.clone();
+            let genres = info.genres.clone();
+            let stats = info.stats.clone();
+            self.ui(move |ui| {
+                let (avatar, has_avatar) = resolve_cover_image(cover_uri.as_deref(), 300);
+                ui.set_is_artist_view(true);
+                ui.set_artist_name(name.into());
+                ui.set_artist_genres(genres.into());
+                ui.set_artist_stats(stats.into());
+                ui.set_artist_avatar(avatar);
+                ui.set_artist_has_avatar(has_avatar);
+                ui.set_artist_tab(0);
+            });
+            to_fetch
+        } else {
+            self.ui(move |ui| {
+                ui.set_is_artist_view(is_artist);
+                ui.set_artist_has_avatar(false);
+            });
+            None
         };
 
         self.ui(move |ui| {
@@ -531,13 +779,20 @@ impl App {
             ui.set_list_subtitle(eff_subtitle.into());
             ui.set_can_start_artist_wave(can_wave);
             ui.set_list_loading(!has_cache);
-            ui.set_cards(ModelRc::new(VecModel::from(card_items)));
+            let card_items: Vec<CardItem> = cards_for_ui.iter().map(card_item).collect();
+            reset_card_items(ui, card_items);
             let rows = metas.into_iter().map(RowMeta::into_row).collect();
             reset_track_rows(ui, rows);
             ui.set_current_index(current_idx);
         });
         if !cached_tracks.is_empty() {
             self.load_covers(&cached_tracks);
+        }
+        if !cached_cards.is_empty() {
+            self.load_card_covers(&cached_cards);
+        }
+        if let Some(uri) = artist_avatar_to_fetch {
+            self.load_artist_avatar(uri);
         }
         view
     }
@@ -552,6 +807,7 @@ impl App {
         cards: Vec<CardTarget>,
         tracks: Vec<Track>,
         viewed_artist_id: Option<(String, String)>,
+        artist_view: Option<ArtistViewInfo>,
     ) -> bool {
         if let Some(k) = key {
             let mut st = self.state.lock().unwrap();
@@ -568,21 +824,22 @@ impl App {
                 cards: cards.clone(),
                 tracks: tracks.clone(),
                 viewed_artist_id: viewed_artist_id.clone(),
+                artist_view: artist_view.clone().or_else(|| prev.and_then(|p| p.artist_view.clone())),
             };
             st.views.insert(k.to_string(), cached.clone());
             drop(st);
             cache::save_view(k, &cached);
         }
 
-        let card_items: Vec<CardItem> = cards.iter().map(card_item).collect();
         let can_wave = viewed_artist_id.is_some();
         let (metas, current_idx) = {
             let mut st = self.state.lock().unwrap();
             if st.view_id != view {
                 return false;
             }
-            st.cards = cards;
+            st.cards = cards.clone();
             st.viewed_artist_id = viewed_artist_id;
+            st.viewed_artist = artist_view.clone();
             let metas: Vec<RowMeta> = tracks
                 .iter()
                 .map(|t| RowMeta::from_track(t, &st.liked_ids))
@@ -590,6 +847,33 @@ impl App {
             st.list = tracks.clone();
             (metas, current_list_index(&st))
         };
+
+        let artist_avatar_to_fetch = if let Some(ref info) = artist_view {
+            let cover_uri = info.cover_uri.clone();
+            let to_fetch = info.cover_uri.clone();
+            let name = info.name.clone();
+            let genres = info.genres.clone();
+            let stats = info.stats.clone();
+            self.ui(move |ui| {
+                let (avatar, has_avatar) = resolve_cover_image(cover_uri.as_deref(), 300);
+                ui.set_is_artist_view(true);
+                ui.set_artist_name(name.into());
+                ui.set_artist_genres(genres.into());
+                ui.set_artist_stats(stats.into());
+                ui.set_artist_avatar(avatar);
+                ui.set_artist_has_avatar(has_avatar);
+                ui.set_artist_tab(0);
+            });
+            to_fetch
+        } else {
+            self.ui(|ui| {
+                ui.set_is_artist_view(false);
+                ui.set_artist_has_avatar(false);
+            });
+            None
+        };
+
+        let cards_for_ui = cards.clone();
         self.ui(move |ui| {
             if let Some(t) = title {
                 ui.set_list_title(t.into());
@@ -598,13 +882,18 @@ impl App {
                 ui.set_list_subtitle(s.into());
             }
             ui.set_can_start_artist_wave(can_wave);
+            let card_items: Vec<CardItem> = cards_for_ui.iter().map(card_item).collect();
             let rows = metas.into_iter().map(RowMeta::into_row).collect();
-            ui.set_cards(ModelRc::new(VecModel::from(card_items)));
+            sync_card_items(ui, card_items);
             sync_track_rows(ui, rows);
             ui.set_current_index(current_idx);
             ui.set_list_loading(false);
         });
         self.load_covers(&tracks);
+        self.load_card_covers(&cards);
+        if let Some(uri) = artist_avatar_to_fetch {
+            self.load_artist_avatar(uri);
+        }
         true
     }
 
@@ -694,10 +983,176 @@ impl App {
         }
     }
 
+    /// Асинхронно подгружает миниатюры обложек для карточек и обновляет их в списке.
+    fn load_card_covers(&self, cards: &[CardTarget]) {
+        let mut to_fetch = Vec::new();
+        {
+            let mut st = self.state.lock().unwrap();
+            for c in cards {
+                if let Some(uri) = c.cover_uri() {
+                    if let Some(url) = api::cover_url(Some(uri), 100) {
+                        if st.covers_loaded.insert(uri.to_string()) {
+                            to_fetch.push((uri.to_string(), url));
+                        }
+                    }
+                }
+            }
+        }
+        for (uri, url) in to_fetch {
+            let http = self.http.clone();
+            let sem = self.cover_sem.clone();
+            let state = self.state.clone();
+            let weak = self.ui.clone();
+            self.rt.spawn(async move {
+                let _permit = sem.acquire().await;
+                let Ok(bytes) = cache::fetch_cover(&http, &url).await else {
+                    state.lock().unwrap().covers_loaded.remove(&uri);
+                    return;
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Ok(image) = slint::Image::load_from_data(&bytes, None) else {
+                        state.lock().unwrap().covers_loaded.remove(&uri);
+                        return;
+                    };
+                    COVER_IMAGES.with(|c| {
+                        c.borrow_mut().insert(uri.clone(), image.clone());
+                    });
+                    if weak.upgrade().is_none() {
+                        return;
+                    }
+                    let matching_indices: Vec<usize> = state
+                        .lock()
+                        .unwrap()
+                        .cards
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, c)| (c.cover_uri() == Some(&uri)).then_some(i))
+                        .collect();
+                    CARD_MODEL.with(|cell| {
+                        let Some(model) = cell.borrow().as_ref().cloned() else { return };
+                        for i in matching_indices {
+                            if let Some(mut item) = model.row_data(i) {
+                                item.cover = image.clone();
+                                item.has_cover = true;
+                                model.set_row_data(i, item);
+                            }
+                        }
+                    });
+                });
+            });
+        }
+    }
+
+    /// Подгружает крупную аватарку артиста для шапки страницы артиста.
+    fn load_artist_avatar(&self, uri: String) {
+        let Some(url) = api::cover_url(Some(&uri), 300) else { return };
+        let http = self.http.clone();
+        let sem = self.cover_sem.clone();
+        let weak = self.ui.clone();
+        self.rt.spawn(async move {
+            let _permit = sem.acquire().await;
+            let Ok(bytes) = cache::fetch_cover(&http, &url).await else { return };
+            let _ = slint::invoke_from_event_loop(move || {
+                let Ok(image) = slint::Image::load_from_data(&bytes, None) else { return };
+                COVER_IMAGES.with(|c| {
+                    c.borrow_mut().insert(uri, image.clone());
+                });
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_artist_avatar(image);
+                    ui.set_artist_has_avatar(true);
+                }
+            });
+        });
+    }
+
+    /// Отображает аватарку пользователя (из локального кэша или загружая по сети).
+    fn apply_user_avatar(&self, url: &str) {
+        if let Some(bytes) = cache::read_cached_cover(url) {
+            let weak = self.ui.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade()
+                    && let Ok(img) = slint::Image::load_from_data(&bytes, None)
+                {
+                    ui.set_user_avatar(img);
+                    ui.set_user_has_avatar(true);
+                }
+            });
+            return;
+        }
+        self.load_user_avatar(url.to_string());
+    }
+
+    fn load_user_avatar(&self, url: String) {
+        let http = self.http.clone();
+        let weak = self.ui.clone();
+        self.rt.spawn(async move {
+            let Ok(bytes) = cache::fetch_cover(&http, &url).await else { return };
+            let _ = slint::invoke_from_event_loop(move || {
+                let Ok(image) = slint::Image::load_from_data(&bytes, None) else { return };
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_user_avatar(image);
+                    ui.set_user_has_avatar(true);
+                }
+            });
+        });
+    }
+
+    fn prefetch_likes(self: Arc<Self>) {
+        let Some(api) = self.api() else { return };
+        let uid = self.state.lock().unwrap().uid;
+        let rt = self.rt.clone();
+        rt.spawn(async move {
+            if let Ok(entries) = api.liked_track_entries(uid).await {
+                let set: HashSet<String> = entries.into_iter().map(|(id, _)| id).collect();
+                self.state.lock().unwrap().liked_ids = set;
+                self.refresh_rows();
+            }
+        });
+    }
+
+    fn load_home(self: Arc<Self>) {
+        let Some(api) = self.api() else { return };
+        let uid = self.state.lock().unwrap().uid;
+        let view = self.begin_cached_view(
+            Some("home"),
+            0,
+            "Главная".into(),
+            "Ваша музыка и рекомендации".into(),
+        );
+        let rt = self.rt.clone();
+        rt.spawn(async move {
+            let playlists_res = api.user_playlists(uid).await;
+            let albums_res = api.liked_albums(uid).await;
+
+            let mut cards = Vec::new();
+            if let Ok(playlists) = playlists_res {
+                for p in playlists.into_iter().take(6) {
+                    cards.push(playlist_target(p));
+                }
+            }
+            if let Ok(albums) = albums_res {
+                for a in albums.into_iter().take(6) {
+                    cards.push(CardTarget::Album(a));
+                }
+            }
+
+            self.apply_cached_view(
+                view,
+                Some("home"),
+                Some("Главная".into()),
+                Some("Ваша музыка и рекомендации".into()),
+                cards,
+                Vec::new(),
+                None,
+                None,
+            );
+        });
+    }
+
     fn load_likes(self: Arc<Self>) {
         let Some(api) = self.api() else { return };
         let uid = self.state.lock().unwrap().uid;
-        let view = self.begin_cached_view(Some("likes"), 0, "Мне нравится".into(), "".into());
+        let view = self.begin_cached_view(Some("likes"), 2, "Мне нравится".into(), "".into());
         let rt = self.rt.clone();
         rt.spawn(async move {
             match api.liked_tracks(uid).await {
@@ -710,6 +1165,7 @@ impl App {
                         Some("".into()),
                         Vec::new(),
                         tracks,
+                        None,
                         None,
                     );
                     // Сердечко текущего трека могло измениться
@@ -731,6 +1187,7 @@ impl App {
                 let view = st.view_id;
                 st.cards.clear();
                 st.viewed_artist_id = None;
+                st.viewed_artist = None;
                 let metas: Vec<RowMeta> = tracks
                     .iter()
                     .map(|t| RowMeta::from_track(t, &st.liked_ids))
@@ -746,11 +1203,13 @@ impl App {
         if let Some((_view, w_title, metas, cur, tracks)) = existing {
             self.ui(move |ui| {
                 ui.set_page(1);
+                ui.set_is_artist_view(false);
+                ui.set_artist_has_avatar(false);
                 ui.set_list_title(w_title.into());
                 ui.set_list_subtitle("Персональный поток рекомендаций".into());
                 ui.set_can_start_artist_wave(false);
                 ui.set_list_loading(false);
-                ui.set_cards(ModelRc::default());
+                reset_card_items(ui, Vec::new());
                 let rows = metas.into_iter().map(RowMeta::into_row).collect();
                 reset_track_rows(ui, rows);
                 ui.set_current_index(cur);
@@ -812,6 +1271,7 @@ impl App {
                 Vec::new(),
                 session.tracks,
                 None,
+                None,
             );
             self.play_index(0, false);
         });
@@ -822,7 +1282,7 @@ impl App {
         let uid = self.state.lock().unwrap().uid;
         let view = self.begin_cached_view(
             Some("playlists"),
-            2,
+            3,
             "Плейлисты".into(),
             "Ваши и понравившиеся плейлисты".into(),
         );
@@ -839,6 +1299,7 @@ impl App {
                         cards,
                         Vec::new(),
                         None,
+                        None,
                     );
                 }
                 Err(e) => self.view_failed(view, "Плейлисты", e),
@@ -851,7 +1312,7 @@ impl App {
         let uid = self.state.lock().unwrap().uid;
         let view = self.begin_cached_view(
             Some("albums"),
-            3,
+            4,
             "Альбомы".into(),
             "Понравившиеся альбомы".into(),
         );
@@ -868,6 +1329,7 @@ impl App {
                         cards,
                         Vec::new(),
                         None,
+                        None,
                     );
                 }
                 Err(e) => self.view_failed(view, "Альбомы", e),
@@ -880,7 +1342,7 @@ impl App {
         let uid = self.state.lock().unwrap().uid;
         let view = self.begin_cached_view(
             Some("artists"),
-            4,
+            5,
             "Артисты".into(),
             "Любимые исполнители".into(),
         );
@@ -896,6 +1358,7 @@ impl App {
                         Some("Любимые исполнители".into()),
                         cards,
                         Vec::new(),
+                        None,
                         None,
                     );
                 }
@@ -913,7 +1376,7 @@ impl App {
         let title = format!("Поиск: {query}");
         let view = self.begin_cached_view(
             Some(&key),
-            5,
+            6,
             title.clone(),
             "Артисты, альбомы, плейлисты и треки".into(),
         );
@@ -933,6 +1396,7 @@ impl App {
                         cards,
                         res.tracks,
                         None,
+                        None,
                     );
                 }
                 Err(e) => self.view_failed(view, "Поиск", e),
@@ -944,7 +1408,7 @@ impl App {
         let target = self.state.lock().unwrap().cards.get(index).cloned();
         let Some(target) = target else { return };
         match target {
-            CardTarget::Playlist { uid, kind, title } => self.open_playlist(uid, kind, title),
+            CardTarget::Playlist { uid, kind, title, .. } => self.open_playlist(uid, kind, title),
             CardTarget::Album(album) => self.open_album(album.id),
             CardTarget::Artist(artist) => self.open_artist(artist.id),
         }
@@ -953,7 +1417,7 @@ impl App {
     fn open_playlist(self: Arc<Self>, owner_uid: u64, kind: u64, title: String) {
         let Some(api) = self.api() else { return };
         let key = format!("playlist:{owner_uid}:{kind}");
-        let view = self.begin_cached_view(Some(&key), 2, title.clone(), "Плейлист".into());
+        let view = self.begin_cached_view(Some(&key), 6, title.clone(), "Плейлист".into());
         let rt = self.rt.clone();
         rt.spawn(async move {
             match api.playlist_tracks(owner_uid, kind).await {
@@ -966,6 +1430,7 @@ impl App {
                         Vec::new(),
                         tracks,
                         None,
+                        None,
                     );
                 }
                 Err(e) => self.view_failed(view, "Плейлист", e),
@@ -976,7 +1441,7 @@ impl App {
     fn open_album(self: Arc<Self>, album_id: String) {
         let Some(api) = self.api() else { return };
         let key = format!("album:{album_id}");
-        let view = self.begin_cached_view(Some(&key), 3, "Альбом…".into(), "".into());
+        let view = self.begin_cached_view(Some(&key), 6, "Альбом…".into(), "".into());
         let rt = self.rt.clone();
         rt.spawn(async move {
             match api.album_with_tracks(&album_id).await {
@@ -995,6 +1460,7 @@ impl App {
                         Vec::new(),
                         tracks,
                         None,
+                        None,
                     );
                 }
                 Err(e) => self.view_failed(view, "Альбом", e),
@@ -1005,7 +1471,7 @@ impl App {
     fn open_artist(self: Arc<Self>, artist_id: String) {
         let Some(api) = self.api() else { return };
         let key = format!("artist:{artist_id}");
-        let view = self.begin_cached_view(Some(&key), 4, "Артист…".into(), "".into());
+        let view = self.begin_cached_view(Some(&key), 6, "Артист…".into(), "".into());
         let rt = self.rt.clone();
         rt.spawn(async move {
             match api.artist_brief(&artist_id).await {
@@ -1016,8 +1482,15 @@ impl App {
                     } else {
                         page.artist.genres.clone()
                     };
-                    let cards = page.albums.into_iter().take(12).map(CardTarget::Album).collect();
+                    let cards = page.albums.into_iter().map(CardTarget::Album).collect();
                     let artist_meta = Some((page.artist.id.clone(), name.clone()));
+                    let artist_view = Some(ArtistViewInfo {
+                        id: page.artist.id.clone(),
+                        name: name.clone(),
+                        genres: genres.clone(),
+                        stats: page.artist.stats.clone(),
+                        cover_uri: page.artist.cover_uri.clone(),
+                    });
                     self.apply_cached_view(
                         view,
                         Some(&key),
@@ -1026,6 +1499,7 @@ impl App {
                         cards,
                         page.popular_tracks,
                         artist_meta,
+                        artist_view,
                     );
                 }
                 Err(e) => self.view_failed(view, "Артист", e),
@@ -1146,22 +1620,30 @@ impl App {
 
     /// Переход по очереди. Недоступные треки пропускаются.
     fn step(self: Arc<Self>, delta: isize, manual_skip: bool) {
-        let next = {
+        let (next, repeat_mode, queue_len) = {
             let st = self.state.lock().unwrap();
             let Some(cur) = st.current else { return };
             let mut i = cur;
-            loop {
+            let found = loop {
                 match i.checked_add_signed(delta).filter(|&n| n < st.queue.len()) {
                     Some(n) if st.queue[n].available => break Some(n),
                     Some(n) => i = n,
                     None => break None,
                 }
-            }
+            };
+            (found, st.repeat_mode, st.queue.len())
         };
         match next {
             Some(i) => self.play_index(i, manual_skip),
-            None if delta > 0 && !manual_skip => self.finish_queue(),
-            None => {}
+            None => {
+                if delta > 0 && queue_len > 0 {
+                    if repeat_mode == 1 {
+                        self.play_index(0, manual_skip);
+                    } else if !manual_skip {
+                        self.finish_queue();
+                    }
+                }
+            }
         }
     }
 
@@ -1204,6 +1686,7 @@ impl App {
             st.generation += 1;
             st.duration_secs = track.duration_ms as f64 / 1000.0;
             st.position_secs = 0.0;
+            st.audio_started = true;
             let liked = st.liked_ids.contains(&track.id);
             (
                 prev_track,
@@ -1217,6 +1700,8 @@ impl App {
                 st.wave.clone(),
             )
         };
+
+        self.persist_session();
 
         if let Some(w) = wave {
             let api_fb = api.clone();
@@ -1392,6 +1877,7 @@ impl App {
                             cards: Vec::new(),
                             tracks: w.tracks.clone(),
                             viewed_artist_id: None,
+                            artist_view: None,
                         };
                         views.insert(key.clone(), cached.clone());
                         wave_cache_update = Some((key, cached));
@@ -1428,11 +1914,35 @@ impl App {
                 });
             }
             Event::Position { generation, secs, paused } if generation == current => {
-                let duration = {
+                let (duration, should_save, ignore_pos) = {
                     let mut st = self.state.lock().unwrap();
-                    st.position_secs = secs;
-                    st.duration_secs
+                    let ignore_pos = if let Some(seek_time) = st.last_seek_time {
+                        if seek_time.elapsed() < Duration::from_millis(350) {
+                            (secs - st.seek_target_secs).abs() > 1.5
+                        } else {
+                            st.last_seek_time = None;
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if !ignore_pos {
+                        st.position_secs = secs;
+                    }
+                    let cur_sec = st.position_secs as u64;
+                    let should_save = cur_sec > 0 && cur_sec % 5 == 0 && cur_sec != st.last_saved_sec;
+                    if should_save && !ignore_pos {
+                        st.last_saved_sec = cur_sec;
+                    }
+                    (st.duration_secs, should_save && !ignore_pos, ignore_pos)
                 };
+                if ignore_pos {
+                    return;
+                }
+                if should_save {
+                    self.persist_session();
+                }
                 let status = if paused { MprisStatus::Paused } else { MprisStatus::Playing };
                 self.mpris.set_status(status, secs);
                 self.discord.set_status(status, secs);
@@ -1445,6 +1955,16 @@ impl App {
                 });
             }
             Event::Ended(g) if g == current => {
+                let (repeat_mode, cur) = {
+                    let st = self.state.lock().unwrap();
+                    (st.repeat_mode, st.current)
+                };
+                if repeat_mode == 2 {
+                    if let Some(cur_idx) = cur {
+                        self.play_index(cur_idx, false);
+                        return;
+                    }
+                }
                 self.ui(|ui| ui.set_playing(false));
                 self.step(1, false);
             }
@@ -1463,11 +1983,242 @@ impl App {
         }
     }
 
+    fn toggle(self: Arc<Self>) {
+        let (started, current) = {
+            let st = self.state.lock().unwrap();
+            (st.audio_started, st.current)
+        };
+        if started {
+            self.audio.toggle();
+            self.persist_session();
+        } else if let Some(idx) = current {
+            self.play_index(idx, false);
+        }
+    }
+
+    fn toggle_repeat(self: Arc<Self>) {
+        let mode = {
+            let mut st = self.state.lock().unwrap();
+            st.repeat_mode = (st.repeat_mode + 1) % 3;
+            st.repeat_mode
+        };
+        self.ui(move |ui| ui.set_repeat_mode(mode as i32));
+        let rt = self.rt.clone();
+        rt.spawn_blocking(move || {
+            let mut settings = config::load_settings();
+            settings.repeat_mode = mode;
+            let _ = config::save_settings(&settings);
+        });
+    }
+
+    fn toggle_shuffle(self: Arc<Self>) {
+        let shuffle_on = {
+            let mut st = self.state.lock().unwrap();
+            st.shuffle = !st.shuffle;
+            if st.shuffle {
+                if st.unshuffled_queue.is_none() {
+                    st.unshuffled_queue = Some(st.queue.clone());
+                }
+                if let Some(cur) = st.current {
+                    if cur + 1 < st.queue.len() {
+                        let mut tail = st.queue.split_off(cur + 1);
+                        shuffle_slice(&mut tail);
+                        st.queue.extend(tail);
+                    }
+                } else if !st.queue.is_empty() {
+                    shuffle_slice(&mut st.queue);
+                }
+            } else if let Some(orig) = st.unshuffled_queue.take() {
+                if let Some(cur) = st.current {
+                    if let Some(track) = st.queue.get(cur) {
+                        let id = track.id.clone();
+                        if let Some(new_idx) = orig.iter().position(|t| t.id == id) {
+                            st.current = Some(new_idx);
+                        }
+                    }
+                }
+                st.queue = orig;
+            }
+            st.shuffle
+        };
+        self.ui(move |ui| ui.set_shuffle(shuffle_on));
+        let rt = self.rt.clone();
+        rt.spawn_blocking(move || {
+            let mut settings = config::load_settings();
+            settings.shuffle = shuffle_on;
+            let _ = config::save_settings(&settings);
+        });
+    }
+
+    fn toggle_mute(self: Arc<Self>) {
+        let (new_vol, should_save) = {
+            let mut st = self.state.lock().unwrap();
+            let cur = config::load_settings().volume;
+            if cur > 0.001 {
+                st.last_unmuted_volume = cur;
+                (0.0, true)
+            } else {
+                let restore = if st.last_unmuted_volume > 0.05 {
+                    st.last_unmuted_volume
+                } else {
+                    0.7
+                };
+                (restore, true)
+            }
+        };
+        if should_save {
+            self.audio.set_volume(perceptual(new_vol));
+            self.mpris.set_volume(new_vol);
+            self.save_volume(new_vol);
+            self.ui(move |ui| ui.set_volume(new_vol));
+        }
+    }
+
+    fn save_volume(&self, vol: f32) {
+        let rt = self.rt.clone();
+        rt.spawn_blocking(move || {
+            let mut settings = config::load_settings();
+            settings.volume = vol;
+            let _ = config::save_settings(&settings);
+        });
+    }
+
+    fn persist_session(&self) {
+        let (queue, current, pos, wave) = {
+            let st = self.state.lock().unwrap();
+            let Some(idx) = st.current else { return };
+            if st.queue.is_empty() { return };
+            let queue = st.queue.clone();
+            let pos = st.position_secs;
+            let wave = st.wave.as_ref().map(|w| config::SavedWaveState {
+                seed: w.seed.clone(),
+                title: w.title.clone(),
+                session_id: w.session_id.clone(),
+                batch_id: w.batch_id.clone(),
+                tracks: w.tracks.clone(),
+            });
+            (queue, idx, pos, wave)
+        };
+
+        let session = config::SavedSession {
+            queue,
+            current_index: current,
+            position_secs: pos,
+            wave,
+        };
+
+        let rt = self.rt.clone();
+        rt.spawn_blocking(move || {
+            let mut settings = config::load_settings();
+            settings.session = Some(session);
+            let _ = config::save_settings(&settings);
+        });
+    }
+
+    fn clear_saved_session(&self) {
+        let rt = self.rt.clone();
+        rt.spawn_blocking(move || {
+            let mut settings = config::load_settings();
+            settings.session = None;
+            let _ = config::save_settings(&settings);
+        });
+    }
+
+    fn restore_session(self: Arc<Self>) {
+        let settings = config::load_settings();
+        let Some(session) = settings.session else { return };
+        if session.queue.is_empty() { return };
+        let idx = session.current_index.min(session.queue.len() - 1);
+        let track = session.queue[idx].clone();
+        let pos_secs = session.position_secs;
+        let duration_secs = track.duration_ms as f64 / 1000.0;
+        let progress = if duration_secs > 0.0 { (pos_secs / duration_secs) as f32 } else { 0.0 };
+        let pos_text = fmt_time(pos_secs);
+        let dur_text = fmt_time(duration_secs);
+
+        let liked = {
+            let mut st = self.state.lock().unwrap();
+            st.queue = session.queue.clone();
+            st.current = Some(idx);
+            st.position_secs = pos_secs;
+            st.duration_secs = duration_secs;
+            st.audio_started = false;
+            if let Some(w) = session.wave {
+                st.wave = Some(WaveState {
+                    seed: w.seed,
+                    title: w.title,
+                    session_id: w.session_id,
+                    batch_id: w.batch_id,
+                    tracks: w.tracks,
+                    fetching_more: false,
+                    resume_on_load: false,
+                });
+            }
+            st.liked_ids.contains(&track.id)
+        };
+
+        let title = track.title.clone();
+        let artists = track.artists.clone();
+        let has_album = track.album_id.is_some();
+        let has_artist = track.artist_id.is_some();
+        let cover_uri = track.cover_uri.clone();
+
+        self.ui(move |ui| {
+            ui.set_has_track(true);
+            ui.set_playing(false);
+            ui.set_buffering(false);
+            ui.set_now_title(title.into());
+            ui.set_now_artists(artists.into());
+            ui.set_now_has_album(has_album);
+            ui.set_now_has_artist(has_artist);
+            ui.set_now_liked(liked);
+            ui.set_duration_text(dur_text.into());
+            ui.set_position_text(pos_text.into());
+            ui.set_progress(progress);
+            let (img, has_img) = resolve_cover_image(cover_uri.as_deref(), 200);
+            ui.set_now_cover(img);
+            ui.set_has_cover(has_img);
+        });
+
+        if let Some(url) = track.cover_url(200) {
+            let this = self.clone();
+            let generation = self.generation();
+            self.rt.spawn(async move {
+                let Ok(bytes) = cache::fetch_cover(&this.http, &url).await else { return };
+                let weak = this.ui.clone();
+                let this2 = this.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if this2.generation() != generation {
+                        return;
+                    }
+                    if let Some(ui) = weak.upgrade()
+                        && let Ok(image) = slint::Image::load_from_data(&bytes, None)
+                    {
+                        ui.set_now_cover(image);
+                        ui.set_has_cover(true);
+                    }
+                });
+            });
+        }
+
+        self.mpris.set_track(
+            MprisMeta {
+                id: track.id.clone(),
+                title: track.title.clone(),
+                artists: track.artists.clone(),
+                duration_us: (track.duration_ms as i64) * 1000,
+                cover_url: track.cover_url(400),
+            },
+            MprisStatus::Paused,
+        );
+        self.discord.set_track(&track, MprisStatus::Paused);
+    }
+
     fn on_mpris(self: Arc<Self>, action: MprisAction) {
         match action {
-            MprisAction::Play => self.audio.play(),
+            MprisAction::Play => self.clone().toggle(),
             MprisAction::Pause => self.audio.pause(),
-            MprisAction::Toggle => self.audio.toggle(),
+            MprisAction::Toggle => self.clone().toggle(),
             MprisAction::Stop => {
                 self.audio.stop();
                 self.ui(|ui| {
@@ -1483,6 +2234,7 @@ impl App {
             MprisAction::SeekAbsolute(secs) => self.audio.seek(secs),
             MprisAction::SetVolume(v) => {
                 self.audio.set_volume(perceptual(v));
+                self.save_volume(v);
                 self.ui(move |ui| ui.set_volume(v));
             }
             MprisAction::Quit => {
@@ -1508,15 +2260,19 @@ fn playlist_target(p: api::PlaylistCard) -> CardTarget {
         uid: p.uid,
         kind: p.kind,
         title: format!("{} ({})", p.title, p.subtitle),
+        cover_uri: p.cover_uri,
     }
 }
 
 fn card_item(t: &CardTarget) -> CardItem {
+    let (cover, has_cover) = resolve_cover_image(t.cover_uri(), 100);
     match t {
         CardTarget::Playlist { title, .. } => CardItem {
             title: title.as_str().into(),
             subtitle: "Плейлист".into(),
             kind: "playlist".into(),
+            cover,
+            has_cover,
         },
         CardTarget::Album(a) => {
             let mut parts = vec!["Альбом".to_string()];
@@ -1533,10 +2289,18 @@ fn card_item(t: &CardTarget) -> CardItem {
                 title: a.title.as_str().into(),
                 subtitle: parts.join(" • ").into(),
                 kind: "album".into(),
+                cover,
+                has_cover,
             }
         }
         CardTarget::Artist(ar) => {
-            let sub = if ar.genres.is_empty() {
+            let sub = if !ar.stats.is_empty() {
+                if !ar.genres.is_empty() {
+                    format!("{} • {}", ar.genres, ar.stats)
+                } else {
+                    ar.stats.clone()
+                }
+            } else if ar.genres.is_empty() {
                 "Исполнитель".to_string()
             } else {
                 format!("Исполнитель • {}", ar.genres)
@@ -1545,6 +2309,8 @@ fn card_item(t: &CardTarget) -> CardItem {
                 title: ar.name.as_str().into(),
                 subtitle: sub.into(),
                 kind: "artist".into(),
+                cover,
+                has_cover,
             }
         }
     }
@@ -1634,4 +2400,19 @@ fn spawn_theme_watcher(ui: &AppWindow, rt: &Handle) {
             }
         }
     });
+}
+
+fn shuffle_slice<T>(slice: &mut [T]) {
+    use std::time::SystemTime;
+    let mut rng = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(123456789);
+    for i in (1..slice.len()).rev() {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        let j = (rng as usize) % (i + 1);
+        slice.swap(i, j);
+    }
 }
