@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::api::Track;
 use crate::mpris::Status;
 
-/// Публичный Application ID («Яндекс Музыку» для режима «Слушает …»).
+/// Публичный Application ID («Яндекс Музыка» для режима «Слушает …»).
 const DEFAULT_CLIENT_ID: &str = "1570127971413663804";
 
 const OP_HANDSHAKE: u32 = 0;
@@ -19,6 +19,8 @@ const OP_FRAME: u32 = 1;
 const OP_CLOSE: u32 = 2;
 const OP_PING: u32 = 3;
 const OP_PONG: u32 = 4;
+
+const MAX_DISCORD_BYTES: usize = 128;
 
 #[derive(Clone, Debug)]
 struct TrackInfo {
@@ -73,6 +75,49 @@ impl Discord {
     }
 }
 
+fn apply_cmd(
+    cmd: Cmd,
+    current: &mut Option<TrackInfo>,
+    status: &mut Status,
+    pos_secs: &mut f64,
+    last_anchor_start_secs: Option<f64>,
+    dirty: &mut bool,
+) {
+    match cmd {
+        Cmd::Track(info, st) => {
+            let is_same_track = current.as_ref().is_some_and(|t| t.id == info.id);
+            *current = Some(info);
+            *status = st;
+            if !is_same_track {
+                *pos_secs = 0.0;
+            }
+            *dirty = true;
+        }
+        Cmd::Status(st, secs) => {
+            *pos_secs = secs;
+            if st != *status {
+                *status = st;
+                *dirty = true;
+            } else if st == Status::Playing {
+                if let Some(prev_anchor) = last_anchor_start_secs {
+                    let expected_start = now_secs() - secs;
+                    if (expected_start - prev_anchor).abs() > 2.5 {
+                        *dirty = true;
+                    }
+                } else {
+                    *dirty = true;
+                }
+            }
+        }
+        Cmd::Clear => {
+            *current = None;
+            *status = Status::Stopped;
+            *pos_secs = 0.0;
+            *dirty = true;
+        }
+    }
+}
+
 fn run(rx: mpsc::Receiver<Cmd>) {
     let client_id = env::var("YM_DISCORD_CLIENT_ID")
         .ok()
@@ -96,31 +141,25 @@ fn run(rx: mpsc::Receiver<Cmd>) {
 
         let mut dirty = false;
         match rx.recv_timeout(timeout) {
-            Ok(Cmd::Track(info, st)) => {
-                current = Some(info);
-                status = st;
-                pos_secs = 0.0;
-                dirty = true;
-            }
-            Ok(Cmd::Status(st, secs)) => {
-                pos_secs = secs;
-                if st != status {
-                    status = st;
-                    dirty = true;
-                } else if st == Status::Playing
-                    && let Some(prev_anchor) = last_anchor_start_secs
-                {
-                    let expected_start = now_secs() - secs;
-                    if (expected_start - prev_anchor).abs() > 2.5 {
-                        dirty = true;
-                    }
+            Ok(first_cmd) => {
+                apply_cmd(
+                    first_cmd,
+                    &mut current,
+                    &mut status,
+                    &mut pos_secs,
+                    last_anchor_start_secs,
+                    &mut dirty,
+                );
+                for cmd in rx.try_iter() {
+                    apply_cmd(
+                        cmd,
+                        &mut current,
+                        &mut status,
+                        &mut pos_secs,
+                        last_anchor_start_secs,
+                        &mut dirty,
+                    );
                 }
-            }
-            Ok(Cmd::Clear) => {
-                current = None;
-                status = Status::Stopped;
-                pos_secs = 0.0;
-                dirty = true;
             }
             Err(RecvTimeoutError::Timeout) => {
                 if current.is_some() && conn.is_none() {
@@ -149,7 +188,9 @@ fn run(rx: mpsc::Receiver<Cmd>) {
             continue;
         }
 
-        let Some(track) = current.as_ref() else { continue };
+        let Some(track) = current.as_ref() else {
+            continue;
+        };
 
         if conn.is_none() {
             conn = connect(&client_id);
@@ -162,7 +203,11 @@ fn run(rx: mpsc::Receiver<Cmd>) {
         let activity = build_activity(track, status, anchor_start_secs);
         match send_activity(stream, Some(activity), &mut nonce) {
             Ok(()) => {
-                last_anchor_start_secs = Some(anchor_start_secs);
+                last_anchor_start_secs = if status == Status::Playing {
+                    Some(anchor_start_secs)
+                } else {
+                    None
+                };
             }
             Err(_) => {
                 conn = None;
@@ -174,14 +219,20 @@ fn run(rx: mpsc::Receiver<Cmd>) {
 
 fn build_activity(track: &TrackInfo, status: Status, start_secs: f64) -> Value {
     let details = pad_discord_str(&track.title, "Без названия");
-    let state = if track.artists.is_empty() {
+    let raw_artists = if track.artists.trim().is_empty() {
         "Неизвестный исполнитель".to_string()
     } else {
-        pad_discord_str(&track.artists, "Исполнитель")
+        track.artists.trim().to_string()
     };
 
+    let state_str = if status == Status::Paused {
+        format!("{raw_artists} (На паузе)")
+    } else {
+        raw_artists
+    };
+    let state = pad_discord_str(&state_str, "Исполнитель");
+
     let mut activity = json!({
-        // 2 = Listening ("Слушает ...")
         "type": 2,
         "details": details,
         "state": state,
@@ -196,18 +247,18 @@ fn build_activity(track: &TrackInfo, status: Status, start_secs: f64) -> Value {
         });
     }
 
-    let mut assets = json!({});
+    let mut assets = serde_json::Map::new();
     if let Some(cover) = &track.cover_url {
-        assets["large_image"] = Value::String(cover.clone());
+        assets.insert("large_image".into(), Value::String(cover.clone()));
     }
-    if !track.album_title.is_empty() {
-        assets["large_text"] = Value::String(pad_discord_str(&track.album_title, "Альбом"));
+    if !track.album_title.trim().is_empty() {
+        assets.insert(
+            "large_text".into(),
+            Value::String(pad_discord_str(&track.album_title, "Альбом")),
+        );
     }
-    if status == Status::Paused {
-        assets["small_text"] = Value::String("На паузе".into());
-    }
-    if assets.as_object().is_some_and(|o| !o.is_empty()) {
-        activity["assets"] = assets;
+    if !assets.is_empty() {
+        activity["assets"] = Value::Object(assets);
     }
 
     let track_url = match &track.album_id {
@@ -224,22 +275,31 @@ fn build_activity(track: &TrackInfo, status: Status, start_secs: f64) -> Value {
     activity
 }
 
-/// Discord отклоняет строки короче 2 символов или длиннее 128 символов.
 fn pad_discord_str(s: &str, fallback: &str) -> String {
     let trimmed = s.trim();
     if trimmed.is_empty() {
         return fallback.to_string();
     }
-    let count = trimmed.chars().count();
-    if count < 2 {
-        format!("{trimmed} ")
-    } else if count > 128 {
-        let mut out: String = trimmed.chars().take(127).collect();
-        out.push('…');
-        out
-    } else {
-        trimmed.to_string()
+    if trimmed.chars().count() < 2 {
+        return format!("{trimmed} ");
     }
+    if trimmed.len() <= MAX_DISCORD_BYTES {
+        return trimmed.to_string();
+    }
+
+    let max_len = MAX_DISCORD_BYTES - '…'.len_utf8();
+    let mut end = 0;
+    for (idx, ch) in trimmed.char_indices() {
+        let next_end = idx + ch.len_utf8();
+        if next_end > max_len {
+            break;
+        }
+        end = next_end;
+    }
+
+    let mut out = trimmed[..end].to_string();
+    out.push('…');
+    out
 }
 
 fn connect(client_id: &str) -> Option<UnixStream> {
@@ -287,7 +347,11 @@ fn socket_candidates() -> Vec<PathBuf> {
     out
 }
 
-fn send_activity(stream: &mut UnixStream, activity: Option<Value>, nonce: &mut u64) -> io::Result<()> {
+fn send_activity(
+    stream: &mut UnixStream,
+    activity: Option<Value>,
+    nonce: &mut u64,
+) -> io::Result<()> {
     *nonce += 1;
     let payload = json!({
         "cmd": "SET_ACTIVITY",
@@ -319,7 +383,10 @@ fn read_frame(stream: &mut UnixStream) -> io::Result<(u32, Vec<u8>)> {
         let opcode = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
         let len = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
         if len > 1024 * 1024 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too large"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "frame too large",
+            ));
         }
         let mut buf = vec![0u8; len];
         stream.read_exact(&mut buf)?;
@@ -333,7 +400,18 @@ fn read_frame(stream: &mut UnixStream) -> io::Result<(u32, Vec<u8>)> {
                 stream.flush()?;
             }
             OP_CLOSE => {
-                return Err(io::Error::new(io::ErrorKind::ConnectionAborted, "discord closed ipc"));
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "discord closed ipc",
+                ));
+            }
+            OP_FRAME => {
+                if let Ok(val) = serde_json::from_slice::<Value>(&buf)
+                    && val.get("evt").and_then(Value::as_str) == Some("ERROR")
+                {
+                    return Err(io::Error::other(format!("discord rpc error: {val}")));
+                }
+                return Ok((opcode, buf));
             }
             _ => return Ok((opcode, buf)),
         }

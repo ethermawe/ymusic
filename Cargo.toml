@@ -3,6 +3,15 @@ name = "ymusic"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "ymusic_core"
+crate-type = ["staticlib", "cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ymusic-slint"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0.104"
 dirs = "7.0.0"

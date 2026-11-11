@@ -1,4 +1,5 @@
 /target
 /pkg
+/build*
 *.pkg.tar.zst
 *.pkg.tar.xz
