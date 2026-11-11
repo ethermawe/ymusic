@@ -1,0 +1,60 @@
+export struct TrackRow {
+    title: string,
+    artists: string,
+    album: string,
+    duration: string,
+    available: bool,
+    liked: bool,
+    cached: bool,
+    has-artist: bool,
+    has-album: bool,
+    cover: image,
+    has-cover: bool,
+}
+
+export struct CardItem {
+    title: string,
+    subtitle: string,
+    kind: string, // "playlist" | "album" | "artist"
+}
+
+export global Theme {
+    in-out property <color> bg: #141314;
+    in-out property <color> surface-low: #1d1b1c;
+    in-out property <color> surface: #211f20;
+    in-out property <color> surface-hi: #2b292b;
+    in-out property <color> surface-highest: #363436;
+    in-out property <color> text: #e7e1e3;
+    in-out property <color> muted: #949091;
+    in-out property <color> outline: #494648;
+    in-out property <color> accent: #d1c2d2;
+    in-out property <color> on-accent: #372d3a;
+    in-out property <color> secondary-container: #4c444d;
+    in-out property <color> on-secondary-container: #ebdfe9;
+    in-out property <color> danger: #93000a;
+    in-out property <color> on-danger: #ffdad6;
+
+    // Скругления и тайминги из Quickshell Appearance.qml
+    out property <length> radius-unsharpen: 2px;
+    out property <length> radius-xs: 8px;
+    out property <length> radius-sm: 12px;
+    out property <length> radius-md: 17px;
+    out property <length> radius-lg: 23px;
+    out property <duration> anim-fast: 150ms;
+    out property <duration> anim-normal: 220ms;
+}
+
+// Material Icons (Apache 2.0), viewbox 24x24
+export global Icons {
+    out property <string> play: "M8 5v14l11-7z";
+    out property <string> pause: "M6 19h4V5H6v14zm8-14v14h4V5h-4z";
+    out property <string> prev: "M6 6h2v12H6zm3.5 6l8.5 6V6z";
+    out property <string> next: "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z";
+    out property <string> volume: "M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z";
+    out property <string> note: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z";
+    out property <string> search: "M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z";
+    out property <string> heart-fill: "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z";
+    out property <string> heart-outline: "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z";
+    out property <string> dislike: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8 0-1.85.63-3.55 1.69-4.9L16.9 18.31C15.55 19.37 13.85 20 12 20zm6.31-3.1L7.1 5.69C8.45 4.63 10.15 4 12 4c4.42 0 8 3.58 8 8 0 1.85-.63 3.55-1.69 4.9z";
+    out property <string> wave: "M12 3v18M8 6v12M4 10v4M16 6v12M20 10v4";
+}
