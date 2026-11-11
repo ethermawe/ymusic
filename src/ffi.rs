@@ -181,99 +181,147 @@ pub unsafe extern "C" fn ymusic_core_open_now_album(handle: *mut CoreHandle) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_play(handle: *mut CoreHandle, index: usize) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        {
-            let mut st = h.core.state.lock().unwrap();
-            let same_as_queue = st.list.len() == st.queue.len()
-                && st.list.iter().zip(&st.queue).all(|(x, y)| x.id == y.id);
-            if !same_as_queue {
-                st.wave = None;
-                st.unshuffled_queue = None;
-                st.queue = st.list.clone();
-                if st.shuffle && (index + 1) < st.queue.len() {
-                    st.unshuffled_queue = Some(st.list.clone());
-                    let mut tail = st.queue.split_off(index + 1);
-                    crate::core::shuffle_slice(&mut tail);
-                    st.queue.extend(tail);
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            {
+                let mut st = core.state.lock().unwrap();
+                let same_as_queue = st.list.len() == st.queue.len()
+                    && st.list.iter().zip(&st.queue).all(|(x, y)| x.id == y.id);
+                if !same_as_queue {
+                    st.wave = None;
+                    st.unshuffled_queue = None;
+                    st.queue = st.list.clone();
+                    if st.shuffle && (index + 1) < st.queue.len() {
+                        st.unshuffled_queue = Some(st.list.clone());
+                        let mut tail = st.queue.split_off(index + 1);
+                        crate::core::shuffle_slice(&mut tail);
+                        st.queue.extend(tail);
+                    }
                 }
             }
-        }
-        h.core.clone().play_index(index, true);
+            core.play_index(index, true);
+        });
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_toggle(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        h.core.clone().toggle();
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            core.toggle();
+        });
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_next(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        h.core.clone().step(1, true);
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            core.step(1, true);
+        });
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_prev(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        h.core.clone().step(-1, true);
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            core.step(-1, true);
+        });
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_seek(handle: *mut CoreHandle, fraction: f32) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        h.core.seek(fraction);
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            core.seek(fraction);
+        });
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_set_volume(handle: *mut CoreHandle, volume: f32) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        h.core.set_volume(volume);
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            core.set_volume(volume);
+        });
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_toggle_mute(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        h.core.clone().toggle_mute();
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            core.toggle_mute();
+        });
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_toggle_shuffle(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        h.core.clone().toggle_shuffle();
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            core.toggle_shuffle();
+        });
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_toggle_repeat(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        h.core.clone().toggle_repeat();
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            core.toggle_repeat();
+        });
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_toggle_like(handle: *mut CoreHandle, index: usize) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        h.core.clone().toggle_like_at(index);
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            core.toggle_like_at(index);
+        });
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_toggle_now_like(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        h.core.clone().toggle_now_like();
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            core.toggle_now_like();
+        });
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_dislike_now(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        h.core.clone().dislike_now();
+        let rt = h.core.rt_handle.clone();
+        let core = h.core.clone();
+        rt.spawn(async move {
+            core.dislike_now();
+        });
     }
 }

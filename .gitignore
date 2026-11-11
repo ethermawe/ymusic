@@ -1,5 +1,6 @@
 /target
 /pkg
 /build*
+.vscode/
 *.pkg.tar.zst
 *.pkg.tar.xz

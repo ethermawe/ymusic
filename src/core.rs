@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
@@ -1308,12 +1307,16 @@ impl YMusicCore {
             waiting
         };
         if waiting_for_wave {
+            let (shuf, rep) = {
+                let st = self.state.lock().unwrap();
+                (st.shuffle, st.repeat_mode as i32)
+            };
             self.send_event(EVENT_PLAYBACK_STATE, &PlaybackStatePayload {
                 playing: false,
                 buffering: true,
                 volume: config::load_settings().volume,
-                shuffle: self.state.lock().unwrap().shuffle,
-                repeat_mode: self.state.lock().unwrap().repeat_mode as i32,
+                shuffle: shuf,
+                repeat_mode: rep,
             });
             return;
         }
@@ -1408,12 +1411,18 @@ impl YMusicCore {
             has_album: track.album_id.is_some(),
         });
 
+        let (shuf, rep, tracks) = {
+            let st = self.state.lock().unwrap();
+            let tracks = st.list.iter().map(|t| track_payload(t, &st.liked_ids)).collect();
+            (st.shuffle, st.repeat_mode as i32, tracks)
+        };
+
         self.send_event(EVENT_PLAYBACK_STATE, &PlaybackStatePayload {
             playing: false,
             buffering: true,
             volume: config::load_settings().volume,
-            shuffle: self.state.lock().unwrap().shuffle,
-            repeat_mode: self.state.lock().unwrap().repeat_mode as i32,
+            shuffle: shuf,
+            repeat_mode: rep,
         });
 
         self.send_event(EVENT_PLAYBACK_PROGRESS, &PlaybackProgressPayload {
@@ -1425,7 +1434,7 @@ impl YMusicCore {
         });
 
         self.send_event(EVENT_TRACKS_LOADED, &TracksPayload {
-            tracks: self.state.lock().unwrap().list.iter().map(|t| track_payload(t, &self.state.lock().unwrap().liked_ids)).collect(),
+            tracks,
             current_index: current_idx,
         });
 
@@ -1473,12 +1482,16 @@ impl YMusicCore {
                     }
                 }
                 Err(e) => {
+                    let (shuf, rep) = {
+                        let st = this.state.lock().unwrap();
+                        (st.shuffle, st.repeat_mode as i32)
+                    };
                     this.send_event(EVENT_PLAYBACK_STATE, &PlaybackStatePayload {
                         playing: false,
                         buffering: false,
                         volume: config::load_settings().volume,
-                        shuffle: this.state.lock().unwrap().shuffle,
-                        repeat_mode: this.state.lock().unwrap().repeat_mode as i32,
+                        shuffle: shuf,
+                        repeat_mode: rep,
                     });
                     this.error(format!("«{}»: {e:#}", track.title));
                 }
