@@ -238,6 +238,9 @@ fn bind_callbacks(ui: &AppWindow, app: &Arc<App>) {
             .arg(url.as_str())
             .spawn();
     });
+    ui.on_copy_code(|code| {
+        copy_to_clipboard(code.as_str());
+    });
     let a = app.clone();
     ui.on_logout(move || a.logout());
 
@@ -1558,6 +1561,32 @@ fn fmt_time(secs: f64) -> String {
 
 fn perceptual(v: f32) -> f32 {
     v.clamp(0.0, 1.0).powi(2)
+}
+
+fn copy_to_clipboard(text: &str) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let candidates: &[(&str, &[&str])] = &[
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--input"]),
+    ];
+
+    for (bin, args) in candidates {
+        if let Ok(mut child) = Command::new(bin)
+            .args(*args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            return;
+        }
+    }
 }
 
 fn apply_palette(ui: &AppWindow, p: config::QsPalette) {

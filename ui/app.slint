@@ -52,7 +52,10 @@ export component AppWindow inherits Window {
     callback login-device();
     callback login-token(string);
     callback open-url(string);
+    callback copy-code(string);
     callback logout();
+
+    private property <bool> code-copied: false;
 
     callback start-wave();
     callback start-artist-wave();
@@ -129,6 +132,7 @@ export component AppWindow inherits Window {
                             accent: true;
                             clicked => {
                                 if (!root.login-busy) {
+                                    root.code-copied = false;
                                     root.login-device();
                                 }
                             }
@@ -140,12 +144,43 @@ export component AppWindow inherits Window {
                                 color: Theme.muted;
                                 wrap: word-wrap;
                             }
-                            Label {
-                                text: root.login-code;
-                                font-size: 34px;
-                                font-weight: 800;
-                                letter-spacing: 4px;
-                                horizontal-alignment: center;
+                            Rectangle {
+                                height: 74px;
+                                border-radius: Theme.radius-md;
+                                background: code-ta.pressed ? Theme.surface-highest
+                                          : code-ta.has-hover ? Theme.surface-hi
+                                          : Theme.surface-low;
+                                border-width: 1px;
+                                border-color: root.code-copied ? Theme.accent : Theme.outline;
+                                animate background { duration: Theme.anim-fast; }
+                                animate border-color { duration: Theme.anim-fast; }
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Label {
+                                        text: root.login-code;
+                                        font-size: 30px;
+                                        font-weight: 800;
+                                        letter-spacing: 4px;
+                                        horizontal-alignment: center;
+                                        color: root.code-copied ? Theme.accent : Theme.text;
+                                    }
+                                    Label {
+                                        text: root.code-copied ? "Скопировано в буфер обмена ✓" : "Нажмите, чтобы скопировать";
+                                        font-size: 11px;
+                                        color: root.code-copied ? Theme.accent : Theme.muted;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+
+                                code-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.code-copied = true;
+                                        root.copy-code(root.login-code);
+                                    }
+                                }
                             }
                             Pill {
                                 text: "Открыть " + root.login-url;
