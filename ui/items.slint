@@ -5,12 +5,13 @@ export component CardTile inherits Rectangle {
     in property <CardItem> item;
     callback clicked;
 
-    height: 58px;
-    border-radius: ta.has-hover ? Theme.radius-md : Theme.radius-sm;
-    background: ta.has-hover ? Theme.surface-hi : Theme.surface;
+    height: 60px;
+    border-radius: Theme.radius-md;
+    background: ta.has-hover ? Theme.surface-hi : Theme.surface-low;
+    opacity: ta.pressed ? 0.85 : 1.0;
 
     animate background { duration: Theme.anim-fast; easing: ease-out; }
-    animate border-radius { duration: Theme.anim-normal; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
+    animate opacity { duration: Theme.anim-fast; }
 
     ta := TouchArea {
         mouse-cursor: pointer;
@@ -81,12 +82,15 @@ export component TrackItem inherits Rectangle {
     callback open-artist;
     callback open-album;
 
-    height: 56px;
+    height: 54px;
     border-radius: Theme.radius-sm;
-    background: ta.has-hover ? Theme.surface-hi : root.current ? Theme.surface : transparent;
-    opacity: track.available ? 1 : 0.45;
+    background: ta.has-hover
+        ? Theme.surface-hi
+        : (root.current ? Theme.secondary-container : transparent);
+    opacity: track.available ? (ta.pressed ? 0.85 : 1.0) : 0.45;
 
     animate background { duration: Theme.anim-fast; easing: ease-out; }
+    animate opacity { duration: Theme.anim-fast; }
 
     ta := TouchArea {
         mouse-cursor: pointer;

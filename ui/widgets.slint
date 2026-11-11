@@ -1,4 +1,4 @@
-import { Theme } from "theme.slint";
+import { Theme, Icons } from "theme.slint";
 
 export component Label inherits Text {
     color: Theme.text;
@@ -23,7 +23,7 @@ export component IconButton inherits Rectangle {
     width: 36px;
     height: 36px;
     border-radius: morphing ? (active ? 14px : self.width / 2) : self.width / 2;
-    opacity: enabled ? 1 : 0.4;
+    opacity: enabled ? (ta.pressed ? 0.75 : (ta.has-hover ? 0.95 : 1.0)) : 0.4;
     background: morphing
         ? (active
             ? (ta.has-hover ? Theme.on-secondary-container : Theme.accent)
@@ -62,6 +62,34 @@ export component IconButton inherits Rectangle {
         height: 4px;
         border-radius: 2px;
         background: Theme.accent;
+    }
+}
+
+export component PlayHeroButton inherits Rectangle {
+    in property <bool> playing;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    width: 44px;
+    height: 44px;
+    border-radius: self.width / 2;
+    background: ta.has-hover ? Theme.on-secondary-container : Theme.accent;
+    opacity: enabled ? (ta.pressed ? 0.8 : 1.0) : 0.4;
+
+    animate background { duration: Theme.anim-fast; easing: ease-out; }
+    animate opacity { duration: Theme.anim-fast; }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    Icon {
+        width: 22px;
+        height: 22px;
+        commands: root.playing ? Icons.pause : Icons.play;
+        fill: Theme.on-accent;
     }
 }
 
@@ -262,13 +290,15 @@ export component NavItem inherits Rectangle {
     in property <string> badge: "";
     callback clicked;
 
-    height: 38px;
-    border-radius: Theme.radius-sm;
+    height: 40px;
+    border-radius: self.height / 2;
     background: active
         ? Theme.secondary-container
         : (ta.has-hover ? Theme.surface-hi : transparent);
+    opacity: ta.pressed ? 0.82 : 1.0;
 
     animate background { duration: Theme.anim-fast; easing: ease-out; }
+    animate opacity { duration: Theme.anim-fast; }
 
     ta := TouchArea {
         mouse-cursor: pointer;
@@ -339,9 +369,11 @@ export component HomeCard inherits Rectangle {
     background: ta.has-hover ? Theme.surface-highest : Theme.surface-low;
     border-width: 1px;
     border-color: ta.has-hover ? Theme.accent : Theme.outline;
+    opacity: ta.pressed ? 0.88 : 1.0;
 
     animate background { duration: Theme.anim-fast; easing: ease-out; }
     animate border-color { duration: Theme.anim-fast; easing: ease-out; }
+    animate opacity { duration: Theme.anim-fast; }
 
     ta := TouchArea {
         mouse-cursor: pointer;

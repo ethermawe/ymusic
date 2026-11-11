@@ -1,6 +1,6 @@
 import { ListView } from "std-widgets.slint";
 import { Theme, Icons, TrackRow, CardItem } from "theme.slint";
-import { Label, Icon, IconButton, Pill, Field, SeekBar, NavItem, HomeCard } from "widgets.slint";
+import { Label, Icon, IconButton, PlayHeroButton, Pill, Field, SeekBar, NavItem, HomeCard } from "widgets.slint";
 import { CardTile, TrackItem } from "items.slint";
 
 export { Theme, TrackRow, CardItem }
@@ -246,36 +246,27 @@ export component AppWindow inherits Window {
         }
     }
 
-    if root.logged-in : VerticalLayout {
-        spacing: 0px;
-        padding: 0px;
+    if root.logged-in : Rectangle {
+        background: Theme.bg;
 
-        // Сайдбар + Область контента
         HorizontalLayout {
-            vertical-stretch: 1;
-            spacing: 0px;
+            padding-left: 8px;
+            padding-right: 8px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 8px;
 
             // Сайдбар слева
             Rectangle {
                 width: 220px;
-                background: Theme.surface-low;
-
-                // Разделитель справа
-                Rectangle {
-                    x: parent.width - 1px;
-                    y: 0;
-                    width: 1px;
-                    height: parent.height;
-                    background: Theme.outline;
-                    opacity: 0.3;
-                }
+                background: transparent;
 
                 VerticalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
-                    padding-top: 16px;
-                    padding-bottom: 12px;
-                    spacing: 8px;
+                    padding-left: 4px;
+                    padding-right: 4px;
+                    padding-top: 8px;
+                    padding-bottom: 4px;
+                    spacing: 6px;
 
                     // Логотип
                     HorizontalLayout {
@@ -369,9 +360,11 @@ export component AppWindow inherits Window {
 
                     // Профиль и кнопка выхода внизу
                     Rectangle {
-                        height: 48px;
-                        border-radius: Theme.radius-sm;
+                        height: 50px;
+                        border-radius: Theme.radius-full;
                         background: Theme.surface-hi;
+                        border-width: 1px;
+                        border-color: Theme.surface-highest;
                         HorizontalLayout {
                             padding-left: 10px;
                             padding-right: 8px;
@@ -380,9 +373,9 @@ export component AppWindow inherits Window {
                             VerticalLayout {
                                 alignment: center;
                                 Rectangle {
-                                    width: 30px;
-                                    height: 30px;
-                                    border-radius: 15px;
+                                    width: 32px;
+                                    height: 32px;
+                                    border-radius: 16px;
                                     clip: true;
                                     background: Theme.secondary-container;
 
@@ -436,14 +429,21 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // Правая часть (Контент)
-            VerticalLayout {
+            // Главный парящий лист контента (Sheet в стиле Swiftify)
+            sheet := Rectangle {
                 horizontal-stretch: 1;
-                padding-left: 24px;
-                padding-right: 24px;
-                padding-top: 14px;
-                padding-bottom: 8px;
-                spacing: 14px;
+                border-radius: Theme.radius-lg;
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.surface-highest;
+                clip: true;
+
+                VerticalLayout {
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    padding-top: 16px;
+                    padding-bottom: root.has-track ? 84px : 12px;
+                    spacing: 14px;
 
                 // Верхняя строка с поиском
                 HorizontalLayout {
@@ -912,45 +912,101 @@ export component AppWindow inherits Window {
                     }
                 }
             }
-        }
+            // Плавающий капсульный плеер (Floating Player Bar в стиле Swiftify)
+            if root.has-track : Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: parent.height - self.height - 12px;
+                width: min(parent.width - 32px, 860px);
+                height: 68px;
+                border-radius: Theme.radius-lg;
+                background: Theme.surface-hi;
+                border-width: 1px;
+                border-color: Theme.surface-highest;
 
-        // плеер
-        Rectangle {
-            height: 92px;
-            background: Theme.surface-low;
-            Rectangle {
-                x: 0;
-                y: 0;
-                width: parent.width;
-                height: 1px;
-                background: Theme.outline;
-                opacity: 0.4;
-            }
-            HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                spacing: 12px;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 14px;
 
-                // Левая колонка (информация о треке) — строго у левого края
-                Rectangle {
-                    horizontal-stretch: 1;
-                    min-width: 0px;
-                    preferred-width: 0px;
-
+                    // 1. Левая секция: транспортные кнопки со стильным Hero PlayButton
                     HorizontalLayout {
-                        x: 0;
-                        width: min(parent.width, 340px);
-                        height: parent.height;
+                        spacing: 4px;
+                        alignment: center;
+
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                width: 30px;
+                                height: 30px;
+                                icon: Icons.shuffle;
+                                active: root.shuffle;
+                                has-dot: true;
+                                enabled: root.has-track;
+                                clicked => { root.toggle-shuffle(); }
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                width: 32px;
+                                height: 32px;
+                                icon: Icons.prev;
+                                enabled: root.has-track;
+                                clicked => { root.prev(); }
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            PlayHeroButton {
+                                playing: root.playing;
+                                enabled: root.has-track && !root.buffering;
+                                clicked => { root.toggle(); }
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                width: 32px;
+                                height: 32px;
+                                icon: Icons.next;
+                                enabled: root.has-track;
+                                clicked => { root.next(); }
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            IconButton {
+                                width: 30px;
+                                height: 30px;
+                                icon: root.repeat-mode == 2 ? Icons.repeat-one : Icons.repeat;
+                                active: root.repeat-mode > 0;
+                                has-dot: true;
+                                enabled: root.has-track;
+                                clicked => { root.toggle-repeat(); }
+                            }
+                        }
+                    }
+
+                    // 2. Центральная секция: обложка + трек/артист + сикбар с таймингами
+                    HorizontalLayout {
+                        horizontal-stretch: 1;
+                        min-width: 0px;
                         spacing: 12px;
+                        alignment: center;
 
                         VerticalLayout {
                             alignment: center;
                             Rectangle {
-                                width: 58px;
-                                height: 58px;
-                                border-radius: Theme.radius-sm;
+                                width: 44px;
+                                height: 44px;
+                                border-radius: Theme.radius-xs;
                                 clip: true;
-                                background: Theme.surface-hi;
+                                background: Theme.surface-low;
+
                                 if root.has-cover : Image {
                                     width: parent.width;
                                     height: parent.height;
@@ -958,225 +1014,165 @@ export component AppWindow inherits Window {
                                     image-fit: cover;
                                 }
                                 if !root.has-cover : Icon {
-                                    width: 24px;
-                                    height: 24px;
+                                    width: 22px;
+                                    height: 22px;
                                     commands: Icons.note;
                                     fill: Theme.muted;
                                 }
                             }
                         }
+
                         VerticalLayout {
                             horizontal-stretch: 1;
                             min-width: 0px;
                             alignment: center;
                             spacing: 2px;
-                            Rectangle {
-                                height: 20px;
-                                now-album-ta := TouchArea {
-                                    enabled: root.has-track && root.now-has-album;
-                                    mouse-cursor: root.now-has-album ? pointer : default;
-                                    clicked => { root.open-now-album(); }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 18px;
+                                    now-album-ta := TouchArea {
+                                        enabled: root.has-track && root.now-has-album;
+                                        mouse-cursor: root.now-has-album ? pointer : default;
+                                        clicked => { root.open-now-album(); }
+                                    }
+                                    Label {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        text: root.now-title;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        color: now-album-ta.has-hover ? Theme.accent : Theme.text;
+                                        overflow: elide;
+                                    }
                                 }
-                                Label {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    text: root.has-track ? root.now-title : "Ничего не играет";
-                                    font-weight: 600;
-                                    color: now-album-ta.has-hover ? Theme.accent : Theme.text;
-                                    overflow: elide;
+
+                                if root.has-track || root.buffering : Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 18px;
+                                    now-artist-ta := TouchArea {
+                                        enabled: root.has-track && root.now-has-artist;
+                                        mouse-cursor: root.now-has-artist ? pointer : default;
+                                        clicked => { root.open-now-artist(); }
+                                    }
+                                    Label {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        text: root.buffering ? "Загрузка…" : root.now-artists;
+                                        font-size: 12px;
+                                        color: now-artist-ta.has-hover ? Theme.text : Theme.muted;
+                                        overflow: elide;
+                                    }
                                 }
                             }
-                            if root.has-track || root.buffering : Rectangle {
-                                height: 18px;
-                                now-artist-ta := TouchArea {
-                                    enabled: root.has-track && root.now-has-artist;
-                                    mouse-cursor: root.now-has-artist ? pointer : default;
-                                    clicked => { root.open-now-artist(); }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Label {
+                                        width: 36px;
+                                        text: root.position-text;
+                                        font-size: 11px;
+                                        color: Theme.muted;
+                                        horizontal-alignment: right;
+                                    }
                                 }
-                                Label {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    text: root.buffering ? "Загрузка…" : root.now-artists;
-                                    font-size: 13px;
-                                    color: now-artist-ta.has-hover ? Theme.text : Theme.muted;
-                                    overflow: elide;
+
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    alignment: center;
+                                    SeekBar {
+                                        value: root.progress;
+                                        enabled: root.has-track && !root.buffering;
+                                        changed(v) => { root.seek(v); }
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Label {
+                                        width: 36px;
+                                        text: root.duration-text;
+                                        font-size: 11px;
+                                        color: Theme.muted;
+                                        horizontal-alignment: left;
+                                    }
                                 }
                             }
                         }
+                    }
+
+                    // 3. Правая секция: лайк, дизлайк и регулятор громкости
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: end;
+
                         VerticalLayout {
                             alignment: center;
                             HorizontalLayout {
-                                spacing: 4px;
+                                spacing: 2px;
                                 IconButton {
-                                    width: 32px;
-                                    height: 32px;
+                                    width: 30px;
+                                    height: 30px;
                                     enabled: root.has-track;
                                     icon: root.now-liked ? Icons.heart-fill : Icons.heart-outline;
                                     active: root.now-liked;
                                     clicked => { root.toggle-now-like(); }
                                 }
                                 IconButton {
-                                    width: 32px;
-                                    height: 32px;
+                                    width: 30px;
+                                    height: 30px;
                                     enabled: root.has-track;
                                     icon: Icons.dislike;
                                     clicked => { root.dislike-now(); }
                                 }
                             }
                         }
-                    }
-                }
 
-                // Центральная колонка (кнопки воспроизведения и дорожка) — строго по центру окна
-                Rectangle {
-                    horizontal-stretch: 2;
-                    min-width: 0px;
-                    preferred-width: 0px;
-
-                    VerticalLayout {
-                        width: min(parent.width, 640px);
-                        x: (parent.width - self.width) / 2;
-                        height: parent.height;
-                        alignment: center;
-                        spacing: 6px;
-
-                        HorizontalLayout {
-                            alignment: center;
-                            spacing: 12px;
-
-                            VerticalLayout {
-                                alignment: center;
-                                IconButton {
-                                    width: 32px;
-                                    height: 32px;
-                                    icon: Icons.shuffle;
-                                    active: root.shuffle;
-                                    has-dot: true;
-                                    enabled: root.has-track;
-                                    clicked => { root.toggle-shuffle(); }
+                        Rectangle {
+                            width: 130px;
+                            TouchArea {
+                                scroll-event(e) => {
+                                    if (e.delta-y != 0px) {
+                                        root.volume = clamp(root.volume + (e.delta-y > 0px ? 0.05 : -0.05), 0.0, 1.0);
+                                        root.set-volume(root.volume);
+                                        return accept;
+                                    }
+                                    reject
                                 }
                             }
 
-                            VerticalLayout {
-                                alignment: center;
-                                IconButton {
-                                    icon: Icons.prev;
-                                    enabled: root.has-track;
-                                    clicked => { root.prev(); }
+                            HorizontalLayout {
+                                width: parent.width;
+                                height: parent.height;
+                                spacing: 6px;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    IconButton {
+                                        width: 26px;
+                                        height: 26px;
+                                        icon: root.volume == 0 ? Icons.volume-mute : Icons.volume;
+                                        clicked => { root.toggle-mute(); }
+                                    }
                                 }
-                            }
 
-                            IconButton {
-                                width: 44px;
-                                height: 44px;
-                                morphing: true;
-                                active: root.playing;
-                                enabled: root.has-track && !root.buffering;
-                                icon: root.playing ? Icons.pause : Icons.play;
-                                clicked => { root.toggle(); }
-                            }
-
-                            VerticalLayout {
-                                alignment: center;
-                                IconButton {
-                                    icon: Icons.next;
-                                    enabled: root.has-track;
-                                    clicked => { root.next(); }
-                                }
-                            }
-
-                            VerticalLayout {
-                                alignment: center;
-                                IconButton {
-                                    width: 32px;
-                                    height: 32px;
-                                    icon: root.repeat-mode == 2 ? Icons.repeat-one : Icons.repeat;
-                                    active: root.repeat-mode > 0;
-                                    has-dot: true;
-                                    enabled: root.has-track;
-                                    clicked => { root.toggle-repeat(); }
-                                }
-                            }
-                        }
-
-                        HorizontalLayout {
-                            spacing: 10px;
-                            VerticalLayout {
-                                alignment: center;
-                                Label {
-                                    width: 40px;
-                                    text: root.position-text;
-                                    font-size: 12px;
-                                    color: Theme.muted;
-                                    horizontal-alignment: right;
-                                }
-                            }
-                            VerticalLayout {
-                                horizontal-stretch: 1;
-                                alignment: center;
-                                SeekBar {
-                                    value: root.progress;
-                                    enabled: root.has-track && !root.buffering;
-                                    changed(v) => { root.seek(v); }
-                                }
-                            }
-                            VerticalLayout {
-                                alignment: center;
-                                Label {
-                                    width: 40px;
-                                    text: root.duration-text;
-                                    font-size: 12px;
-                                    color: Theme.muted;
-                                    horizontal-alignment: left;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Правая колонка (громкость) — строго у правого края
-                Rectangle {
-                    horizontal-stretch: 1;
-                    min-width: 0px;
-                    preferred-width: 0px;
-
-                    TouchArea {
-                        scroll-event(e) => {
-                            if (e.delta-y != 0px) {
-                                root.volume = clamp(root.volume + (e.delta-y > 0px ? 0.05 : -0.05), 0.0, 1.0);
-                                root.set-volume(root.volume);
-                                return accept;
-                            }
-                            reject
-                        }
-                    }
-
-                    HorizontalLayout {
-                        x: parent.width - self.width;
-                        width: 160px;
-                        height: parent.height;
-                        spacing: 8px;
-                        alignment: end;
-
-                        VerticalLayout {
-                            alignment: center;
-                            IconButton {
-                                width: 28px;
-                                height: 28px;
-                                icon: root.volume == 0 ? Icons.volume-mute : Icons.volume;
-                                clicked => { root.toggle-mute(); }
-                            }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            SeekBar {
-                                width: 120px;
-                                live: true;
-                                scroll-step: 0.05;
-                                value: root.volume;
-                                changed(v) => {
-                                    root.volume = v;
-                                    root.set-volume(v);
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    alignment: center;
+                                    SeekBar {
+                                        live: true;
+                                        scroll-step: 0.05;
+                                        value: root.volume;
+                                        changed(v) => {
+                                            root.volume = v;
+                                            root.set-volume(v);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1185,6 +1181,7 @@ export component AppWindow inherits Window {
             }
         }
     }
+}
 
     if root.status != "" : Rectangle {
         x: (parent.width - self.width) / 2;
