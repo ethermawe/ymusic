@@ -209,7 +209,8 @@ fn run(rx: mpsc::Receiver<Cmd>) {
                     None
                 };
             }
-            Err(_) => {
+            Err(e) => {
+                eprintln!("Discord RPC: не удалось обновить активность: {e}");
                 conn = None;
                 last_anchor_start_secs = None;
             }
@@ -234,6 +235,7 @@ fn build_activity(track: &TrackInfo, status: Status, start_secs: f64) -> Value {
 
     let mut activity = json!({
         "type": 2,
+        "status_display_type": 2,
         "details": details,
         "state": state,
     });
@@ -313,10 +315,15 @@ fn connect(client_id: &str) -> Option<UnixStream> {
             "v": 1,
             "client_id": client_id,
         });
-        if write_frame(&mut stream, OP_HANDSHAKE, &handshake).is_ok()
-            && read_frame(&mut stream).is_ok()
-        {
-            return Some(stream);
+        if write_frame(&mut stream, OP_HANDSHAKE, &handshake).is_ok() {
+            match read_frame(&mut stream).and_then(|(opcode, bytes)| {
+                let frame: Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+                if opcode == OP_FRAME && frame["evt"] == "READY" { Ok(()) }
+                else { Err(io::Error::other("Discord не подтвердил READY")) }
+            }) {
+                Ok(()) => return Some(stream),
+                Err(e) => eprintln!("Discord RPC: ошибка подключения: {e}"),
+            }
         }
     }
     None
@@ -362,8 +369,21 @@ fn send_activity(
         "nonce": nonce.to_string(),
     });
     write_frame(stream, OP_FRAME, &payload)?;
-    let _ = read_frame(stream)?;
-    Ok(())
+    let expected = nonce.to_string();
+    // Dispatches may arrive before the SET_ACTIVITY response. Only the
+    // matching nonce confirms this update, not an unrelated event.
+    for _ in 0..16 {
+        let (opcode, bytes) = read_frame(stream)?;
+        if opcode != OP_FRAME { return Err(io::Error::other("неожиданный opcode Discord")); }
+        let response: Value = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+        if response["nonce"].as_str() == Some(expected.as_str()) {
+            if response["cmd"] != "SET_ACTIVITY" {
+                return Err(io::Error::other("неожиданное подтверждение Discord"));
+            }
+            return Ok(());
+        }
+    }
+    Err(io::Error::other("Discord не подтвердил SET_ACTIVITY"))
 }
 
 fn write_frame(stream: &mut UnixStream, opcode: u32, payload: &Value) -> io::Result<()> {
@@ -409,7 +429,8 @@ fn read_frame(stream: &mut UnixStream) -> io::Result<(u32, Vec<u8>)> {
                 if let Ok(val) = serde_json::from_slice::<Value>(&buf)
                     && val.get("evt").and_then(Value::as_str) == Some("ERROR")
                 {
-                    return Err(io::Error::other(format!("discord rpc error: {val}")));
+                    return Err(io::Error::other(format!("Discord отклонил запрос (код {}): {}",
+                        val["data"]["code"], val["data"]["message"].as_str().unwrap_or("неизвестная ошибка"))));
                 }
                 return Ok((opcode, buf));
             }
@@ -423,4 +444,54 @@ fn now_secs() -> f64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
         .unwrap_or(0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track() -> TrackInfo {
+        TrackInfo { id: "123".into(), album_id: Some("456".into()), title: "Название трека".into(),
+            artists: "Исполнитель".into(), album_title: "Альбом".into(), duration_secs: 180.0,
+            cover_url: Some("https://example.org/cover.jpg".into()) }
+    }
+
+    #[test]
+    fn listening_status_uses_track_title() {
+        let activity = build_activity(&track(), Status::Playing, 1000.0);
+        assert_eq!(activity["type"], 2);
+        assert_eq!(activity["status_display_type"], 2);
+        assert_eq!(activity["details"], "Название трека");
+        assert_eq!(activity["timestamps"]["end"], 1180000u64);
+        let paused = build_activity(&track(), Status::Paused, 1000.0);
+        assert!(paused.get("timestamps").is_none());
+        assert!(paused["state"].as_str().unwrap().contains("На паузе"));
+    }
+
+    #[test]
+    fn waits_for_matching_activity_acknowledgement() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let worker = thread::spawn(move || {
+            let (_, bytes) = read_frame(&mut server).unwrap();
+            let request: Value = serde_json::from_slice(&bytes).unwrap();
+            write_frame(&mut server, OP_FRAME, &json!({"evt": "ACTIVITY_JOIN", "data": {}})).unwrap();
+            write_frame(&mut server, OP_FRAME, &json!({"cmd": "SET_ACTIVITY", "nonce": request["nonce"], "data": {}})).unwrap();
+        });
+        send_activity(&mut client, Some(build_activity(&track(), Status::Playing, 1000.0)), &mut 0).unwrap();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn reports_discord_rejection() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let worker = thread::spawn(move || {
+            read_frame(&mut server).unwrap();
+            write_frame(&mut server, OP_FRAME, &json!({"evt": "ERROR", "data": {"code": 4000, "message": "Invalid activity"}})).unwrap();
+        });
+        let error = send_activity(&mut client, None, &mut 0).unwrap_err();
+        assert!(error.to_string().contains("Invalid activity"));
+        worker.join().unwrap();
+    }
 }

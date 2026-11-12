@@ -261,12 +261,22 @@ Item {
                 anchors.margins: 16
                 spacing: 12
 
-                Text {
-                    text: "ОЧЕРЕДЬ ВОСПРОИЗВЕДЕНИЯ"
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text {
+                    text: "ОЧЕРЕДЬ · " + backend.queue.count
                     color: Appearance.colors.onSurfaceVariant
                     font.pixelSize: Appearance.fontSize.smallest
                     font.weight: Font.Bold
                     font.letterSpacing: 1.2
+                    Layout.fillWidth: true
+                    }
+                    StyledButton { text: "Очистить"; onClicked: backend.feature({action: "queue", operation: "clear"}) }
+                    IconButton {
+                        symbol: "play_arrow"
+                        tooltip: "Показать текущий трек"
+                        onClicked: queueList.positionViewAtIndex(backend.queue.currentIndex, ListView.Center)
+                    }
                 }
 
                 ListView {

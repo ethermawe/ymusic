@@ -42,11 +42,12 @@ Item {
         loops: Animation.Infinite
         running: root.visible && !Appearance.reduceMotion
         onRunningChanged: if (running) paused = !root.playing
-        Connections {
-            target: root
-            function onPlayingChanged() {
-                if (spinAnim.running) spinAnim.paused = !root.playing;
-            }
+    }
+
+    Connections {
+        target: root
+        function onPlayingChanged() {
+            if (spinAnim.running) spinAnim.paused = !root.playing;
         }
     }
 

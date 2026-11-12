@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,7 @@ pub const EVENT_VIEW_HEADER: i32 = 8;
 pub const EVENT_STATUS_MSG: i32 = 9;
 pub const EVENT_QUEUE_LOADED: i32 = 10;
 pub const EVENT_PLAYLIST_PICKER: i32 = 11;
+pub const EVENT_FEATURE: i32 = 12;
 
 pub trait EventSink: Send + Sync {
     fn on_event(&self, event_type: i32, json_data: &str);
@@ -194,6 +196,10 @@ pub struct WaveState {
 
 #[derive(Default)]
 pub struct State {
+    pub search_query: String,
+    pub search_filter: String,
+    pub collection_downloadable: bool,
+    pub history_generation: Option<u64>,
     pub view_cover_uri: Option<String>,
     pub api: Option<Api>,
     pub uid: u64,
@@ -226,6 +232,10 @@ pub struct State {
 }
 
 pub struct YMusicCore {
+    pub batch_running: AtomicBool,
+    pub batch_cancel: AtomicBool,
+    pub batch_cancel_tx: tokio::sync::watch::Sender<bool>,
+    pub playlist_creating: AtomicBool,
     pub rt_handle: Handle,
     pub runtime: Option<tokio::runtime::Runtime>,
     pub http: reqwest::Client,
@@ -374,6 +384,29 @@ fn enqueue_in_state(st: &mut State, track: Track, next: bool) {
     }
 }
 
+fn edit_queue_state(st: &mut State, op: &str, index: usize, id: Option<&str>) -> bool {
+    if op == "clear" {
+        let current = current_track(st).cloned();
+        st.queue = current.into_iter().collect();
+        st.current = (!st.queue.is_empty()).then_some(0);
+    } else if index < st.queue.len() && id == Some(st.queue[index].id.as_str()) {
+        if op == "remove" {
+            if st.current == Some(index) { return false; }
+            st.queue.remove(index);
+            if let Some(cur) = st.current { if index < cur { st.current = Some(cur - 1); } }
+        } else if op == "up" || op == "down" {
+            let target = if op == "up" { index.checked_sub(1) } else { index.checked_add(1).filter(|&i| i < st.queue.len()) };
+            let Some(target) = target else { return false };
+            st.queue.swap(index, target);
+            if st.current == Some(index) { st.current = Some(target); }
+            else if st.current == Some(target) { st.current = Some(index); }
+        } else { return false; }
+    } else { return false; }
+    st.wave = None;
+    st.unshuffled_queue = None;
+    true
+}
+
 #[cfg(test)]
 mod queue_tests {
     use super::*;
@@ -409,9 +442,146 @@ mod queue_tests {
         assert!(!st.audio_started);
         assert_eq!(st.queue[0].id, "first");
     }
+
+    #[test]
+    fn edits_preserve_playing_track_and_reject_stale_rows() {
+        let mut st = State { queue: vec![track("a"), track("b"), track("c")], current: Some(1), ..State::default() };
+        assert!(!edit_queue_state(&mut st, "remove", 1, Some("b")));
+        assert!(!edit_queue_state(&mut st, "remove", 0, Some("c")));
+        assert!(edit_queue_state(&mut st, "up", 1, Some("b")));
+        assert_eq!(current_track(&st).unwrap().id, "b");
+        assert_eq!(st.current, Some(0));
+        assert!(edit_queue_state(&mut st, "remove", 1, Some("a")));
+        assert!(edit_queue_state(&mut st, "clear", 0, None));
+        assert_eq!(st.queue.len(), 1);
+        assert_eq!(current_track(&st).unwrap().id, "b");
+    }
 }
 
 impl YMusicCore {
+    pub fn send_feature(&self, kind: &str, mut data: serde_json::Value) {
+        data["type"] = kind.into();
+        self.send_event(EVENT_FEATURE, &data);
+    }
+
+    fn send_history_tracks(&self, tracks: Vec<Track>) {
+        let st = self.state.lock().unwrap();
+        let payload: Vec<_> = tracks.iter().map(|t| track_payload(t, &st.liked_ids)).collect();
+        drop(st);
+        self.send_feature("history", serde_json::json!({"tracks": payload}));
+    }
+
+    pub fn feature_command(self: Arc<Self>, cmd: serde_json::Value) {
+        match cmd["action"].as_str().unwrap_or("") {
+            "history" => self.send_history_tracks(crate::history::load()),
+            "clear_history" => {
+                if crate::history::clear().is_ok() { self.send_history_tracks(Vec::new()); }
+                else { self.error("Не удалось очистить историю"); }
+            }
+            "play_history" => {
+                let tracks = crate::history::load();
+                let Some(id) = cmd["id"].as_str() else { return };
+                let Some(index) = tracks.iter().position(|t| t.id == id) else { return };
+                {
+                    let mut st = self.state.lock().unwrap();
+                    st.queue = tracks;
+                    st.wave = None;
+                    st.unshuffled_queue = None;
+                }
+                self.play_index(index, true);
+            }
+            "search" => self.search_with_filter(cmd["query"].as_str().unwrap_or("").trim().into(), cmd["filter"].as_str().unwrap_or("all").into()),
+            "create_playlist" => {
+                let Some(api) = self.api() else { self.error("Для создания плейлиста нужен вход"); return };
+                if self.playlist_creating.swap(true, Ordering::SeqCst) { return; }
+                let uid = self.state.lock().unwrap().uid;
+                let title = cmd["title"].as_str().unwrap_or("").to_string();
+                let private = cmd["private"].as_bool().unwrap_or(true);
+                let this = self.clone();
+                self.rt_handle.spawn(async move {
+                    let result = api.create_playlist(uid, &title, private).await;
+                    this.playlist_creating.store(false, Ordering::SeqCst);
+                    if this.state.lock().unwrap().uid != uid { return; }
+                    match result {
+                        Ok(p) => {
+                            this.send_feature("create_playlist", serde_json::json!({"ok": true, "title": p.title}));
+                            let page = this.state.lock().unwrap().page;
+                            if page == 3 { this.clone().load_playlists(); }
+                            else if page == 0 { this.clone().load_home(); }
+                        }
+                        Err(e) => this.send_feature("create_playlist", serde_json::json!({"ok": false, "message": e.to_string()})),
+                    }
+                });
+            }
+            "download_collection" => self.download_collection(),
+            "cancel_download" => {
+                self.batch_cancel.store(true, Ordering::SeqCst);
+                self.batch_cancel_tx.send_replace(true);
+            }
+            "queue" => self.edit_queue(&cmd),
+            _ => (),
+        }
+    }
+
+    fn edit_queue(&self, cmd: &serde_json::Value) {
+        let op = cmd["operation"].as_str().unwrap_or("");
+        let index = cmd["index"].as_u64().unwrap_or(u64::MAX) as usize;
+        let mut st = self.state.lock().unwrap();
+        if !edit_queue_state(&mut st, op, index, cmd["id"].as_str()) { return; }
+        drop(st);
+        self.send_queue();
+        self.refresh_rows();
+        self.persist_session();
+    }
+
+    pub fn download_collection(self: Arc<Self>) {
+        let Some(api) = self.api() else { self.error("Для загрузки нужен вход"); return };
+        let (tracks, title, uid) = {
+            let st = self.state.lock().unwrap();
+            if !st.collection_downloadable || st.list.is_empty() { return; }
+            (st.list.clone(), "Загрузка коллекции".to_string(), st.uid)
+        };
+        if self.batch_running.swap(true, Ordering::SeqCst) { self.error("Уже идёт загрузка коллекции"); return; }
+        self.batch_cancel.store(false, Ordering::SeqCst);
+        self.batch_cancel_tx.send_replace(false);
+        let mut cancel = self.batch_cancel_tx.subscribe();
+        let this = self.clone();
+        self.rt_handle.spawn(async move {
+            let total = tracks.len();
+            let mut done = 0;
+            let mut failed = 0;
+            for track in tracks {
+                if this.batch_cancel.load(Ordering::SeqCst) || this.state.lock().unwrap().uid != uid { break; }
+                this.send_feature("batch", serde_json::json!({"running": true, "done": done, "total": total, "failed": failed, "title": track.title}));
+                let download = async {
+                    if !cache::is_offline(&track.id) {
+                        anyhow::ensure!(track.available, "трек недоступен");
+                        let url = api.track_direct_url(&track.id).await?;
+                        let path = cache::offline_track_path(&track.id).ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?;
+                        cache::download_to_file(api.http(), &url, &path).await?;
+                    }
+                    let metadata = track.clone();
+                    tokio::task::spawn_blocking(move || cache::save_offline_metadata(&metadata)).await??;
+                    Ok::<(), anyhow::Error>(())
+                };
+                let result = tokio::select! {
+                    biased;
+                    _ = cancel.changed() => break,
+                    result = download => result,
+                };
+                if result.is_err() { failed += 1; }
+                done += 1;
+            }
+            this.batch_running.store(false, Ordering::SeqCst);
+            let cancelled = done < total;
+            this.send_feature("batch", serde_json::json!({"running": false, "done": done, "total": total, "failed": failed, "cancelled": cancelled, "title": title}));
+            this.refresh_rows();
+            let showing_downloads = this.state.lock().unwrap().page == 7;
+            if showing_downloads { this.clone().load_downloads(); }
+            this.error(format!("{}: {done}/{total}, ошибок: {failed}", if cancelled { "Загрузка остановлена" } else { "Загрузка завершена" }));
+        });
+    }
+
     pub fn new(sink: Arc<dyn EventSink>) -> Arc<Self> {
         if std::env::var("MIMALLOC_PURGE_DELAY").is_err() {
             unsafe { std::env::set_var("MIMALLOC_PURGE_DELAY", "0"); }
@@ -428,6 +598,10 @@ impl YMusicCore {
             let me_audio = me.clone();
             let me_mpris = me.clone();
             YMusicCore {
+                batch_running: AtomicBool::new(false),
+                batch_cancel: AtomicBool::new(false),
+                batch_cancel_tx: tokio::sync::watch::channel(false).0,
+                playlist_creating: AtomicBool::new(false),
                 rt_handle: rt_handle.clone(),
                 runtime: Some(runtime),
                 http: api::http_client(),
@@ -461,6 +635,11 @@ impl YMusicCore {
         }
 
         core.send_playback_state(false);
+
+        // Downloads remain usable while the network login is being checked.
+        if cache::offline_tracks().is_ok_and(|(tracks, _)| !tracks.is_empty()) {
+            core.clone().load_downloads();
+        }
 
         if let Some(token) = config::load_token() {
             core.clone().login(token);
@@ -636,6 +815,8 @@ impl YMusicCore {
     }
 
     pub fn logout(&self) {
+        self.batch_cancel.store(true, Ordering::SeqCst);
+        self.batch_cancel_tx.send_replace(true);
         config::clear_token();
         self.clear_saved_session();
         {
@@ -699,6 +880,7 @@ impl YMusicCore {
             let mut st = self.state.lock().unwrap();
             st.view_id += 1;
             st.page = page;
+            st.collection_downloadable = key.is_some_and(|k| k.starts_with("album:") || k.starts_with("playlist:"));
             let view = st.view_id;
 
             let cached = key.and_then(|k| {
@@ -760,6 +942,7 @@ impl YMusicCore {
         self.send_event(EVENT_CARDS_LOADED, &CardsPayload { cards: cards_payload });
         self.send_event(EVENT_TRACKS_LOADED, &TracksPayload { tracks: tracks_payload, current_index: current_idx });
 
+        self.send_feature("view", serde_json::json!({"downloadable": self.state.lock().unwrap().collection_downloadable}));
         view
     }
 
@@ -1055,6 +1238,8 @@ impl YMusicCore {
                 let w_title = w.title.clone();
                 st.view_id += 1;
                 st.page = 1;
+                st.collection_downloadable = false;
+                st.view_cover_uri = None;
                 let view = st.view_id;
                 st.cards.clear();
                 st.viewed_artist_id = None;
@@ -1072,6 +1257,7 @@ impl YMusicCore {
         };
 
         if let Some((_view, w_title, tracks_p, cur)) = existing {
+            self.send_feature("view", serde_json::json!({"downloadable": false}));
             self.send_event(EVENT_VIEW_HEADER, &ViewHeaderPayload {
                 cover_url: self.view_cover_url(),
                 page: 1,
@@ -1239,26 +1425,37 @@ impl YMusicCore {
     }
 
     pub fn search(self: Arc<Self>, query: String) {
+        self.search_with_filter(query, "all".into());
+    }
+
+    pub fn search_with_filter(self: Arc<Self>, query: String, filter: String) {
         if query.is_empty() {
             return;
         }
+        if !["all", "track", "album", "artist", "playlist"].contains(&filter.as_str()) { return; }
         let Some(api) = self.api() else { return };
-        let key = format!("search:{}", query.to_lowercase());
+        {
+            let mut st = self.state.lock().unwrap();
+            st.search_query = query.clone();
+            st.search_filter = filter.clone();
+        }
+        self.send_feature("search", serde_json::json!({"query": query, "filter": filter}));
+        let key = format!("search:{filter}:{}", query.to_lowercase());
         let title = format!("Поиск: {query}");
         let view = self.begin_cached_view(
             Some(&key),
-            6,
+            8,
             title.clone(),
             "Артисты, альбомы, плейлисты и треки".into(),
         );
         let this = self.clone();
         self.rt_handle.spawn(async move {
-            match api.search_all(&query).await {
+            match api.search_filtered(&query, &filter).await {
                 Ok(res) => {
                     let mut cards = Vec::new();
-                    cards.extend(res.artists.into_iter().take(4).map(CardTarget::Artist));
-                    cards.extend(res.albums.into_iter().take(4).map(CardTarget::Album));
-                    cards.extend(res.playlists.into_iter().take(3).map(playlist_target));
+                    cards.extend(res.artists.into_iter().map(CardTarget::Artist));
+                    cards.extend(res.albums.into_iter().map(CardTarget::Album));
+                    cards.extend(res.playlists.into_iter().map(playlist_target));
                     this.apply_cached_view(
                         view,
                         Some(&key),
@@ -1651,6 +1848,7 @@ impl YMusicCore {
             st.duration_secs = track.duration_ms as f64 / 1000.0;
             st.position_secs = 0.0;
             st.audio_started = true;
+            st.history_generation = None;
             st.resume_at = start_at;
             let liked = st.liked_ids.contains(&track.id);
             (
@@ -1883,6 +2081,22 @@ impl YMusicCore {
                 self.set_playing(true, false);
             }
             Event::Position { generation, secs, paused } if generation == current => {
+                let listened = {
+                    let mut st = self.state.lock().unwrap();
+                    if !paused && secs >= 5.0 && st.history_generation != Some(generation) {
+                        st.history_generation = Some(generation);
+                        current_track(&st).cloned()
+                    } else { None }
+                };
+                if let Some(track) = listened {
+                    let this = self.clone();
+                    self.rt_handle.spawn(async move {
+                        match tokio::task::spawn_blocking(move || crate::history::record(track)).await {
+                            Ok(Ok(tracks)) => this.send_history_tracks(tracks),
+                            _ => this.error("Не удалось сохранить историю прослушивания"),
+                        }
+                    });
+                }
                 let (duration, should_save, ignore_pos, state_changed) = {
                     let mut st = self.state.lock().unwrap();
                     let ignore_pos = if let Some(seek_time) = st.last_seek_time {

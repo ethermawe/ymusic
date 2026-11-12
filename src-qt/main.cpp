@@ -12,6 +12,11 @@
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <QDebug>
+#include <QLocalServer>
+#include <QLocalSocket>
+#include <QLockFile>
+#include <QDir>
+#include <QFileInfo>
 #include "YMusicBackend.h"
 #include "TrackModel.h"
 #include "CardModel.h"
@@ -69,6 +74,32 @@ int main(int argc, char *argv[]) {
     app.setOrganizationName("finrixx");
     app.setApplicationDisplayName("Yandex Music");
 
+    // A lock distinguishes a stale socket from a live instance. Never unlink
+    // another instance's socket just because it has not started listening yet.
+    QString runtimeDir = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (runtimeDir.isEmpty()) runtimeDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    QDir().mkpath(runtimeDir);
+    const QString socketName = runtimeDir + "/ymusic-qml-instance";
+    QLockFile instanceLock(socketName + ".lock");
+    if (!instanceLock.tryLock(0)) {
+        QLocalSocket socket;
+        socket.connectToServer(socketName);
+        if (!socket.waitForConnected(1500)) {
+            qWarning() << "YMusic is already running, but could not be activated.";
+            return 1;
+        }
+        socket.write("activate\n");
+        socket.waitForBytesWritten(1000);
+        return 0;
+    }
+    QLocalServer instanceServer;
+    instanceServer.setSocketOptions(QLocalServer::UserAccessOption);
+    QLocalServer::removeServer(socketName);
+    if (!instanceServer.listen(socketName)) {
+        qCritical() << "Could not create the single-instance socket:" << instanceServer.errorString();
+        return 1;
+    }
+
     AppSettings settings;
     if (!graphicsOverride) {
         if (settings.graphicsBackend() == "vulkan")
@@ -102,6 +133,19 @@ int main(int argc, char *argv[]) {
     if (engine.rootObjects().isEmpty()) {
         return -1;
     }
+
+    QObject::connect(&instanceServer, &QLocalServer::newConnection, &app, [&]() {
+        while (auto *socket = instanceServer.nextPendingConnection()) {
+            socket->disconnectFromServer();
+            socket->deleteLater();
+            if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first())) {
+                if (window->visibility() == QWindow::Minimized) window->showNormal();
+                else window->show();
+                window->raise();
+                window->requestActivate();
+            }
+        }
+    });
 
     return app.exec();
 }

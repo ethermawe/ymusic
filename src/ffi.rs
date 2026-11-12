@@ -94,6 +94,14 @@ pub unsafe extern "C" fn ymusic_core_load_downloads(handle: *mut CoreHandle) {
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_core_feature(handle: *mut CoreHandle, json: *const c_char) {
+    if let Some(h) = unsafe { handle.as_ref() } && !json.is_null()
+        && let Ok(json) = unsafe { CStr::from_ptr(json) }.to_str()
+        && let Ok(cmd) = serde_json::from_str(json)
+    { h.core.clone().feature_command(cmd); }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_playlist_choices(handle: *mut CoreHandle, id: *const c_char) {
     if let Some(h) = unsafe { handle.as_ref() } && !id.is_null()
         && let Ok(id) = unsafe { CStr::from_ptr(id) }.to_str()

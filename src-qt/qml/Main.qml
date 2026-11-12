@@ -15,6 +15,19 @@ ApplicationWindow {
     color: Appearance.colors.surfaceContainerLowest
 
     property bool immersiveOpen: false
+    CreatePlaylistDialog { id: createPlaylist; parent: Overlay.overlay }
+    Shortcut { sequence: "Ctrl+N"; enabled: backend.loggedIn; onActivated: createPlaylist.open() }
+    Shortcut { sequence: "Ctrl+Right"; onActivated: backend.next() }
+    Shortcut { sequence: "Ctrl+Left"; onActivated: backend.prev() }
+    Shortcut { sequence: "Ctrl+Space"; onActivated: backend.toggle() }
+    Shortcut { sequence: "Ctrl+,"; onActivated: settingsDialog.open() }
+    SearchView {
+        parent: sheet
+        anchors.fill: parent
+        anchors.margins: 24
+        visible: backend.loggedIn && backend.page === 8
+        z: 2
+    }
     SettingsDialog {
         id: settingsDialog
         parent: Overlay.overlay
@@ -203,6 +216,14 @@ ApplicationWindow {
                             font.weight: Font.Bold
                         }
 
+                        StyledButton {
+                            visible: backend.page === 3
+                            text: "+ Создать плейлист"
+                            palette.button: Appearance.colors.primaryContainer
+                            palette.buttonText: Appearance.colors.onPrimaryContainer
+                            onClicked: createPlaylist.open()
+                        }
+
                         Text {
                             visible: backend.listSubtitle.length > 0
                             text: backend.listSubtitle
@@ -382,8 +403,30 @@ ApplicationWindow {
             anchors.bottom: sheet.bottom
             anchors.bottomMargin: 16
             width: Math.min(840, sheet.width - 40)
-            visible: backend.loggedIn || backend.page === 7
+            visible: backend.loggedIn || backend.page === 7 || backend.hasTrack
             onImmersiveRequested: window.immersiveOpen = true
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: sheet.horizontalCenter
+            anchors.bottom: playerBar.top
+            anchors.bottomMargin: 12
+            width: Math.min(540, sheet.width - 40)
+            height: 70
+            visible: backend.batch.running === true
+            color: Appearance.colors.surfaceContainerHigh
+            radius: 16
+            z: 50
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    StyledText { Layout.fillWidth: true; text: backend.batch.title || "Загрузка"; elide: Text.ElideRight }
+                    StyledText { text: (backend.batch.done || 0) + " / " + (backend.batch.total || 0) + " · ошибок: " + (backend.batch.failed || 0); font.pixelSize: 12 }
+                }
+                StyledButton { text: "Отменить"; onClicked: backend.feature({action: "cancel_download"}) }
+            }
         }
 
         // Fullscreen Immersive Player Overlay

@@ -156,6 +156,13 @@ Dialog {
                 color: Appearance.colors.onSurfaceVariant
             }
             IconButton {
+                symbol: "library_music"
+                tooltip: "Создать плейлист"
+                size: 30
+                enabled: !root.loading && !root.submitting
+                onClicked: newPlaylist.open()
+            }
+            IconButton {
                 symbol: "repeat"
                 size: 30
                 tooltip: "Обновить список"
@@ -317,5 +324,9 @@ Dialog {
         function onAuthChanged() {
             if (!backend.loggedIn) { root.submitting = false; root.loading = false; root.close(); }
         }
+        function onFeatureResult(result) {
+            if (result.type === "create_playlist" && result.ok && root.visible) root.reload();
+        }
     }
+    CreatePlaylistDialog { id: newPlaylist; parent: Overlay.overlay }
 }

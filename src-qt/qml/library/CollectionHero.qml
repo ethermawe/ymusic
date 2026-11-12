@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import ymusic.ui
 
@@ -136,6 +137,13 @@ Item {
                 }
 
                 // Start Artist Wave button (if artist)
+                StyledButton {
+                    visible: backend.collectionDownloadable
+                    enabled: !backend.listLoading && !backend.batch.running
+                    text: "Скачать всё"
+                    onClicked: backend.feature({action: "download_collection"})
+                }
+
                 Rectangle {
                     visible: root.isArtist && backend.canStartArtistWave
                     height: 44

@@ -335,12 +335,17 @@ impl Api {
     }
 
     pub async fn search_all(&self, text: &str) -> Result<SearchResults> {
+        self.search_filtered(text, "all").await
+    }
+
+    pub async fn search_filtered(&self, text: &str, filter: &str) -> Result<SearchResults> {
+        anyhow::ensure!(["all", "track", "album", "artist", "playlist"].contains(&filter), "неизвестный фильтр поиска");
         let r = self
             .get(
                 "/search",
                 &[
                     ("text", text),
-                    ("type", "all"),
+                    ("type", filter),
                     ("page", "0"),
                     ("nocorrect", "false"),
                 ],
@@ -422,6 +427,14 @@ impl Api {
         let result = self.get(&format!("/users/{uid}/playlists/list"), &[]).await?;
         let items = result.as_array().ok_or_else(|| anyhow!("некорректный список плейлистов"))?;
         Ok(items.iter().filter_map(parse_playlist).filter(|p| p.uid == uid).collect())
+    }
+
+    pub async fn create_playlist(&self, uid: u64, title: &str, private: bool) -> Result<PlaylistCard> {
+        let title = title.trim();
+        anyhow::ensure!(!title.is_empty() && title.chars().count() <= 100, "Название должно содержать от 1 до 100 символов");
+        let result = self.post_form(&format!("/users/{uid}/playlists/create"),
+            &[("title", title), ("visibility", if private { "private" } else { "public" })]).await?;
+        parse_playlist(&result).ok_or_else(|| anyhow!("Сервер не вернул созданный плейлист"))
     }
 
     pub async fn insert_playlist_track(&self, uid: u64, kind: u64, track: &Track) -> Result<()> {

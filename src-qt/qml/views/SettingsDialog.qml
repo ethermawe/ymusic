@@ -258,7 +258,7 @@ Popup {
                             Layout.margins: 12
                             spacing: 12
                             StyledText { text: "Графический API"; font.weight: Font.Medium }
-                            ComboBox {
+                            StyledComboBox {
                                 Layout.fillWidth: true
                                 model: ["Автоматически (Qt)", "Vulkan", "OpenGL"]
                                 currentIndex: appSettings.graphicsBackend === "vulkan" ? 1 : (appSettings.graphicsBackend === "opengl" ? 2 : 0)

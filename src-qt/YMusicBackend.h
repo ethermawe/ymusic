@@ -66,6 +66,11 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(TrackModel* tracks READ tracks CONSTANT)
     Q_PROPERTY(TrackModel* queue READ queue CONSTANT)
     Q_PROPERTY(CardModel* cards READ cards CONSTANT)
+    Q_PROPERTY(TrackModel* history READ history CONSTANT)
+    Q_PROPERTY(QString searchQuery READ searchQuery NOTIFY featuresChanged)
+    Q_PROPERTY(QString searchFilter READ searchFilter NOTIFY featuresChanged)
+    Q_PROPERTY(bool collectionDownloadable READ collectionDownloadable NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantMap batch READ batch NOTIFY featuresChanged)
 
 public:
     explicit YMusicBackend(QObject *parent = nullptr);
@@ -119,6 +124,12 @@ public:
     TrackModel* tracks() { return &m_trackModel; }
     TrackModel* queue() { return &m_queueModel; }
     CardModel* cards() { return &m_cardModel; }
+    TrackModel* history() { return &m_historyModel; }
+    QString searchQuery() const { return m_searchQuery; }
+    QString searchFilter() const { return m_searchFilter; }
+    bool collectionDownloadable() const { return m_collectionDownloadable; }
+    QVariantMap batch() const { return m_batch; }
+    Q_INVOKABLE void feature(const QVariantMap &command);
 
     // Q_INVOKABLE Actions
     Q_INVOKABLE void loginDevice();
@@ -170,6 +181,8 @@ public:
     Q_INVOKABLE void clearStatus();
 
 signals:
+    void featuresChanged();
+    void featureResult(const QVariantMap &result);
     void playlistPickerResult(const QString &id, const QString &stage, const QVariantList &playlists, const QString &message);
     void trackMenuRequested(const QString &id, const QString &title, bool available, qreal x, qreal y);
     void authChanged();
@@ -188,6 +201,11 @@ private:
     TrackModel m_trackModel;
     TrackModel m_queueModel;
     CardModel m_cardModel;
+    TrackModel m_historyModel;
+    QString m_searchQuery;
+    QString m_searchFilter = "all";
+    bool m_collectionDownloadable = false;
+    QVariantMap m_batch;
 
     bool m_loggedIn = false;
     bool m_authReady = false;

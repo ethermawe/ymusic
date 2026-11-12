@@ -243,6 +243,46 @@ Flickable {
             }
         }
 
+        ColumnLayout {
+            Layout.fillWidth: true
+            visible: backend.history.count > 0
+            spacing: 12
+            SectionHeader {
+                Layout.fillWidth: true
+                title: "Недавно слушали"
+                symbol: "music_note"
+                showsAction: true
+                actionText: "Очистить"
+                onActionClicked: clearHistory.open()
+            }
+            ListView {
+                id: recent
+                Layout.fillWidth: true
+                Layout.preferredHeight: 104
+                orientation: ListView.Horizontal
+                spacing: 12
+                clip: true
+                model: backend.history
+                delegate: Rectangle {
+                    id: historyTile
+                    required property var model
+                    width: 240; height: 92
+                    radius: 16
+                    color: Appearance.colors.surfaceContainerLow
+                    RowLayout {
+                        anchors.fill: parent; anchors.margins: 12; spacing: 12
+                        RoundedImage { Layout.preferredWidth: 60; Layout.preferredHeight: 60; source: historyTile.model.coverUrl; radius: 12 }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            StyledText { Layout.fillWidth: true; text: historyTile.model.title; elide: Text.ElideRight; font.weight: Font.Medium }
+                            StyledText { Layout.fillWidth: true; text: historyTile.model.artists; elide: Text.ElideRight; color: Appearance.colors.onSurfaceVariant }
+                        }
+                    }
+                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: backend.feature({action: "play_history", id: historyTile.model.id}) }
+                }
+            }
+        }
+
         // Recommendations Section with Swiftify SectionHeader and WavyLine
         ColumnLayout {
             Layout.fillWidth: true
@@ -288,4 +328,13 @@ Flickable {
     }
 
     ScrollBar.vertical: ScrollBar { active: true }
+    Dialog {
+        id: clearHistory
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        title: "Очистить историю прослушивания?"
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: backend.feature({action: "clear_history"})
+    }
 }

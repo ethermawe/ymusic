@@ -18,7 +18,8 @@ enum YMusicEventType {
     EVENT_VIEW_HEADER = 8,
     EVENT_STATUS_MSG = 9,
     EVENT_QUEUE_LOADED = 10,
-    EVENT_PLAYLIST_PICKER = 11
+    EVENT_PLAYLIST_PICKER = 11,
+    EVENT_FEATURE = 12
 };
 
 typedef struct CoreHandle CoreHandle;
@@ -34,6 +35,7 @@ void ymusic_core_logout(CoreHandle *handle);
 void ymusic_core_load_home(CoreHandle *handle);
 void ymusic_core_load_likes(CoreHandle *handle);
 void ymusic_core_load_downloads(CoreHandle *handle);
+void ymusic_core_feature(CoreHandle *handle, const char *json);
 void ymusic_core_playlist_choices(CoreHandle *handle, const char *id);
 void ymusic_core_add_to_playlist(CoreHandle *handle, const char *id, uint64_t kind);
 void ymusic_core_remove_download(CoreHandle *handle, const char *id);

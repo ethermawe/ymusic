@@ -24,8 +24,22 @@ Item {
     readonly property bool isHovered: mouseArea.containsMouse
     readonly property bool isDragging: mouseArea.pressed
 
-    property real visualProgress: isDragging ? dragProgress : value
+    // Keep the committed pointer position until the async backend acknowledges
+    // it. Otherwise releasing the pointer briefly restores the old value.
+    readonly property real visualProgress: isDragging || awaitingCommit ? dragProgress : value
     property real dragProgress: 0.0
+    property bool awaitingCommit: false
+    onValueChanged: {
+        if (awaitingCommit && Math.abs(value - dragProgress) < 0.002) {
+            awaitingCommit = false;
+            commitTimeout.stop();
+        }
+    }
+    Timer {
+        id: commitTimeout
+        interval: 1000
+        onTriggered: root.awaitingCommit = false
+    }
 
     ShaderEffect {
         id: progressShader
@@ -68,9 +82,12 @@ Item {
         anchors.fill: parent
         hoverEnabled: root.interactive
         enabled: root.interactive
+        preventStealing: true
         cursorShape: Qt.PointingHandCursor
 
         onPressed: (mouse) => {
+            commitTimeout.stop();
+            root.awaitingCommit = true;
             root.dragProgress = Math.max(0.0, Math.min(1.0, mouse.x / width))
         }
 
@@ -82,7 +99,13 @@ Item {
 
         onReleased: (mouse) => {
             var target = Math.max(0.0, Math.min(1.0, mouse.x / width))
+            root.dragProgress = target;
+            commitTimeout.restart();
             root.userSeek(target)
+        }
+        onCanceled: {
+            commitTimeout.stop();
+            root.awaitingCommit = false;
         }
     }
 }

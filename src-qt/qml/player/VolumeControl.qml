@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import ymusic.ui
 
 Item {
@@ -11,6 +12,38 @@ Item {
 
     implicitWidth: pill.width
     implicitHeight: 34
+
+    ToolTip {
+        id: volumeTip
+        parent: root
+        x: (root.width - width) / 2
+        y: -height - 10
+        visible: root.visible && pillHover.hovered
+        delay: 250
+        padding: 9
+        horizontalPadding: 14
+        text: Math.round(backend.volume * 100) + "%"
+        contentItem: Text {
+            text: volumeTip.text
+            font.family: Appearance.fontFamily
+            font.pixelSize: Appearance.fontSize.smaller
+            font.weight: Font.DemiBold
+            color: Appearance.colors.onPrimaryContainer
+            horizontalAlignment: Text.AlignHCenter
+        }
+        background: Rectangle {
+            radius: height / 2
+            color: Appearance.colors.primaryContainer
+            border.width: 1
+            border.color: Appearance.colors.outlineVariant
+        }
+    }
+    WheelHandler {
+        onWheel: (event) => {
+            backend.setVolume(Math.max(0, Math.min(1, backend.volume + event.angleDelta.y / 120 * 0.05)));
+            event.accepted = true;
+        }
+    }
 
     Rectangle {
         id: pill
@@ -34,7 +67,7 @@ Item {
         HoverHandler {
             id: pillHover
             onHoveredChanged: {
-                if (!hovered) {
+                if (!hovered && !slider.isDragging) {
                     root.expanded = false;
                 }
             }
@@ -56,6 +89,9 @@ Item {
             fillColor: Appearance.colors.onSurface
             hoverFillColor: Appearance.colors.primary
             onUserSeek: (fraction) => backend.setVolume(fraction)
+            onIsDraggingChanged: {
+                if (!isDragging && !pillHover.hovered) root.expanded = false;
+            }
 
             Behavior on opacity {
                 NumberAnimation { duration: 140 }

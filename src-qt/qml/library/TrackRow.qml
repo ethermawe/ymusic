@@ -191,6 +191,13 @@ Item {
         }
 
         // Like button
+        Row {
+            visible: root.queueView
+            IconButton { symbol: "expand_more"; rotation: 180; size: 28; enabled: model.index > 0; onClicked: backend.feature({action: "queue", operation: "up", index: model.index, id: model.id}) }
+            IconButton { symbol: "expand_more"; size: 28; enabled: model.index < backend.queue.count - 1; onClicked: backend.feature({action: "queue", operation: "down", index: model.index, id: model.id}) }
+            IconButton { symbol: "close"; size: 28; enabled: !root.isCurrent; onClicked: backend.feature({action: "queue", operation: "remove", index: model.index, id: model.id}) }
+        }
+
         MaterialSymbol {
             Layout.alignment: Qt.AlignVCenter
             text: "download_done"

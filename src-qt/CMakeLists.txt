@@ -40,6 +40,9 @@ set(QML_FILES
     qml/motion/HoverFade.qml
     qml/components/MaterialSymbol.qml
     qml/components/StyledText.qml
+    qml/components/StyledButton.qml
+    qml/components/StyledComboBox.qml
+    qml/components/StyledCheckBox.qml
     qml/components/TitleText.qml
     qml/components/IconButton.qml
     qml/components/PlayHeroButton.qml
@@ -61,6 +64,8 @@ set(QML_FILES
     qml/library/TrackRow.qml
     qml/library/TrackMenu.qml
     qml/library/PlaylistPicker.qml
+    qml/library/CreatePlaylistDialog.qml
+    qml/views/SearchView.qml
     qml/views/LoginView.qml
     qml/views/SettingsDialog.qml
     qml/library/CardItem.qml
