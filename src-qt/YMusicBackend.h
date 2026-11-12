@@ -22,6 +22,7 @@ class YMusicBackend : public QObject {
 
     // View / Header
     Q_PROPERTY(int page READ page NOTIFY viewHeaderChanged)
+    Q_PROPERTY(bool canGoBack READ canGoBack NOTIFY viewHeaderChanged)
     Q_PROPERTY(QString listTitle READ listTitle NOTIFY viewHeaderChanged)
     Q_PROPERTY(QString listSubtitle READ listSubtitle NOTIFY viewHeaderChanged)
     Q_PROPERTY(bool listLoading READ listLoading NOTIFY viewHeaderChanged)
@@ -75,6 +76,7 @@ public:
     QString statusMessage() const { return m_statusMessage; }
 
     int page() const { return m_page; }
+    bool canGoBack() const { return m_page == 6; }
     QString listTitle() const { return m_listTitle; }
     QString listSubtitle() const { return m_listSubtitle; }
     bool listLoading() const { return m_listLoading; }
@@ -120,6 +122,7 @@ public:
     Q_INVOKABLE void loadPlaylists();
     Q_INVOKABLE void loadAlbums();
     Q_INVOKABLE void loadArtists();
+    Q_INVOKABLE void goBack();
 
     Q_INVOKABLE void startWave();
     Q_INVOKABLE void startArtistWave();
@@ -173,6 +176,7 @@ private:
     QString m_statusMessage;
 
     int m_page = 0;
+    int m_previousPage = 0;
     QString m_listTitle;
     QString m_listSubtitle;
     bool m_listLoading = false;

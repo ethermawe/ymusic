@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 QuickEffects)
 
 set(RUST_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../target/release")
 
@@ -26,15 +26,28 @@ qt_add_executable(ymusic-qml
 set(QML_FILES
     qml/Main.qml
     qml/design/Appearance.qml
+    qml/motion/Bounce.qml
+    qml/motion/ClickBounce.qml
+    qml/motion/ElementMove.qml
+    qml/motion/ElementMoveSmall.qml
+    qml/motion/ElementMoveFastColor.qml
+    qml/motion/HoverFade.qml
     qml/components/MaterialSymbol.qml
+    qml/components/StyledText.qml
+    qml/components/TitleText.qml
     qml/components/IconButton.qml
     qml/components/PlayHeroButton.qml
     qml/components/StyledSlider.qml
+    qml/components/HomeShortcut.qml
+    qml/shell/SectionLabel.qml
+    qml/shell/NavigationItem.qml
     qml/player/FloatingPlayerBar.qml
+    qml/player/VolumeControl.qml
     qml/player/EqualizerBars.qml
     qml/library/TrackRow.qml
     qml/library/CardItem.qml
     qml/library/CollectionHero.qml
+    qml/views/HomeView.qml
     qml/sidebar/Sidebar.qml
     qml/immersive/ImmersivePlayer.qml
 )
@@ -56,6 +69,7 @@ target_link_libraries(ymusic-qml PRIVATE
     Qt6::Quick
     Qt6::Qml
     Qt6::QuickControls2
+    Qt6::QuickEffects
     ymusic_core
     pthread
     dl

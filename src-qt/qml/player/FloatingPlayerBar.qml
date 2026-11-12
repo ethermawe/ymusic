@@ -10,7 +10,7 @@ Item {
     implicitHeight: 72
     implicitWidth: 800
 
-    // Elevated surface capsule
+    // Elevated surface capsule matching Swiftify
     Rectangle {
         id: surface
         anchors.fill: parent
@@ -19,9 +19,9 @@ Item {
         border.width: 1
         border.color: Qt.rgba(Appearance.colors.outlineVariant.r,
                               Appearance.colors.outlineVariant.g,
-                              Appearance.colors.outlineVariant.b, 0.45)
+                              Appearance.colors.outlineVariant.b, 0.4)
 
-        // Drop shadow / ambient glow
+        // Drop shadow / soft ambient blur
         Rectangle {
             anchors.centerIn: parent
             width: parent.width + 4
@@ -29,7 +29,7 @@ Item {
             radius: parent.radius
             z: -1
             color: "#000000"
-            opacity: 0.35
+            opacity: 0.28
         }
 
         MouseArea {
@@ -76,7 +76,7 @@ Item {
 
             PlayHeroButton {
                 anchors.verticalCenter: parent.verticalCenter
-                size: 42
+                size: 44
                 playing: backend.playing
                 onClicked: backend.toggle()
             }
@@ -115,7 +115,7 @@ Item {
                     Layout.preferredHeight: 44
                     Layout.alignment: Qt.AlignVCenter
 
-                    scale: artHover.containsMouse ? 1.14 : 1.0
+                    scale: artHover.containsMouse ? 1.12 : 1.0
                     Behavior on scale {
                         NumberAnimation {
                             duration: 220
@@ -141,7 +141,7 @@ Item {
                         id: popAnim
                         target: popScale
                         properties: "xScale,yScale"
-                        from: 0.65
+                        from: 0.70
                         to: 1.0
                         duration: 420
                         easing.type: Easing.OutBack
@@ -200,7 +200,7 @@ Item {
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignVCenter
-                    spacing: 2
+                    spacing: 3
 
                     // Title + Artists
                     RowLayout {
@@ -213,7 +213,7 @@ Item {
                             font.pixelSize: Appearance.fontSize.small
                             font.weight: Font.DemiBold
                             elide: Text.ElideRight
-                            Layout.maximumWidth: 260
+                            Layout.maximumWidth: 280
                         }
 
                         Text {
@@ -248,6 +248,8 @@ Item {
                         StyledSlider {
                             Layout.fillWidth: true
                             value: backend.progress
+                            trackHeight: 3
+                            activeTrackHeight: 5
                             onUserSeek: (fraction) => backend.seek(fraction)
                         }
 
@@ -262,7 +264,7 @@ Item {
             }
         }
 
-        // Right: Utilities (Like, Volume, Immersive)
+        // Right: Utilities (Like, Volume Pill, Immersive)
         Row {
             Layout.alignment: Qt.AlignVCenter
             spacing: 6
@@ -272,29 +274,14 @@ Item {
                 symbol: backend.nowLiked ? "favorite" : "favorite_border"
                 size: 34
                 iconSize: 20
-                iconColor: backend.nowLiked ? Appearance.colors.primary : Appearance.colors.onSurface
+                iconColor: backend.nowLiked ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
                 activeIconColor: Appearance.colors.primary
                 toggled: backend.nowLiked
                 onClicked: backend.toggleNowLike()
             }
 
-            IconButton {
+            VolumeControl {
                 anchors.verticalCenter: parent.verticalCenter
-                symbol: backend.volume <= 0.001 ? "volume_off" : "volume_up"
-                size: 34
-                iconSize: 20
-                onClicked: backend.toggleMute()
-            }
-
-            StyledSlider {
-                anchors.verticalCenter: parent.verticalCenter
-                width: 90
-                value: backend.volume
-                trackHeight: 3
-                activeTrackHeight: 5
-                fillColor: Appearance.colors.onSurface
-                hoverFillColor: Appearance.colors.primary
-                onUserSeek: (fraction) => backend.setVolume(fraction)
             }
 
             IconButton {

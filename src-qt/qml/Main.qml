@@ -15,7 +15,9 @@ ApplicationWindow {
     color: Appearance.colors.surfaceContainerLowest
 
     property bool immersiveOpen: false
-    readonly property bool isCardsPage: (backend.page === 0 || backend.page === 3 || backend.page === 4 || backend.page === 5) || (backend.page === 6 && !backend.isArtistView && backend.tracks.rowCount() === 0)
+    readonly property bool isHome: backend.page === 0
+    readonly property bool isCardsPage: (backend.page === 3 || backend.page === 4 || backend.page === 5) || (backend.page === 6 && !backend.isArtistView && backend.tracks.rowCount() === 0)
+    readonly property bool isTrackListPage: backend.page === 1 || backend.page === 2 || (backend.page === 6 && (backend.isArtistView || backend.tracks.rowCount() > 0))
 
     // Root layout
     Item {
@@ -43,6 +45,41 @@ ApplicationWindow {
             clip: true
             border.width: 1
             border.color: Qt.rgba(1, 1, 1, 0.04)
+
+            // Swiftify Back Button on subviews (Albums / Artists detail)
+            Rectangle {
+                id: backButtonBox
+                visible: backend.canGoBack
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.margins: 14
+                width: 38
+                height: 38
+                radius: 19
+                color: backMouse.containsMouse ? Appearance.colors.surfaceContainerHighest : Appearance.colors.surfaceContainerHigh
+                border.width: 1
+                border.color: Qt.rgba(1, 1, 1, 0.08)
+                z: 25
+
+                scale: backMouse.pressed ? 0.94 : (backMouse.containsMouse ? 1.05 : 1.0)
+                Behavior on scale { Bounce {} }
+                Behavior on color { ElementMoveFastColor {} }
+
+                MaterialSymbol {
+                    anchors.centerIn: parent
+                    text: "arrow_back"
+                    iconSize: 20
+                    color: Appearance.colors.onSurface
+                }
+
+                MouseArea {
+                    id: backMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: backend.goBack()
+                }
+            }
 
             // Status message toast / banner
             Rectangle {
@@ -229,7 +266,14 @@ ApplicationWindow {
                 }
             }
 
-            // View 2: Cards Grid View (Главная, Плейлисты, Альбомы, Артисты)
+            // View 2: Home Page (Swiftify-style spotlight, shortcuts, and recommendations)
+            HomeView {
+                id: homeView
+                anchors.fill: parent
+                visible: backend.loggedIn && window.isHome
+            }
+
+            // View 3: Cards Grid View (Плейлисты, Альбомы, Артисты)
             Item {
                 id: cardsView
                 anchors.fill: parent
@@ -311,11 +355,11 @@ ApplicationWindow {
                 }
             }
 
-            // View 3: Logged In - Track List / Collection View (Wave, Likes, Album/Artist tracks)
+            // View 4: Logged In - Track List / Collection View (Wave, Likes, Album/Artist tracks)
             Item {
                 id: trackListView
                 anchors.fill: parent
-                visible: backend.loggedIn && !window.isCardsPage
+                visible: backend.loggedIn && window.isTrackListPage
 
                 ListView {
                     id: listView
@@ -413,10 +457,10 @@ ApplicationWindow {
         // Floating Player Bar
         FloatingPlayerBar {
             id: playerBar
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: sheet.horizontalCenter
+            anchors.bottom: sheet.bottom
             anchors.bottomMargin: 16
-            width: Math.min(840, parent.width - 48)
+            width: Math.min(840, sheet.width - 40)
             visible: backend.loggedIn
             onImmersiveRequested: window.immersiveOpen = true
         }

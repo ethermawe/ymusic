@@ -9,27 +9,40 @@ Item {
     property string subtitle: backend.listSubtitle
     property bool isArtist: backend.isArtistView
 
-    implicitHeight: 180
+    implicitHeight: 200
     implicitWidth: 600
 
     RowLayout {
         anchors.fill: parent
-        anchors.margins: 20
-        spacing: 20
+        anchors.margins: 24
+        spacing: 24
 
-        // Hero Artwork with glow
+        // Hero Artwork with dual glowing backdrop
         Item {
-            Layout.preferredWidth: 140
-            Layout.preferredHeight: 140
+            Layout.preferredWidth: 152
+            Layout.preferredHeight: 152
             Layout.alignment: Qt.AlignVCenter
 
-            // Soft glow behind artwork
+            // Dual soft glow layers behind artwork (inspired by Swiftify ArtworkGlow)
             Rectangle {
                 anchors.centerIn: parent
-                width: parent.width + 12
-                height: parent.height + 12
+                anchors.horizontalCenterOffset: -4
+                anchors.verticalCenterOffset: 6
+                width: parent.width + 16
+                height: parent.height + 16
                 radius: root.isArtist ? width / 2 : Appearance.rounding.normal
                 color: Appearance.colors.primary
+                opacity: 0.22
+            }
+
+            Rectangle {
+                anchors.centerIn: parent
+                anchors.horizontalCenterOffset: 4
+                anchors.verticalCenterOffset: -2
+                width: parent.width + 8
+                height: parent.height + 8
+                radius: root.isArtist ? width / 2 : Appearance.rounding.normal
+                color: Appearance.colors.primaryContainer
                 opacity: 0.18
             }
 
@@ -39,6 +52,8 @@ Item {
                 radius: root.isArtist ? width / 2 : Appearance.rounding.normal
                 color: Appearance.colors.surfaceContainerHighest
                 clip: true
+                border.width: 1
+                border.color: Qt.rgba(1, 1, 1, 0.08)
 
                 Image {
                     anchors.fill: parent
@@ -48,50 +63,60 @@ Item {
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     cache: true
-                    sourceSize.width: 280
-                    sourceSize.height: 280
+                    sourceSize.width: 320
+                    sourceSize.height: 320
                     visible: root.isArtist ? backend.artistHasAvatar : backend.hasCover
                 }
 
                 MaterialSymbol {
                     anchors.centerIn: parent
                     text: root.isArtist ? "person" : (backend.page === 1 ? "auto_awesome" : (backend.page === 2 ? "favorite" : "album"))
-                    iconSize: 56
+                    iconSize: 64
                     color: Appearance.colors.onSurfaceVariant
                     visible: root.isArtist ? !backend.artistHasAvatar : !backend.hasCover
                 }
             }
         }
 
-        // Details
+        // Details Column
         ColumnLayout {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignVCenter
-            spacing: 6
+            spacing: 8
 
             // Kind Chip
             Rectangle {
-                height: 22
-                width: kindText.implicitWidth + 14
+                height: 24
+                width: kindRow.implicitWidth + 20
                 radius: Appearance.rounding.full
-                color: Qt.rgba(Appearance.colors.primary.r, Appearance.colors.primary.g, Appearance.colors.primary.b, 0.15)
+                color: Appearance.colors.primaryContainer
 
-                Text {
-                    id: kindText
+                RowLayout {
+                    id: kindRow
                     anchors.centerIn: parent
-                    text: root.isArtist ? "АРТИСТ" : (backend.page === 1 ? "ПОТОК" : (backend.page === 2 ? "ИЗБРАННОЕ" : "КОЛЛЕКЦИЯ"))
-                    color: Appearance.colors.primary
-                    font.pixelSize: Appearance.fontSize.smallest
-                    font.weight: Font.Bold
-                    font.capitalization: Font.AllUppercase
+                    spacing: 6
+
+                    MaterialSymbol {
+                        text: root.isArtist ? "person" : (backend.page === 1 ? "auto_awesome" : (backend.page === 2 ? "favorite" : "album"))
+                        iconSize: 14
+                        color: Appearance.colors.onPrimaryContainer
+                    }
+
+                    Text {
+                        text: root.isArtist ? "АРТИСТ" : (backend.page === 1 ? "ПОТОК" : (backend.page === 2 ? "ИЗБРАННОЕ" : "КОЛЛЕКЦИЯ"))
+                        color: Appearance.colors.onPrimaryContainer
+                        font.pixelSize: Appearance.fontSize.smallest
+                        font.weight: Font.Bold
+                        font.capitalization: Font.AllUppercase
+                    }
                 }
             }
 
             // Big Title
-            Text {
+            TitleText {
                 text: root.isArtist ? backend.artistName : root.title
                 color: Appearance.colors.onSurface
-                font.pixelSize: 26
+                font.pixelSize: 32
                 font.weight: Font.Bold
                 elide: Text.ElideRight
                 Layout.fillWidth: true
@@ -111,11 +136,11 @@ Item {
             // Action Buttons
             Row {
                 spacing: 12
-                topPadding: 4
+                topPadding: 6
 
-                // Play first track or Wave
+                // Play Hero Button
                 PlayHeroButton {
-                    size: 40
+                    size: 44
                     playing: backend.playing
                     onClicked: {
                         if (backend.tracks && backend.tracks.rowCount() > 0) {
@@ -129,12 +154,16 @@ Item {
                 // Start Artist Wave button (if artist)
                 Rectangle {
                     visible: root.isArtist && backend.canStartArtistWave
-                    height: 40
-                    width: waveRow.implicitWidth + 24
+                    height: 44
+                    width: waveRow.implicitWidth + 28
                     radius: Appearance.rounding.full
                     color: waveHover.containsMouse ? Appearance.colors.surfaceContainerHighest : Appearance.colors.surfaceContainerHigh
                     border.width: 1
                     border.color: Qt.rgba(1, 1, 1, 0.1)
+
+                    scale: waveMouse.pressed ? 0.96 : (waveHover.hovered ? 1.02 : 1.0)
+                    Behavior on scale { Bounce {} }
+                    Behavior on color { ElementMoveFastColor {} }
 
                     RowLayout {
                         id: waveRow
@@ -143,7 +172,7 @@ Item {
 
                         MaterialSymbol {
                             text: "auto_awesome"
-                            iconSize: 18
+                            iconSize: 20
                             color: Appearance.colors.primary
                         }
 
@@ -155,10 +184,13 @@ Item {
                         }
                     }
 
-                    MouseArea {
+                    HoverHandler {
                         id: waveHover
+                    }
+
+                    MouseArea {
+                        id: waveMouse
                         anchors.fill: parent
-                        hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: backend.startArtistWave()
                     }

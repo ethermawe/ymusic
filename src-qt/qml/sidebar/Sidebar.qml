@@ -5,31 +5,34 @@ import ymusic.ui
 Item {
     id: root
 
-    property int activeIndex: backend.page // 0: Home, 1: Likes, 2: Wave, 3: Playlists, 4: Albums, 5: Artists, 6: Search
+    readonly property int activePage: backend.page
 
-    implicitWidth: 210
+    implicitWidth: 220
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 14
-        spacing: 16
+        anchors.margins: 12
+        spacing: 12
 
         // User Profile Header
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 52
+            Layout.preferredHeight: 50
             radius: Appearance.rounding.normal
             color: Appearance.colors.surfaceContainerLow
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.04)
 
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: 8
+                anchors.leftMargin: 10
+                anchors.rightMargin: 8
                 spacing: 10
 
                 // Avatar
                 Rectangle {
-                    Layout.preferredWidth: 36
-                    Layout.preferredHeight: 36
+                    Layout.preferredWidth: 34
+                    Layout.preferredHeight: 34
                     radius: width / 2
                     color: Appearance.colors.surfaceContainerHighest
                     clip: true
@@ -40,6 +43,8 @@ Item {
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
                         cache: true
+                        sourceSize.width: 68
+                        sourceSize.height: 68
                         visible: backend.userHasAvatar
                     }
 
@@ -53,10 +58,9 @@ Item {
                 }
 
                 // Name
-                Text {
+                StyledText {
                     Layout.fillWidth: true
                     text: backend.loggedIn ? backend.userName : "Гость"
-                    color: Appearance.colors.onSurface
                     font.pixelSize: Appearance.fontSize.small
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
@@ -65,7 +69,7 @@ Item {
                 // Logout button
                 IconButton {
                     symbol: "logout"
-                    size: 30
+                    size: 28
                     iconSize: 16
                     iconColor: Appearance.colors.onSurfaceVariant
                     visible: backend.loggedIn
@@ -74,7 +78,7 @@ Item {
             }
         }
 
-        // Search Input
+        // Search Input Field
         Rectangle {
             id: searchBox
             Layout.fillWidth: true
@@ -108,7 +112,7 @@ Item {
 
                     Text {
                         anchors.fill: parent
-                        text: "Поиск музыки..."
+                        text: "Поиск музыки…"
                         color: Appearance.colors.onSurfaceVariant
                         font.pixelSize: Appearance.fontSize.smaller
                         visible: !searchInput.text && !searchInput.activeFocus
@@ -123,103 +127,75 @@ Item {
             }
         }
 
-        // Navigation Items List
-        Item {
+        // Navigation Items
+        Flickable {
             Layout.fillWidth: true
             Layout.fillHeight: true
-
-            // Moving active capsule indicator
-            Rectangle {
-                id: pillIndicator
-                width: parent.width
-                height: 42
-                radius: Appearance.rounding.full
-                color: Qt.rgba(Appearance.colors.primary.r,
-                               Appearance.colors.primary.g,
-                               Appearance.colors.primary.b, 0.16)
-                border.width: 1
-                border.color: Qt.rgba(Appearance.colors.primary.r,
-                                      Appearance.colors.primary.g,
-                                      Appearance.colors.primary.b, 0.3)
-
-                visible: root.activeIndex >= 0 && root.activeIndex < navModel.count
-                y: visible ? (root.activeIndex * 48) : 0
-
-                Behavior on y {
-                    NumberAnimation {
-                        duration: 220
-                        easing.type: Easing.OutBack
-                        easing.overshoot: 1.4
-                    }
-                }
-            }
+            contentHeight: navColumn.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
 
             Column {
-                anchors.fill: parent
-                spacing: 6
+                id: navColumn
+                width: parent.width
+                spacing: 4
 
-                Repeater {
-                    id: navRepeater
-                    model: ListModel {
-                        id: navModel
-                        ListElement { title: "Главная"; icon: "home"; pageIndex: 0 }
-                        ListElement { title: "Моя волна"; icon: "auto_awesome"; pageIndex: 1 }
-                        ListElement { title: "Любимые"; icon: "favorite"; pageIndex: 2 }
-                        ListElement { title: "Плейлисты"; icon: "library_music"; pageIndex: 3 }
-                        ListElement { title: "Альбомы"; icon: "album"; pageIndex: 4 }
-                        ListElement { title: "Артисты"; icon: "person"; pageIndex: 5 }
-                    }
+                NavigationItem {
+                    width: parent.width
+                    text: "Главная"
+                    symbol: "home"
+                    selected: root.activePage === 0
+                    onClicked: backend.loadHome()
+                }
 
-                    delegate: Item {
-                        width: parent.width
-                        height: 42
+                NavigationItem {
+                    width: parent.width
+                    text: "Моя волна"
+                    symbol: "auto_awesome"
+                    selected: root.activePage === 1
+                    onClicked: backend.startWave()
+                }
 
-                        readonly property bool isSelected: root.activeIndex === model.pageIndex
-                        readonly property bool isHovered: itemMouse.containsMouse
+                SectionLabel {
+                    width: parent.width
+                    text: "Медиатека"
+                }
 
-                        scale: isHovered && !isSelected ? 1.02 : 1.0
-                        Behavior on scale {
-                            NumberAnimation { duration: 150; easing.type: Easing.OutBack }
-                        }
+                NavigationItem {
+                    width: parent.width
+                    text: "Мне нравится"
+                    symbol: "favorite"
+                    selected: root.activePage === 2
+                    onClicked: backend.loadLikes()
+                }
 
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 16
-                            anchors.rightMargin: 16
-                            spacing: 12
+                SectionLabel {
+                    width: parent.width
+                    text: "Коллекции"
+                }
 
-                            MaterialSymbol {
-                                text: model.icon
-                                iconSize: 20
-                                color: isSelected ? Appearance.colors.primary : (isHovered ? Appearance.colors.onSurface : Appearance.colors.onSurfaceVariant)
-                            }
+                NavigationItem {
+                    width: parent.width
+                    text: "Плейлисты"
+                    symbol: "library_music"
+                    selected: root.activePage === 3
+                    onClicked: backend.loadPlaylists()
+                }
 
-                            Text {
-                                text: model.title
-                                color: isSelected ? Appearance.colors.primary : (isHovered ? Appearance.colors.onSurface : Appearance.colors.onSurfaceVariant)
-                                font.pixelSize: Appearance.fontSize.small
-                                font.weight: isSelected ? Font.DemiBold : Font.Normal
-                                Layout.fillWidth: true
-                            }
-                        }
+                NavigationItem {
+                    width: parent.width
+                    text: "Альбомы"
+                    symbol: "album"
+                    selected: root.activePage === 4
+                    onClicked: backend.loadAlbums()
+                }
 
-                        MouseArea {
-                            id: itemMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                switch (model.pageIndex) {
-                                case 0: backend.loadHome(); break;
-                                case 1: backend.startWave(); break;
-                                case 2: backend.loadLikes(); break;
-                                case 3: backend.loadPlaylists(); break;
-                                case 4: backend.loadAlbums(); break;
-                                case 5: backend.loadArtists(); break;
-                                }
-                            }
-                        }
-                    }
+                NavigationItem {
+                    width: parent.width
+                    text: "Артисты"
+                    symbol: "person"
+                    selected: root.activePage === 5
+                    onClicked: backend.loadArtists()
                 }
             }
         }

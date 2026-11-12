@@ -91,7 +91,11 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         break;
     }
     case EVENT_VIEW_HEADER: {
-        m_page = obj["page"].toInt();
+        int newPage = obj["page"].toInt();
+        if (newPage == 6 && m_page != 6) {
+            m_previousPage = m_page;
+        }
+        m_page = newPage;
         m_listTitle = obj["title"].toString();
         m_listSubtitle = obj["subtitle"].toString();
         m_listLoading = obj["loading"].toBool();
@@ -145,6 +149,18 @@ void YMusicBackend::loadAlbums() {
 
 void YMusicBackend::loadArtists() {
     if (m_core) ymusic_core_load_artists(m_core);
+}
+
+void YMusicBackend::goBack() {
+    switch (m_previousPage) {
+    case 0: loadHome(); break;
+    case 1: startWave(); break;
+    case 2: loadLikes(); break;
+    case 3: loadPlaylists(); break;
+    case 4: loadAlbums(); break;
+    case 5: loadArtists(); break;
+    default: loadHome(); break;
+    }
 }
 
 void YMusicBackend::startWave() {
