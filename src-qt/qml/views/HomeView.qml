@@ -99,32 +99,18 @@ Flickable {
                 anchors.margins: 20
                 spacing: 20
 
-                // Cover Artwork
-                Rectangle {
+                // Cover Artwork with true rounded corners
+                RoundedImage {
                     Layout.preferredWidth: 140
                     Layout.preferredHeight: 140
                     radius: Appearance.rounding.normal
-                    color: Appearance.colors.surfaceContainerHighest
-                    clip: true
-
-                    Image {
-                        anchors.fill: parent
-                        source: backend.hasCover ? backend.nowCover : ""
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        cache: true
-                        sourceSize.width: 280
-                        sourceSize.height: 280
-                        visible: backend.hasCover
-                    }
-
-                    MaterialSymbol {
-                        anchors.centerIn: parent
-                        text: "music_note"
-                        iconSize: 48
-                        color: Appearance.colors.onSurfaceVariant
-                        visible: !backend.hasCover
-                    }
+                    source: backend.hasCover ? backend.nowCover : ""
+                    fallbackSymbol: "music_note"
+                    fallbackIconSize: 48
+                    sourceSize.width: 280
+                    sourceSize.height: 280
+                    borderWidth: 1
+                    borderColor: Qt.rgba(1, 1, 1, 0.08)
                 }
 
                 // Info & Controls

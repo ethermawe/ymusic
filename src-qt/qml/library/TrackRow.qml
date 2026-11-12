@@ -69,33 +69,17 @@ Item {
             }
         }
 
-        // Thumbnail cover
-        Rectangle {
+        // Thumbnail cover with true rounded corners
+        RoundedImage {
             Layout.preferredWidth: 40
             Layout.preferredHeight: 40
             Layout.alignment: Qt.AlignVCenter
             radius: Appearance.rounding.verySmall
-            color: Appearance.colors.surfaceContainerHighest
-            clip: true
-
-            Image {
-                anchors.fill: parent
-                source: model.hasCover ? model.coverUrl : ""
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                cache: true
-                sourceSize.width: 80
-                sourceSize.height: 80
-                visible: model.hasCover
-            }
-
-            MaterialSymbol {
-                anchors.centerIn: parent
-                text: "music_note"
-                iconSize: 18
-                color: Appearance.colors.onSurfaceVariant
-                visible: !model.hasCover
-            }
+            source: model.hasCover ? model.coverUrl : ""
+            fallbackSymbol: "music_note"
+            fallbackIconSize: 18
+            sourceSize.width: 80
+            sourceSize.height: 80
         }
 
         // Title and Artists

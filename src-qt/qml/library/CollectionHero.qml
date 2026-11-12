@@ -46,35 +46,19 @@ Item {
                 opacity: 0.18
             }
 
-            Rectangle {
+            RoundedImage {
                 id: artworkContainer
                 anchors.fill: parent
                 radius: root.isArtist ? width / 2 : Appearance.rounding.normal
-                color: Appearance.colors.surfaceContainerHighest
-                clip: true
-                border.width: 1
-                border.color: Qt.rgba(1, 1, 1, 0.08)
-
-                Image {
-                    anchors.fill: parent
-                    source: root.isArtist
-                            ? (backend.artistHasAvatar ? backend.artistAvatar : "")
-                            : (backend.hasCover ? backend.nowCover : "")
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    cache: true
-                    sourceSize.width: 320
-                    sourceSize.height: 320
-                    visible: root.isArtist ? backend.artistHasAvatar : backend.hasCover
-                }
-
-                MaterialSymbol {
-                    anchors.centerIn: parent
-                    text: root.isArtist ? "person" : (backend.page === 1 ? "auto_awesome" : (backend.page === 2 ? "favorite" : "album"))
-                    iconSize: 64
-                    color: Appearance.colors.onSurfaceVariant
-                    visible: root.isArtist ? !backend.artistHasAvatar : !backend.hasCover
-                }
+                source: root.isArtist
+                        ? (backend.artistHasAvatar ? backend.artistAvatar : "")
+                        : (backend.hasCover ? backend.nowCover : "")
+                fallbackSymbol: root.isArtist ? "person" : (backend.page === 1 ? "auto_awesome" : (backend.page === 2 ? "favorite" : "album"))
+                fallbackIconSize: 64
+                sourceSize.width: 320
+                sourceSize.height: 320
+                borderWidth: 1
+                borderColor: Qt.rgba(1, 1, 1, 0.08)
             }
         }
 

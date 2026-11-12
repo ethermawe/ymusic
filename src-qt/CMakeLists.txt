@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 QuickEffects)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 QuickEffects Network)
 
 set(RUST_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../target/release")
 
@@ -37,6 +37,7 @@ set(QML_FILES
     qml/components/TitleText.qml
     qml/components/IconButton.qml
     qml/components/PlayHeroButton.qml
+    qml/components/RoundedImage.qml
     qml/components/StyledSlider.qml
     qml/components/HomeShortcut.qml
     qml/shell/SectionLabel.qml
@@ -70,6 +71,7 @@ target_link_libraries(ymusic-qml PRIVATE
     Qt6::Qml
     Qt6::QuickControls2
     Qt6::QuickEffects
+    Qt6::Network
     ymusic_core
     pthread
     dl

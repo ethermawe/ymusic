@@ -92,31 +92,15 @@ Item {
             Layout.preferredHeight: width
             Layout.alignment: Qt.AlignHCenter
 
-            Rectangle {
+            RoundedImage {
                 id: artBox
                 anchors.fill: parent
                 radius: root.isArtist ? width / 2 : Appearance.rounding.small
-                color: Appearance.colors.surfaceContainerHighest
-                clip: true
-
-                Image {
-                    anchors.fill: parent
-                    source: model.hasCover ? model.coverUrl : ""
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    cache: true
-                    sourceSize.width: 240
-                    sourceSize.height: 240
-                    visible: model.hasCover
-                }
-
-                MaterialSymbol {
-                    anchors.centerIn: parent
-                    text: root.isArtist ? "person" : "album"
-                    iconSize: 40
-                    color: Appearance.colors.onSurfaceVariant
-                    visible: !model.hasCover
-                }
+                source: model.hasCover ? model.coverUrl : ""
+                fallbackSymbol: root.isArtist ? "person" : "album"
+                fallbackIconSize: 40
+                sourceSize.width: 240
+                sourceSize.height: 240
 
                 // Swiftify Badge Overlay (Bottom-Right circle with Play icon)
                 Rectangle {
@@ -133,6 +117,7 @@ Item {
                     opacity: root.isHovered ? 1.0 : 0.0
                     scale: root.isHovered ? 1.0 : 0.7
                     visible: opacity > 0.0
+                    z: 5
 
                     Behavior on opacity {
                         NumberAnimation { duration: 160 }

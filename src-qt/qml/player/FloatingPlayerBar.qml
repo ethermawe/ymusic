@@ -148,32 +148,19 @@ Item {
                         easing.overshoot: 2.2
                     }
 
-                    Rectangle {
+                    RoundedImage {
                         anchors.fill: parent
                         radius: Appearance.rounding.small
-                        color: Appearance.colors.surfaceContainerHighest
-                        clip: true
-
-                        Image {
-                            anchors.fill: parent
-                            source: backend.hasCover ? backend.nowCover : ""
-                            fillMode: Image.PreserveAspectCrop
-                            asynchronous: true
-                            cache: true
-                            visible: backend.hasCover
-                        }
-
-                        MaterialSymbol {
-                            anchors.centerIn: parent
-                            text: "music_note"
-                            iconSize: 20
-                            color: Appearance.colors.onSurfaceVariant
-                            visible: !backend.hasCover
-                        }
+                        source: backend.hasCover ? backend.nowCover : ""
+                        fallbackSymbol: "music_note"
+                        fallbackIconSize: 20
+                        sourceSize.width: 100
+                        sourceSize.height: 100
 
                         // Hover overlay icon indicating expand
                         Rectangle {
                             anchors.fill: parent
+                            radius: Appearance.rounding.small
                             color: Qt.rgba(0, 0, 0, 0.35)
                             opacity: artHover.containsMouse ? 1.0 : 0.0
                             Behavior on opacity { NumberAnimation { duration: 140 } }

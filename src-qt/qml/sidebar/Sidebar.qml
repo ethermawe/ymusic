@@ -29,32 +29,18 @@ Item {
                 anchors.rightMargin: 8
                 spacing: 10
 
-                // Avatar
-                Rectangle {
+                // Avatar with true circular rounding
+                RoundedImage {
                     Layout.preferredWidth: 34
                     Layout.preferredHeight: 34
                     radius: width / 2
-                    color: Appearance.colors.surfaceContainerHighest
-                    clip: true
-
-                    Image {
-                        anchors.fill: parent
-                        source: backend.userHasAvatar ? backend.userAvatar : ""
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        cache: true
-                        sourceSize.width: 68
-                        sourceSize.height: 68
-                        visible: backend.userHasAvatar
-                    }
-
-                    MaterialSymbol {
-                        anchors.centerIn: parent
-                        text: "person"
-                        iconSize: 20
-                        color: Appearance.colors.onSurfaceVariant
-                        visible: !backend.userHasAvatar
-                    }
+                    source: backend.userHasAvatar ? backend.userAvatar : ""
+                    fallbackSymbol: "person"
+                    fallbackIconSize: 20
+                    sourceSize.width: 100
+                    sourceSize.height: 100
+                    borderWidth: 1
+                    borderColor: Qt.rgba(1, 1, 1, 0.08)
                 }
 
                 // Name
