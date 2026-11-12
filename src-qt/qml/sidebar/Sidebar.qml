@@ -6,6 +6,7 @@ Item {
     id: root
 
     readonly property int activePage: backend.page
+    signal settingsRequested()
 
     implicitWidth: 220
 
@@ -115,6 +116,7 @@ Item {
 
         // Navigation Items
         Flickable {
+            id: navigationFlickable
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentHeight: navColumn.implicitHeight
@@ -137,7 +139,7 @@ Item {
                 NavigationItem {
                     width: parent.width
                     text: "Моя волна"
-                    symbol: "auto_awesome"
+                    symbol: "my_wave"
                     selected: root.activePage === 1
                     onClicked: backend.startWave()
                 }
@@ -153,6 +155,14 @@ Item {
                     symbol: "favorite"
                     selected: root.activePage === 2
                     onClicked: backend.loadLikes()
+                }
+
+                NavigationItem {
+                    width: parent.width
+                    text: "Загружено"
+                    symbol: "download_done"
+                    selected: root.activePage === 7
+                    onClicked: backend.loadDownloads()
                 }
 
                 SectionLabel {
@@ -179,11 +189,18 @@ Item {
                 NavigationItem {
                     width: parent.width
                     text: "Артисты"
-                    symbol: "person"
+                    symbol: "artists"
                     selected: root.activePage === 5
                     onClicked: backend.loadArtists()
                 }
             }
+        }
+
+        NavigationItem {
+            Layout.fillWidth: true
+            text: "Настройки"
+            symbol: "settings"
+            onClicked: root.settingsRequested()
         }
     }
 }

@@ -42,6 +42,20 @@ ThemeManager::ThemeManager(QObject *parent)
 }
 
 void ThemeManager::onFileChanged() {
+    // При атомарной замене файла (rename) watcher теряет его — добавляем заново.
+    QString home = QDir::homePath();
+    const QStringList paths = {
+        home + "/.local/state/quickshell/user/generated/colors.json",
+        home + "/.cache/wal/colors.json",
+        home + "/.config/presets/user/colors.json",
+        home + "/.config/noctalia/colors.json"
+    };
+    const QStringList watched = m_watcher.files();
+    for (const QString &p : paths) {
+        if (!watched.contains(p) && QFile::exists(p)) {
+            m_watcher.addPath(p);
+        }
+    }
     m_debounceTimer.start();
 }
 
@@ -187,6 +201,8 @@ bool ThemeManager::tryLoadWal() {
     QJsonObject colors = root["colors"].toObject();
     QString bgStr = colors["color0"].toString();
     if (bgStr.isEmpty()) return false;
+    // If color1 and color2 are empty, this is a corrupt/partial wal file
+    if (colors["color1"].toString().isEmpty() && colors["color2"].toString().isEmpty()) return false;
 
     m_background = QColor(bgStr);
     m_surface = m_background.lighter(115);
@@ -229,24 +245,45 @@ bool ThemeManager::tryLoadPresets() {
     if (!special.contains("background")) return false;
 
     m_background = QColor(special["background"].toString());
-    m_surface = m_background.lighter(115);
+    m_surface = m_background.lighter(125);
+    m_surfaceContainerLowest = m_background;
+    m_surfaceContainerLow = m_background.lighter(115);
+    m_surfaceContainer = m_background.lighter(130);
+    m_surfaceContainerHigh = m_background.lighter(150);
+    m_surfaceContainerHighest = m_background.lighter(175);
+
     m_onSurface = QColor(special["foreground"].toString("#e2e2e2"));
-    m_onSurfaceVariant = m_onSurface.darker(130);
-    m_primary = QColor(colors["color1"].toString("#fc3f1d"));
+    m_onSurfaceVariant = m_onSurface.darker(125);
+
+    // Pick luminous purple/accent from illogical-impulse
+    QString pStr = colors["color5"].toString();
+    if (pStr.isEmpty()) pStr = colors["color6"].toString();
+    if (pStr.isEmpty()) pStr = colors["color1"].toString();
+    m_primary = QColor(pStr.isEmpty() ? "#9369AE" : pStr);
     m_primaryHover = m_primary.lighter(115);
     m_onPrimary = QColor("#ffffff");
-    m_outline = QColor(colors["color8"].toString("#474747"));
-    m_secondary = QColor(colors["color2"].toString("#e59b24"));
+    m_primaryContainer = m_primary.darker(180);
+    m_onPrimaryContainer = m_primary.lighter(160);
 
-    deriveSurfaces();
+    m_outline = QColor(colors["color8"].toString("#474747"));
+    m_outlineVariant = m_outline.darker(130);
+
+    m_secondary = QColor(colors["color4"].toString("#AE6F96"));
+    m_secondaryContainer = m_secondary.darker(180);
+    m_tertiary = QColor(colors["color3"].toString("#9C6697"));
+
+    m_isDark = true;
     return true;
 }
 
 void ThemeManager::loadColors() {
+    // Не все загрузчики заполняют каждый цвет: начинаем с дефолтов, чтобы не оставалось
+    // невалидных или устаревших значений от предыдущей темы.
+    setDefaults();
     bool ok = tryLoadQuickshell();
-    if (!ok) ok = tryLoadWal();
     if (!ok) ok = tryLoadPresets();
     if (!ok) ok = tryLoadNoctalia();
+    if (!ok) ok = tryLoadWal();
     if (!ok) setDefaults();
 
     emit themeChanged();

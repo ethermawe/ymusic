@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Layouts
 import ymusic.ui
 
@@ -57,18 +58,20 @@ Item {
             Layout.alignment: Qt.AlignVCenter
             spacing: 4
 
-            IconButton {
+            TransportButton {
                 anchors.verticalCenter: parent.verticalCenter
                 symbol: "shuffle"
+                effect: TransportButton.Bounce
                 size: 34
                 iconSize: 18
                 toggled: backend.shuffle
                 onClicked: backend.toggleShuffle()
             }
 
-            IconButton {
+            TransportButton {
                 anchors.verticalCenter: parent.verticalCenter
                 symbol: "skip_previous"
+                effect: TransportButton.NudgeLeft
                 size: 34
                 iconSize: 22
                 onClicked: backend.prev()
@@ -81,17 +84,19 @@ Item {
                 onClicked: backend.toggle()
             }
 
-            IconButton {
+            TransportButton {
                 anchors.verticalCenter: parent.verticalCenter
                 symbol: "skip_next"
+                effect: TransportButton.NudgeRight
                 size: 34
                 iconSize: 22
                 onClicked: backend.next()
             }
 
-            IconButton {
+            TransportButton {
                 anchors.verticalCenter: parent.verticalCenter
                 symbol: backend.repeatMode === 2 ? "repeat_one" : "repeat"
+                effect: TransportButton.Bounce
                 size: 34
                 iconSize: 18
                 toggled: backend.repeatMode !== 0
@@ -201,6 +206,12 @@ Item {
                             font.weight: Font.DemiBold
                             elide: Text.ElideRight
                             Layout.maximumWidth: 280
+                            font.underline: playerTitleHover.hovered && backend.nowHasAlbum
+                            HoverHandler {
+                                id: playerTitleHover
+                                cursorShape: backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            }
+                            TapHandler { enabled: backend.nowHasAlbum; onTapped: backend.openNowAlbum() }
                         }
 
                         Text {
@@ -217,6 +228,16 @@ Item {
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                             visible: backend.hasTrack
+                            font.underline: playerArtistHover.hovered && backend.nowHasArtist
+                            HoverHandler { id: playerArtistHover; cursorShape: backend.nowHasArtist ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                            TapHandler { enabled: backend.nowHasArtist; onTapped: backend.openNowArtist() }
+                        }
+
+                        // Compact dancing visualizer meter (Swiftify CompactMeter)
+                        EqualizerBars {
+                            Layout.alignment: Qt.AlignVCenter
+                            active: backend.playing
+                            visible: backend.playing && backend.hasTrack
                         }
                     }
 
@@ -225,26 +246,26 @@ Item {
                         Layout.fillWidth: true
                         spacing: 8
 
-                        Text {
+                        RollingText {
                             text: backend.positionText
                             color: Appearance.colors.onSurfaceVariant
-                            font.pixelSize: Appearance.fontSize.smallest
-                            font.family: "monospace"
+                            pixelSize: Appearance.fontSize.smallest
                         }
 
                         StyledSlider {
                             Layout.fillWidth: true
                             value: backend.progress
+                            animatedWave: true
+                            playing: backend.playing
                             trackHeight: 3
                             activeTrackHeight: 5
                             onUserSeek: (fraction) => backend.seek(fraction)
                         }
 
-                        Text {
+                        RollingText {
                             text: backend.durationText
                             color: Appearance.colors.onSurfaceVariant
-                            font.pixelSize: Appearance.fontSize.smallest
-                            font.family: "monospace"
+                            pixelSize: Appearance.fontSize.smallest
                         }
                     }
                 }
@@ -269,6 +290,22 @@ Item {
 
             VolumeControl {
                 anchors.verticalCenter: parent.verticalCenter
+            }
+
+            IconButton {
+                id: trackActions
+                anchors.verticalCenter: parent.verticalCenter
+                symbol: "more_horiz"
+                size: 34
+                iconSize: 20
+                enabled: backend.hasTrack
+                tooltip: "Действия с текущим треком"
+                onClicked: {
+                    const appWindow = root.Window.window;
+                    if (!appWindow) return;
+                    const point = trackActions.mapToItem(appWindow.contentItem, 0, 0);
+                    backend.requestTrackMenu(backend.nowId, backend.nowTitle, true, point.x, point.y);
+                }
             }
 
             IconButton {

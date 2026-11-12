@@ -26,6 +26,81 @@ pub fn track_path(track_id: &str) -> Option<PathBuf> {
     cache_root().map(|d| d.join("tracks").join(format!("{safe}.mp3")))
 }
 
+/// Explicit offline downloads live outside the automatically evicted cache.
+pub fn offline_track_path(track_id: &str) -> Option<PathBuf> {
+    let name = format!("{:x}.mp3", md5::compute(track_id.as_bytes()));
+    dirs::data_local_dir().map(|d| d.join("ymusic/offline").join(name))
+}
+
+pub fn is_offline(track_id: &str) -> bool {
+    offline_track_path(track_id).and_then(|p| fs::metadata(p).ok()).is_some_and(|m| m.len() > 1024)
+}
+
+pub fn save_offline_metadata(track: &crate::api::Track) -> Result<()> {
+    let path = offline_track_path(&track.id).ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?.with_extension("json");
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let tmp = path.with_extension(format!("{}-{}.json.tmp", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+    fs::write(&tmp, serde_json::to_vec(track)?)?;
+    fs::rename(tmp, path)?;
+    Ok(())
+}
+
+pub fn offline_tracks() -> Result<(Vec<crate::api::Track>, u64)> {
+    let dir = offline_track_path("").ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?.parent().unwrap().to_path_buf();
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok((Vec::new(), 0)),
+        Err(e) => return Err(e.into()),
+    };
+    let mut tracks = Vec::new();
+    let mut size = 0;
+    for entry in entries.flatten() {
+        if entry.path().extension().is_none_or(|ext| ext != "json") { continue; }
+        let Ok(data) = fs::read(entry.path()) else { continue };
+        let Ok(mut track) = serde_json::from_slice::<crate::api::Track>(&data) else { continue };
+        let Some(path) = offline_track_path(&track.id) else { continue };
+        let Ok(meta) = fs::metadata(path) else { continue };
+        if meta.len() <= 1024 { continue; }
+        size += meta.len();
+        track.available = true;
+        tracks.push(track);
+    }
+    tracks.sort_by(|a, b| a.artists.cmp(&b.artists).then(a.title.cmp(&b.title)));
+    Ok((tracks, size))
+}
+
+/// Older downloads have audio only. Recover their metadata from cached lists.
+pub fn recover_offline_metadata(known: &[crate::api::Track]) {
+    fn recover(track: &crate::api::Track) {
+        if is_offline(&track.id)
+            && offline_track_path(&track.id).is_some_and(|p| !p.with_extension("json").exists())
+        { let _ = save_offline_metadata(track); }
+    }
+    for track in known { recover(track); }
+    let Some(dir) = cache_root().map(|p| p.join("views")) else { return };
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let Ok(bytes) = fs::read(entry.path()) else { continue };
+        let Ok(view) = serde_json::from_slice::<serde_json::Value>(&bytes) else { continue };
+        if let Some(tracks) = view.get("tracks").and_then(|v| v.as_array()) {
+            for value in tracks {
+                if let Ok(track) = serde_json::from_value::<crate::api::Track>(value.clone()) { recover(&track); }
+            }
+        }
+    }
+}
+
+pub fn remove_offline(track_id: &str) -> Result<()> {
+    let path = offline_track_path(track_id).ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?;
+    match fs::remove_file(&path) {
+        Ok(()) => (),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => (),
+        Err(e) => return Err(e.into()),
+    }
+    let _ = fs::remove_file(path.with_extension("json"));
+    Ok(())
+}
+
 fn cover_path(url: &str) -> Option<PathBuf> {
     let hash = md5::compute(url.as_bytes());
     cache_root().map(|d| d.join("covers").join(format!("{hash:x}.img")))
@@ -53,6 +128,10 @@ pub fn load_view<T: DeserializeOwned>(key: &str) -> Option<T> {
     serde_json::from_slice(&bytes).ok()
 }
 
+pub fn remove_view(key: &str) {
+    if let Some(path) = view_cache_path(key) { let _ = fs::remove_file(path); }
+}
+
 pub fn read_cached_cover(url: &str) -> Option<Vec<u8>> {
     let path = cover_path(url)?;
     let bytes = fs::read(path).ok()?;
@@ -61,6 +140,13 @@ pub fn read_cached_cover(url: &str) -> Option<Vec<u8>> {
 
 /// Если трек уже закэширован на диске — возвращает открытый файл и его длину.
 pub fn open_cached_track(track_id: &str) -> Option<(File, u64)> {
+    if let Some(path) = offline_track_path(track_id)
+        && let Ok(file) = File::open(path)
+        && let Ok(meta) = file.metadata()
+        && meta.len() > 1024
+    {
+        return Some((file, meta.len()));
+    }
     let path = track_path(track_id)?;
     let file = File::open(&path).ok()?;
     let len = file.metadata().ok()?.len();
@@ -73,7 +159,10 @@ pub fn open_cached_track(track_id: &str) -> Option<(File, u64)> {
 }
 
 pub fn is_track_cached(track_id: &str) -> bool {
-    track_path(track_id)
+    offline_track_path(track_id)
+        .and_then(|p| fs::metadata(p).ok())
+        .is_some_and(|m| m.len() > 1024)
+        || track_path(track_id)
         .and_then(|p| fs::metadata(p).ok())
         .is_some_and(|m| m.len() > 1024)
 }
@@ -94,6 +183,113 @@ pub fn save_track(track_id: &str, bytes: &[u8]) {
     if fs::write(&tmp, bytes).is_ok() {
         let _ = fs::rename(&tmp, &path);
         trim_cache(dir);
+    }
+}
+
+/// Stream to a sibling file using bounded buffers; publish only a complete file.
+pub async fn download_to_file(http: &Client, url: &str, path: &std::path::Path) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+    const LIMIT: u64 = 128 * 1024 * 1024;
+    let mut response = http.get(url).send().await?.error_for_status()?;
+    let expected = response.content_length();
+    anyhow::ensure!(expected.is_none_or(|n| n <= LIMIT), "файл превышает 128 МБ");
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let tmp = path.with_extension(format!("{}-{}.part", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+    // Also remove an unfinished download if its async task is cancelled.
+    struct PartialFile(PathBuf);
+    impl Drop for PartialFile {
+        fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
+    }
+    let _partial = PartialFile(tmp.clone());
+    let mut file = tokio::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).await?;
+    let mut received = 0u64;
+    while let Some(chunk) = response.chunk().await? {
+        received += chunk.len() as u64;
+        anyhow::ensure!(received <= LIMIT, "файл превышает 128 МБ");
+        file.write_all(&chunk).await?;
+    }
+    anyhow::ensure!(received > 1024, "сервер вернул пустой аудиофайл");
+    anyhow::ensure!(expected.is_none_or(|n| n == received), "аудиофайл загружен не полностью");
+    file.flush().await?;
+    file.sync_all().await?;
+    drop(file);
+    tokio::fs::rename(&tmp, path).await?;
+    Ok(())
+}
+
+pub fn trim_track_cache() {
+    if let Some(dir) = cache_root().map(|p| p.join("tracks")) { trim_cache(&dir); }
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+
+    #[test]
+    fn offline_metadata_round_trip_and_removal() {
+        let id = format!("offline-test-{}", std::process::id());
+        let track = crate::api::Track {
+            id: id.clone(), title: "Offline test".into(), artists: "Test artist".into(),
+            album_id: None, album_title: String::new(), artist_id: None,
+            duration_ms: 1000, cover_uri: None, available: false,
+        };
+        let path = offline_track_path(&id).unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, vec![42; 2048]).unwrap();
+        save_offline_metadata(&track).unwrap();
+        let (tracks, size) = offline_tracks().unwrap();
+        let loaded = tracks.iter().find(|t| t.id == id).unwrap();
+        assert_eq!(loaded.title, "Offline test");
+        assert!(loaded.available);
+        assert!(size >= 2048);
+        assert!(is_offline(&id));
+        assert_eq!(open_cached_track(&id).unwrap().1, 2048);
+        remove_offline(&id).unwrap();
+        assert!(!is_offline(&id));
+        assert!(!path.with_extension("json").exists());
+        assert!(!offline_tracks().unwrap().0.iter().any(|t| t.id == id));
+    }
+
+    fn run_response(body: Vec<u8>, declared: usize) -> (Result<()>, PathBuf) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/audio", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0; 4096];
+            let _ = socket.read(&mut request);
+            write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n").unwrap();
+            socket.write_all(&body).unwrap();
+        });
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!("ymusic-download-test-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        fs::create_dir_all(&dir).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let client = Client::builder().no_proxy().build().unwrap();
+        let result = runtime.block_on(download_to_file(&client, &url, &dir.join("track.mp3")));
+        server.join().unwrap();
+        (result, dir)
+    }
+
+    #[test]
+    fn publishes_complete_download() {
+        let bytes = vec![42; 65536];
+        let (result, dir) = run_response(bytes.clone(), bytes.len());
+        result.unwrap();
+        assert_eq!(fs::read(dir.join("track.mp3")).unwrap(), bytes);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        fs::remove_file(dir.join("track.mp3")).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_partial_download_and_removes_temporary_file() {
+        let (result, dir) = run_response(vec![42; 2048], 4096);
+        assert!(result.is_err());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        fs::remove_dir(dir).unwrap();
     }
 }
 

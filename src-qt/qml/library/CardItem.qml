@@ -97,7 +97,7 @@ Item {
                 anchors.fill: parent
                 radius: root.isArtist ? width / 2 : Appearance.rounding.small
                 source: model.hasCover ? model.coverUrl : ""
-                fallbackSymbol: root.isArtist ? "person" : "album"
+                fallbackSymbol: root.isArtist ? "artists" : "album"
                 fallbackIconSize: 40
                 sourceSize.width: 240
                 sourceSize.height: 240

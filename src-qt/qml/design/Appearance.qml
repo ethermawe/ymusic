@@ -7,6 +7,10 @@ QtObject {
     // Reactive shell colors from ThemeManager
     readonly property var colors: themeManager
 
+    readonly property string fontFamily: "Rubik"
+    readonly property string monoFontFamily: "monospace"
+    readonly property bool reduceMotion: !appSettings.motionEnabled
+
     component Rounding: QtObject {
         readonly property int unsharpen: 2
         readonly property int unsharpenMore: 6

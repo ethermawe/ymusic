@@ -2,24 +2,24 @@
 pkgname=ymusic
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="Лёгкий нативный клиент Яндекс Музыки на Rust и Slint"
+pkgdesc="Нативный клиент Яндекс Музыки на Rust и Qt Quick"
 arch=('x86_64')
 url="https://github.com/ethermawe/ymusic"
 license=('custom')
-depends=('alsa-lib' 'fontconfig' 'freetype2' 'hicolor-icon-theme' 'libxkbcommon')
-makedepends=('cargo')
+depends=('alsa-lib' 'qt6-base' 'qt6-declarative' 'hicolor-icon-theme')
+makedepends=('cargo' 'cmake' 'qt6-shadertools')
 provides=('ymusic')
 conflicts=('ymusic-git')
 options=('!lto')
 
 build() {
     cd "$startdir"
-    cargo build --release --locked
+    cargo build --release --locked --lib
+    cmake -S src-qt -B build-qt -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build build-qt
 }
 
 package() {
     cd "$startdir"
-    install -Dm755 "target/release/ymusic" "$pkgdir/usr/bin/ymusic"
-    install -Dm644 "ymusic.desktop" "$pkgdir/usr/share/applications/ymusic.desktop"
-    install -Dm644 "icon.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/ymusic.svg"
+    DESTDIR="$pkgdir" cmake --install build-qt
 }

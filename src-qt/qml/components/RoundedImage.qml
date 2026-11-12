@@ -1,11 +1,10 @@
 import QtQuick
-import QtQuick.Effects
 import ymusic.ui
 
 Item {
     id: root
 
-    property alias source: srcImage.source
+    property url source: ""
     property alias status: srcImage.status
     property alias asynchronous: srcImage.asynchronous
     property alias cache: srcImage.cache
@@ -17,6 +16,14 @@ Item {
     property color fallbackColor: Appearance.colors.surfaceContainerHighest
     property real borderWidth: 0
     property color borderColor: Qt.rgba(1, 1, 1, 0.08)
+    property bool fadeIn: true
+    property int maximumPixelSize: 1536
+
+    readonly property int decodePixelSize: {
+        const dpr = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1;
+        const requested = Math.ceil(Math.max(width, height) * dpr);
+        return Math.min(maximumPixelSize, Math.max(32, requested));
+    }
 
     readonly property bool hasValidImage: srcImage.status === Image.Ready && source.toString().length > 0
 
@@ -39,33 +46,36 @@ Item {
         }
     }
 
-    // Source Image (hidden from direct render, texture fed into MultiEffect)
+    // Image provides its texture directly: no offscreen image/mask layers.
     Image {
         id: srcImage
+        source: appSettings.coversEnabled ? root.source : ""
         anchors.fill: parent
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
         cache: true
+        sourceSize.width: root.decodePixelSize
+        sourceSize.height: root.decodePixelSize
         visible: false
     }
 
-    // Mask Item with smooth rounded corners
-    Rectangle {
-        id: maskRect
+    ShaderEffect {
         anchors.fill: parent
-        radius: root.radius
-        color: "#ffffff"
-        layer.enabled: true
-        visible: false
-    }
-
-    // Hardware GPU masked image with smooth subpixel rounded corners
-    MultiEffect {
-        anchors.fill: parent
-        source: srcImage
-        maskEnabled: true
-        maskSource: maskRect
+        property variant source: srcImage
+        property size itemSize: Qt.size(width, height)
+        property real radius: root.radius
+        readonly property real imageAspect: srcImage.implicitHeight > 0 ? srcImage.implicitWidth / srcImage.implicitHeight : 1
+        readonly property real itemAspect: height > 0 ? width / height : 1
+        property vector2d uvScale: root.fillMode === Image.PreserveAspectCrop
+            ? (imageAspect > itemAspect ? Qt.vector2d(itemAspect / imageAspect, 1) : Qt.vector2d(1, imageAspect / itemAspect))
+            : Qt.vector2d(1, 1)
+        fragmentShader: "qrc:/shaders/rounded_image.frag.qsb"
         visible: root.hasValidImage
+        opacity: root.hasValidImage ? 1 : 0
+        Behavior on opacity {
+            enabled: root.fadeIn && !Appearance.reduceMotion
+            NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+        }
     }
 
     // Optional border overlay with matching radius

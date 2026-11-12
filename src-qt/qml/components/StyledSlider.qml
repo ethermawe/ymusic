@@ -13,6 +13,8 @@ Item {
     property color thumbColor: Appearance.colors.onPrimary
     property bool interactive: true
     property bool showThumb: true
+    property bool animatedWave: false
+    property bool playing: false
 
     signal userSeek(real fraction)
 
@@ -25,54 +27,39 @@ Item {
     property real visualProgress: isDragging ? dragProgress : value
     property real dragProgress: 0.0
 
-    Rectangle {
-        id: track
+    ShaderEffect {
+        id: progressShader
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        height: (root.isHovered || root.isDragging) ? root.activeTrackHeight : root.trackHeight
-        radius: height / 2
-        color: root.trackColor
+        // Keep the rendering area fixed and leave room for the full wave,
+        // antialiasing fringe and handle, including during hover transitions.
+        height: Math.max(root.height, root.activeTrackHeight + 8, 22)
+        property size itemSize: Qt.size(width, height)
+        property real progress: Math.max(0, Math.min(1, root.visualProgress))
+        property real amplitude: root.animatedWave && root.playing && !Appearance.reduceMotion
+                                 ? (root.isHovered || root.isDragging ? 2.4 : 1.6) : 0
+        property real wavelength: 34
+        property real phase: 0
+        property real thickness: root.isHovered || root.isDragging ? root.activeTrackHeight : root.trackHeight
+        property real handleWidth: root.showThumb && (root.animatedWave || root.isHovered || root.isDragging) ? 4 : 0
+        property real handleHeight: 18
+        property real gap: 4
+        property color activeColor: (root.isHovered || root.isDragging) ? root.hoverFillColor : root.fillColor
+        property color trackColor: root.trackColor
+        property color handleColor: root.animatedWave ? root.fillColor : root.thumbColor
+        fragmentShader: "qrc:/shaders/wavy_progress.frag.qsb"
 
-        Behavior on height {
-            NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
-        }
+        Behavior on thickness { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on amplitude { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        Behavior on handleWidth { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
-        Rectangle {
-            id: fill
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            width: Math.max(0, Math.min(parent.width, parent.width * root.visualProgress))
-            radius: parent.radius
-            color: (root.isHovered || root.isDragging) ? root.hoverFillColor : root.fillColor
-
-            Behavior on color {
-                ColorAnimation { duration: 140 }
-            }
-        }
-    }
-
-    Rectangle {
-        id: thumb
-        visible: root.showThumb
-        width: (root.isHovered || root.isDragging) ? 12 : 0
-        height: width
-        radius: width / 2
-        color: root.thumbColor
-        anchors.verticalCenter: parent.verticalCenter
-        x: Math.max(0, Math.min(parent.width - width, parent.width * root.visualProgress - width / 2))
-
-        scale: (root.isHovered || root.isDragging) ? 1.0 : 0.0
-        Behavior on scale {
-            NumberAnimation {
-                duration: 160
-                easing.type: Easing.OutBack
-                easing.overshoot: 1.8
-            }
-        }
-        Behavior on width {
-            NumberAnimation { duration: 140 }
+        NumberAnimation on phase {
+            from: 0
+            to: 6.283185
+            duration: 2200
+            loops: Animation.Infinite
+            running: root.animatedWave && root.playing && root.visible && !Appearance.reduceMotion
         }
     }
 

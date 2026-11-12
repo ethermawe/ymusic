@@ -1,78 +1,87 @@
 import QtQuick
-import QtQuick.Templates as T
 import ymusic.ui
 
-T.AbstractButton {
+Item {
     id: root
 
     property bool playing: false
-    property real size: 44
-    property real iconSize: Math.round(size * 0.52)
     property color color: Appearance.colors.primary
-    property color hoverColor: Appearance.colors.primaryHover
     property color iconColor: Appearance.colors.onPrimary
+    property real size: 44
+    signal clicked()
 
     implicitWidth: size
     implicitHeight: size
-    hoverEnabled: true
 
-    scale: down ? 0.90 : (hovered ? 1.07 : 1.0)
-    Behavior on scale {
-        NumberAnimation {
-            duration: 220
-            easing.type: Easing.OutBack
-            easing.overshoot: 2.2
+    scale: mouseArea.pressed ? 0.90 : (mouseArea.containsMouse ? 1.06 : 1.0)
+    Behavior on scale { Bounce {} }
+
+    MaterialShape {
+        id: shapeItem
+        anchors.fill: parent
+        shape: "softCookie"
+        morphTo: "cookie9"
+        morph: root.playing ? 1 : 0
+        Behavior on morph {
+            NumberAnimation { duration: Appearance.reduceMotion ? 0 : 400; easing.type: Easing.InOutCubic }
         }
+        color: mouseArea.containsMouse ? Appearance.colors.primaryHover : root.color
+        spinAngle: spinAnim.currentAngle
+
+        Behavior on color { ElementMoveFastColor {} }
     }
 
-    onPlayingChanged: pop.restart()
-
-    background: Rectangle {
-        anchors.fill: parent
-        radius: root.size / 2
-        color: root.hovered ? root.hoverColor : root.color
-
-        Behavior on color {
-            ColorAnimation { duration: 160 }
-        }
-
-        // Ambient glow
-        Rectangle {
-            anchors.centerIn: parent
-            width: parent.width + 8
-            height: parent.height + 8
-            radius: width / 2
-            z: -1
-            color: root.color
-            opacity: root.hovered ? 0.35 : 0.15
-            Behavior on opacity {
-                NumberAnimation { duration: 200 }
+    NumberAnimation {
+        id: spinAnim
+        property real currentAngle: 0
+        target: spinAnim
+        property: "currentAngle"
+        from: 0
+        to: 360
+        duration: 9000
+        loops: Animation.Infinite
+        running: root.visible && !Appearance.reduceMotion
+        onRunningChanged: if (running) paused = !root.playing
+        Connections {
+            target: root
+            function onPlayingChanged() {
+                if (spinAnim.running) spinAnim.paused = !root.playing;
             }
         }
     }
 
-    contentItem: Item {
-        anchors.fill: parent
-
+    Item {
+        id: glyph
+        anchors.centerIn: parent
+        width: Math.round(root.size * 0.52)
+        height: width
         MaterialSymbol {
-            id: glyph
             anchors.centerIn: parent
-            // Center play arrow visually slightly to the right
-            anchors.horizontalCenterOffset: root.playing ? 0 : 1
-            text: root.playing ? "pause" : "play_arrow"
-            iconSize: root.iconSize
+            text: "play_arrow"
+            iconSize: glyph.width
             color: root.iconColor
-
-            NumberAnimation {
-                id: pop
-                target: glyph
-                property: "scale"
-                from: 0.6
-                to: 1.0
-                duration: 380
-                easing.type: Easing.OutBack
-                easing.overshoot: 2.4
-            }
+            opacity: root.playing ? 0 : 1
+            scale: root.playing ? 0.65 : 1
+            Behavior on opacity { NumberAnimation { duration: Appearance.reduceMotion ? 0 : 180 } }
+            Behavior on scale { NumberAnimation { duration: Appearance.reduceMotion ? 0 : 280; easing.type: Easing.OutCubic } }
         }
+        MaterialSymbol {
+            anchors.centerIn: parent
+            text: "pause"
+            iconSize: glyph.width
+            color: root.iconColor
+            opacity: root.playing ? 1 : 0
+            scale: root.playing ? 1 : 0.65
+            Behavior on opacity { NumberAnimation { duration: Appearance.reduceMotion ? 0 : 180 } }
+            Behavior on scale { NumberAnimation { duration: Appearance.reduceMotion ? 0 : 280; easing.type: Easing.OutCubic } }
+        }
+    }
+
+    MouseArea {
+        id: mouseArea
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.clicked()
     }
 }

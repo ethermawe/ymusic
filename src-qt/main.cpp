@@ -1,4 +1,5 @@
 #include <QGuiApplication>
+#include <QFont>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -8,10 +9,14 @@
 #include <QNetworkReply>
 #include <QNetworkDiskCache>
 #include <QStandardPaths>
+#include <QQuickWindow>
+#include <QSGRendererInterface>
+#include <QDebug>
 #include "YMusicBackend.h"
 #include "TrackModel.h"
 #include "CardModel.h"
 #include "ThemeManager.h"
+#include "AppSettings.h"
 
 class CustomNetworkAccessManager : public QNetworkAccessManager {
     Q_OBJECT
@@ -40,10 +45,41 @@ public:
 };
 
 int main(int argc, char *argv[]) {
+    bool graphicsOverride = qEnvironmentVariableIsSet("QSG_RHI_BACKEND");
+    // Opt-in: keep Qt's default and user environment unless explicitly selected.
+    for (int i = 1; i < argc; ++i) {
+        const QByteArray arg(argv[i]);
+        if (arg == "--graphics=vulkan") {
+            graphicsOverride = true;
+            QQuickWindow::setGraphicsApi(QSGRendererInterface::Vulkan);
+        } else if (arg == "--graphics=opengl") {
+            graphicsOverride = true;
+            QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+        } else if (arg.startsWith("--graphics=")) {
+            qCritical() << "Supported graphics backends: vulkan, opengl";
+            return 2;
+        }
+    }
+    // Release decoded CPU-side cover pixels once uploaded to the GPU.
+    // Respect an explicit user override when diagnosing a graphics driver.
+    if (!qEnvironmentVariableIsSet("QSG_TRANSIENT_IMAGES"))
+        qputenv("QSG_TRANSIENT_IMAGES", "1");
     QGuiApplication app(argc, argv);
     app.setApplicationName("ymusic");
     app.setOrganizationName("finrixx");
     app.setApplicationDisplayName("Yandex Music");
+
+    AppSettings settings;
+    if (!graphicsOverride) {
+        if (settings.graphicsBackend() == "vulkan")
+            QQuickWindow::setGraphicsApi(QSGRendererInterface::Vulkan);
+        else if (settings.graphicsBackend() == "opengl")
+            QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+    }
+
+    QFont appFont("Rubik", 10);
+    appFont.setStyleHint(QFont::SansSerif);
+    app.setFont(appFont);
 
     QQuickStyle::setStyle("Basic");
 
@@ -51,6 +87,7 @@ int main(int argc, char *argv[]) {
     qmlRegisterUncreatableType<CardModel>("ymusic.ui", 1, 0, "CardModel", "Provided by backend");
     qmlRegisterUncreatableType<YMusicBackend>("ymusic.ui", 1, 0, "YMusicBackend", "Provided by backend");
     qmlRegisterUncreatableType<ThemeManager>("ymusic.ui", 1, 0, "ThemeManager", "Provided by context");
+    qmlRegisterUncreatableType<AppSettings>("ymusic.ui", 1, 0, "AppSettings", "Provided by context");
 
     YMusicBackend backend;
 
@@ -58,6 +95,7 @@ int main(int argc, char *argv[]) {
     engine.setNetworkAccessManagerFactory(new CustomNamFactory);
     engine.rootContext()->setContextProperty("backend", &backend);
     engine.rootContext()->setContextProperty("themeManager", &ThemeManager::instance());
+    engine.rootContext()->setContextProperty("appSettings", &settings);
 
     engine.loadFromModule("ymusic.ui", "Main");
 

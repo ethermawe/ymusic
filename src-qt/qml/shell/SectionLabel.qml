@@ -24,16 +24,19 @@ Item {
             font.weight: Font.Bold
             font.capitalization: Font.AllUppercase
             color: Appearance.colors.onSurfaceVariant
-            opacity: 0.8
+            opacity: 0.85
         }
 
-        Rectangle {
+        WavyLine {
             anchors.verticalCenter: parent.verticalCenter
             width: Math.max(0, parent.width - label.width - trailingSlot.width - 24)
-            height: 1
+            height: 8
+            wavelength: 14
+            amplitude: 1.8
             color: Qt.rgba(Appearance.colors.outlineVariant.r,
                            Appearance.colors.outlineVariant.g,
-                           Appearance.colors.outlineVariant.b, 0.4)
+                           Appearance.colors.outlineVariant.b, 0.5)
+            visible: width > 16
         }
 
         Row {

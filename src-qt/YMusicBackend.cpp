@@ -4,6 +4,11 @@
 #include <QJsonArray>
 #include <QMetaObject>
 #include <QDebug>
+#include <QGuiApplication>
+#include <QClipboard>
+#include <QCryptographicHash>
+#include <QFileInfo>
+#include <QDir>
 
 YMusicBackend::YMusicBackend(QObject *parent)
     : QObject(parent) {
@@ -35,6 +40,11 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
     case EVENT_LOGIN_STATUS: {
         m_loggedIn = obj["logged_in"].toBool();
         m_loginBusy = obj["busy"].toBool();
+        if (!m_loginBusy) m_authReady = true;
+        if (!m_loginBusy) {
+            m_loginCode.clear();
+            m_loginUrl.clear();
+        }
         m_userName = obj["user_name"].toString();
         m_userAvatar = obj["user_avatar"].toString();
         m_userHasAvatar = obj["user_has_avatar"].toBool();
@@ -75,6 +85,7 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         m_shuffle = obj["shuffle"].toBool();
         m_repeatMode = obj["repeat_mode"].toInt();
         m_trackModel.setPlaying(m_playing);
+        m_queueModel.setPlaying(m_playing);
         emit playbackStateChanged();
         emit volumeChanged();
         break;
@@ -83,6 +94,15 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         QJsonArray arr = obj["tracks"].toArray();
         int curIdx = obj["current_index"].toInt();
         m_trackModel.setTracks(arr, curIdx);
+        break;
+    }
+    case EVENT_QUEUE_LOADED: {
+        m_queueModel.setTracks(obj["tracks"].toArray(), obj["current_index"].toInt(-1));
+        break;
+    }
+    case EVENT_PLAYLIST_PICKER: {
+        emit playlistPickerResult(obj["id"].toString(), obj["stage"].toString(),
+                                  obj["playlists"].toArray().toVariantList(), obj["message"].toString());
         break;
     }
     case EVENT_CARDS_LOADED: {
@@ -97,6 +117,7 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         }
         m_page = newPage;
         m_listTitle = obj["title"].toString();
+        m_listCover = obj["cover_url"].toString();
         m_listSubtitle = obj["subtitle"].toString();
         m_listLoading = obj["loading"].toBool();
         m_isArtistView = obj["is_artist_view"].toBool();
@@ -120,10 +141,20 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
 }
 
 void YMusicBackend::loginDevice() {
+    if (m_loginBusy) return;
+    m_loginCode.clear();
+    m_loginUrl.clear();
+    clearStatus();
+    m_loginBusy = true;
+    emit authChanged();
     if (m_core) ymusic_core_login_device(m_core);
 }
 
 void YMusicBackend::loginToken(const QString &token) {
+    if (m_loginBusy || token.trimmed().isEmpty()) return;
+    clearStatus();
+    m_loginBusy = true;
+    emit authChanged();
     if (m_core) ymusic_core_login_token(m_core, token.toUtf8().constData());
 }
 
@@ -137,6 +168,32 @@ void YMusicBackend::loadHome() {
 
 void YMusicBackend::loadLikes() {
     if (m_core) ymusic_core_load_likes(m_core);
+}
+
+void YMusicBackend::loadDownloads() {
+    if (m_core) ymusic_core_load_downloads(m_core);
+}
+
+void YMusicBackend::loadPlaylistChoices(const QString &id) {
+    if (m_core && m_loggedIn) ymusic_core_playlist_choices(m_core, id.toUtf8().constData());
+}
+
+void YMusicBackend::addToPlaylist(const QString &id, const QString &kind) {
+    bool ok = false;
+    const auto value = kind.toULongLong(&ok);
+    if (ok && m_core && m_loggedIn) ymusic_core_add_to_playlist(m_core, id.toUtf8().constData(), value);
+}
+
+void YMusicBackend::removeDownload(const QString &id) {
+    if (m_core) ymusic_core_remove_download(m_core, id.toUtf8().constData());
+}
+
+bool YMusicBackend::isDownloaded(const QString &id) const {
+    QString base = qEnvironmentVariable("XDG_DATA_HOME");
+    if (base.isEmpty()) base = QDir::homePath() + "/.local/share";
+    const auto hash = QCryptographicHash::hash(id.toUtf8(), QCryptographicHash::Md5).toHex();
+    const QFileInfo info(base + "/ymusic/offline/" + QString::fromLatin1(hash) + ".mp3");
+    return info.isFile() && info.size() > 1024;
 }
 
 void YMusicBackend::loadPlaylists() {
@@ -159,6 +216,7 @@ void YMusicBackend::goBack() {
     case 3: loadPlaylists(); break;
     case 4: loadAlbums(); break;
     case 5: loadArtists(); break;
+    case 7: loadDownloads(); break;
     default: loadHome(); break;
     }
 }
@@ -197,6 +255,23 @@ void YMusicBackend::openNowAlbum() {
 
 void YMusicBackend::play(int index) {
     if (m_core) ymusic_core_play(m_core, index);
+}
+
+void YMusicBackend::trackAction(const QString &id, int action) {
+    if (m_core) ymusic_core_track_action(m_core, id.toUtf8().constData(), action);
+}
+
+void YMusicBackend::saveOffline(const QString &id) {
+    if (m_core) ymusic_core_download_track(m_core, id.toUtf8().constData(), "");
+}
+
+void YMusicBackend::downloadTrack(const QString &id, const QUrl &destination) {
+    if (m_core && destination.isLocalFile())
+        ymusic_core_download_track(m_core, id.toUtf8().constData(), destination.toLocalFile().toUtf8().constData());
+}
+
+void YMusicBackend::copyText(const QString &text) {
+    QGuiApplication::clipboard()->setText(text);
 }
 
 void YMusicBackend::toggle() {

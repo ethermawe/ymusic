@@ -34,6 +34,7 @@ QHash<int, QByteArray> CardModel::roleNames() const {
 }
 
 void CardModel::setCards(const QJsonArray &cardsArray) {
+    const int oldCount = m_cards.size();
     beginResetModel();
     m_cards.clear();
     m_cards.reserve(cardsArray.size());
@@ -49,4 +50,5 @@ void CardModel::setCards(const QJsonArray &cardsArray) {
         m_cards.append(c);
     }
     endResetModel();
+    if (oldCount != m_cards.size()) emit countChanged();
 }

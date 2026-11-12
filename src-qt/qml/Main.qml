@@ -15,9 +15,26 @@ ApplicationWindow {
     color: Appearance.colors.surfaceContainerLowest
 
     property bool immersiveOpen: false
+    SettingsDialog {
+        id: settingsDialog
+        parent: Overlay.overlay
+    }
+    Connections {
+        target: backend
+        function onTrackMenuRequested(id, title, available, x, y) {
+            trackMenu.x = Math.max(0, Math.min(window.contentItem.width - trackMenu.width, x));
+            trackMenu.y = Math.max(8, Math.min(y, window.contentItem.height - trackMenu.implicitHeight - 8));
+            trackMenu.showFor(id, title, available);
+        }
+    }
+
+    TrackMenu {
+        id: trackMenu
+        parent: window.contentItem
+    }
     readonly property bool isHome: backend.page === 0
-    readonly property bool isCardsPage: (backend.page === 3 || backend.page === 4 || backend.page === 5) || (backend.page === 6 && !backend.isArtistView && backend.tracks.rowCount() === 0)
-    readonly property bool isTrackListPage: backend.page === 1 || backend.page === 2 || (backend.page === 6 && (backend.isArtistView || backend.tracks.rowCount() > 0))
+    readonly property bool isCardsPage: (backend.page === 3 || backend.page === 4 || backend.page === 5) || (backend.page === 6 && !backend.isArtistView && backend.tracks.count === 0)
+    readonly property bool isTrackListPage: backend.page === 7 || backend.page === 1 || backend.page === 2 || (backend.page === 6 && (backend.isArtistView || backend.tracks.count > 0))
 
     // Root layout
     Item {
@@ -30,6 +47,7 @@ ApplicationWindow {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: 210
+            onSettingsRequested: settingsDialog.open()
         }
 
         // Center Elevated Sheet
@@ -84,31 +102,43 @@ ApplicationWindow {
             // Status message toast / banner
             Rectangle {
                 id: statusBanner
-                visible: backend.statusMessage.length > 0
+                visible: opacity > 0
                 anchors.top: parent.top
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.topMargin: 12
-                height: 36
-                width: statusText.implicitWidth + 32
-                radius: Appearance.rounding.full
+                height: Math.max(48, statusRow.implicitHeight + 20)
+                width: Math.min(parent.width - 112, Math.max(280, statusText.implicitWidth + 76))
+                radius: Appearance.rounding.normal
                 color: Appearance.colors.primaryContainer
-                border.width: 1
-                border.color: Appearance.colors.primary
-                z: 10
+                border.width: 0
+                z: 30
+
+                Timer {
+                    interval: 8000
+                    running: backend.statusMessage.length > 0
+                    onTriggered: backend.clearStatus()
+                }
+
+                Behavior on opacity {
+                    NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+                }
+                opacity: backend.statusMessage.length > 0 ? 1 : 0
 
                 RowLayout {
-                    anchors.centerIn: parent
-                    spacing: 8
-
-                    MaterialSymbol {
-                        text: "auto_awesome"
-                        iconSize: 16
-                        color: Appearance.colors.onPrimaryContainer
-                    }
+                    id: statusRow
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.leftMargin: 16
+                    anchors.rightMargin: 10
+                    spacing: 12
 
                     Text {
                         id: statusText
+                        Layout.fillWidth: true
                         text: backend.statusMessage
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WordWrap
                         color: Appearance.colors.onPrimaryContainer
                         font.pixelSize: Appearance.fontSize.smaller
                         font.weight: Font.Medium
@@ -124,153 +154,27 @@ ApplicationWindow {
                 }
             }
 
+            StyledText {
+                anchors.centerIn: parent
+                visible: !backend.authReady && backend.page !== 7
+                text: "Восстанавление сессии..."
+                color: Appearance.colors.onSurfaceVariant
+            }
+
             // View 1: Not Logged In
-            Item {
+            Loader {
                 id: loginView
                 anchors.fill: parent
-                visible: !backend.loggedIn
-
-                ColumnLayout {
-                    anchors.centerIn: parent
-                    spacing: 20
-                    width: 360
-
-                    MaterialSymbol {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: "music_note"
-                        iconSize: 64
-                        color: Appearance.colors.primary
-                    }
-
-                    Text {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: "Добро пожаловать в Yandex Music"
-                        color: Appearance.colors.onSurface
-                        font.pixelSize: Appearance.fontSize.title
-                        font.weight: Font.Bold
-                    }
-
-                    Text {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: "Авторизуйтесь для доступа к вашим трекам и Моей волне"
-                        color: Appearance.colors.onSurfaceVariant
-                        font.pixelSize: Appearance.fontSize.small
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    // Device code section
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-                        visible: backend.loginCode.length > 0
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 60
-                            radius: Appearance.rounding.normal
-                            color: Appearance.colors.surfaceContainerHigh
-                            border.width: 1
-                            border.color: Appearance.colors.primary
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: backend.loginCode
-                                color: Appearance.colors.primary
-                                font.pixelSize: 28
-                                font.weight: Font.Bold
-                                font.letterSpacing: 4
-                            }
-                        }
-
-                        Text {
-                            Layout.alignment: Qt.AlignHCenter
-                            text: "Перейдите на <a href=\"" + backend.loginUrl + "\">" + backend.loginUrl + "</a> и введите код выше"
-                            color: Appearance.colors.onSurfaceVariant
-                            font.pixelSize: Appearance.fontSize.smaller
-                            onLinkActivated: (link) => Qt.openUrlExternally(link)
-                        }
-                    }
-
-                    // Login button
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 44
-                        radius: Appearance.rounding.full
-                        color: loginMouse.containsMouse ? Appearance.colors.primaryHover : Appearance.colors.primary
-
-                        RowLayout {
-                            anchors.centerIn: parent
-                            spacing: 8
-
-                            MaterialSymbol {
-                                text: "auto_awesome"
-                                iconSize: 18
-                                color: Appearance.colors.onPrimary
-                            }
-
-                            Text {
-                                text: backend.loginBusy ? "Ожидание входа..." : "Войти через код устройства"
-                                color: Appearance.colors.onPrimary
-                                font.pixelSize: Appearance.fontSize.small
-                                font.weight: Font.DemiBold
-                            }
-                        }
-
-                        MouseArea {
-                            id: loginMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            enabled: !backend.loginBusy
-                            onClicked: backend.loginDevice()
-                        }
-                    }
-
-                    // Or enter token manually
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 40
-                        radius: Appearance.rounding.full
-                        color: Appearance.colors.surfaceContainerLow
-                        border.width: 1
-                        border.color: Qt.rgba(1, 1, 1, 0.08)
-
-                        TextInput {
-                            id: tokenInput
-                            anchors.fill: parent
-                            anchors.leftMargin: 16
-                            anchors.rightMargin: 16
-                            verticalAlignment: TextInput.AlignVCenter
-                            color: Appearance.colors.onSurface
-                            font.pixelSize: Appearance.fontSize.smaller
-                            clip: true
-
-                            Text {
-                                anchors.fill: parent
-                                verticalAlignment: Text.AlignVCenter
-                                text: "или вставьте OAuth токен..."
-                                color: Appearance.colors.onSurfaceVariant
-                                font.pixelSize: Appearance.fontSize.smaller
-                                visible: !tokenInput.text && !tokenInput.activeFocus
-                            }
-
-                            onAccepted: {
-                                if (text.trim().length > 0) {
-                                    backend.loginToken(text.trim());
-                                }
-                            }
-                        }
-                    }
-                }
+                active: backend.authReady && !backend.loggedIn && backend.page !== 7
+                sourceComponent: LoginView {}
             }
 
             // View 2: Home Page (Swiftify-style spotlight, shortcuts, and recommendations)
-            HomeView {
+            Loader {
                 id: homeView
                 anchors.fill: parent
-                visible: backend.loggedIn && window.isHome
+                active: backend.loggedIn && window.isHome
+                sourceComponent: HomeView {}
             }
 
             // View 3: Cards Grid View (Плейлисты, Альбомы, Артисты)
@@ -317,7 +221,7 @@ ApplicationWindow {
                         reuseItems: true
                         displayMarginBeginning: 200
                         displayMarginEnd: 200
-                        model: backend.cards
+                        model: cardsView.visible ? backend.cards : null
 
                         delegate: CardItem {
                             width: 178
@@ -337,7 +241,7 @@ ApplicationWindow {
                 ColumnLayout {
                     anchors.centerIn: parent
                     spacing: 12
-                    visible: backend.cards.rowCount() === 0 && backend.listLoading
+                    visible: backend.cards.count === 0 && backend.listLoading
 
                     MaterialSymbol {
                         Layout.alignment: Qt.AlignHCenter
@@ -353,13 +257,21 @@ ApplicationWindow {
                         font.pixelSize: Appearance.fontSize.normal
                     }
                 }
+
+                EmptyState {
+                    anchors.centerIn: parent
+                    visible: backend.cards.count === 0 && !backend.listLoading
+                    symbol: "library_music"
+                    title: "Здесь пока пусто"
+                    description: "В этом разделе пока нет подборок"
+                }
             }
 
             // View 4: Logged In - Track List / Collection View (Wave, Likes, Album/Artist tracks)
             Item {
                 id: trackListView
                 anchors.fill: parent
-                visible: backend.loggedIn && window.isTrackListPage
+                visible: (backend.loggedIn || backend.page === 7) && window.isTrackListPage
 
                 ListView {
                     id: listView
@@ -371,7 +283,7 @@ ApplicationWindow {
                     reuseItems: true
                     displayMarginBeginning: 200
                     displayMarginEnd: 200
-                    model: backend.tracks
+                    model: trackListView.visible ? backend.tracks : null
 
                     header: CollectionHero {
                         width: listView.width
@@ -390,7 +302,7 @@ ApplicationWindow {
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 12
-                            visible: backend.isArtistView && backend.cards.rowCount() > 0
+                            visible: backend.isArtistView && backend.cards.count > 0
 
                             Text {
                                 text: "Альбомы и релизы"
@@ -401,22 +313,23 @@ ApplicationWindow {
                                 topPadding: 16
                             }
 
-                            Flow {
+                            ListView {
                                 Layout.fillWidth: true
+                                Layout.preferredHeight: 250
+                                orientation: ListView.Horizontal
                                 spacing: 16
-
-                                Repeater {
-                                    model: backend.cards
-                                    delegate: CardItem {
-                                        width: 174
-                                        height: 234
-                                    }
+                                clip: true
+                                reuseItems: true
+                                model: trackListView.visible && backend.isArtistView ? backend.cards : null
+                                delegate: CardItem {
+                                    width: 174
+                                    height: 234
                                 }
                             }
                         }
 
                         Item {
-                            height: 110 // Space for floating player bar
+                            Layout.preferredHeight: 110 // Space for floating player bar
                         }
                     }
 
@@ -427,11 +340,11 @@ ApplicationWindow {
                 ColumnLayout {
                     anchors.centerIn: parent
                     spacing: 16
-                    visible: backend.tracks.rowCount() === 0 && backend.listLoading
+                    visible: backend.tracks.count === 0 && backend.listLoading
 
                     MaterialSymbol {
                         Layout.alignment: Qt.AlignHCenter
-                        text: backend.page === 1 ? "auto_awesome" : "progress_activity"
+                        text: backend.page === 1 ? "my_wave" : "progress_activity"
                         iconSize: 52
                         color: Appearance.colors.primary
                     }
@@ -451,6 +364,14 @@ ApplicationWindow {
                         font.pixelSize: Appearance.fontSize.small
                     }
                 }
+
+                EmptyState {
+                    anchors.centerIn: parent
+                    visible: backend.tracks.count === 0 && !backend.listLoading
+                    symbol: backend.page === 2 ? "favorite" : (backend.page === 6 ? "search_off" : "music_note")
+                    title: backend.page === 7 ? "Пока ничего не загружено" : (backend.page === 2 ? "Пока нет любимых треков" : (backend.page === 6 ? "Ничего не найдено" : "Нет треков"))
+                    description: backend.page === 7 ? "Откройте меню трека → Сохранить офлайн в приложении" : (backend.page === 2 ? "Отмечайте треки сердцем, чтобы найти их здесь" : (backend.page === 6 ? "Попробуйте изменить запрос" : "Треки появятся здесь, когда будут доступны"))
+                }
             }
         }
 
@@ -461,26 +382,19 @@ ApplicationWindow {
             anchors.bottom: sheet.bottom
             anchors.bottomMargin: 16
             width: Math.min(840, sheet.width - 40)
-            visible: backend.loggedIn
+            visible: backend.loggedIn || backend.page === 7
             onImmersiveRequested: window.immersiveOpen = true
         }
 
         // Fullscreen Immersive Player Overlay
-        ImmersivePlayer {
+        Loader {
             id: immersiveOverlay
             anchors.fill: parent
             z: 100
-            visible: opacity > 0
-            opacity: window.immersiveOpen ? 1.0 : 0.0
-
-            Behavior on opacity {
-                NumberAnimation {
-                    duration: 240
-                    easing.type: Easing.OutCubic
-                }
+            active: window.immersiveOpen
+            sourceComponent: ImmersivePlayer {
+                onCloseRequested: window.immersiveOpen = false
             }
-
-            onCloseRequested: window.immersiveOpen = false
         }
     }
 }

@@ -10,6 +10,7 @@ T.AbstractButton {
     property color badgeColor: Appearance.colors.primaryContainer
     property color badgeIconColor: Appearance.colors.onPrimaryContainer
     property alias trailing: trailingSlot.data
+    property string iconShape: "cookie9"
 
     implicitHeight: 42
     hoverEnabled: true
@@ -63,17 +64,63 @@ T.AbstractButton {
             anchors.rightMargin: 12
             spacing: 12
 
-            MaterialSymbol {
+            Item {
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.symbol
-                iconSize: 20
-                color: root.selected ? Appearance.colors.primary
-                     : (root.hovered ? Appearance.colors.onSurface : Appearance.colors.onSurfaceVariant)
+                width: 24
+                height: 24
+
+                MaterialShape {
+                    anchors.centerIn: parent
+                    width: 32
+                    height: 32
+                    shape: root.iconShape
+                    color: Appearance.colors.primary
+                    opacity: root.selected || root.hovered ? 1 : 0
+                    scale: root.selected || root.hovered ? 1 : 0.55
+                    spinAngle: root.hovered ? 24 : 0
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Appearance.reduceMotion ? 0 : 160 }
+                    }
+                    Behavior on scale {
+                        NumberAnimation {
+                            duration: Appearance.reduceMotion ? 0 : 360
+                            easing.type: Easing.OutBack
+                            easing.overshoot: 1.6
+                        }
+                    }
+                    Behavior on spinAngle {
+                        NumberAnimation {
+                            duration: Appearance.reduceMotion ? 0 : 380
+                            easing.type: Easing.OutBack
+                        }
+                    }
+                }
+
+                MaterialSymbol {
+                    anchors.centerIn: parent
+                    text: root.symbol
+                    iconSize: root.selected || root.hovered ? 18 : 20
+                    color: root.selected || root.hovered ? Appearance.colors.onPrimary : Appearance.colors.onSurfaceVariant
+                    rotation: root.hovered ? -10 : 0
+                    Behavior on rotation {
+                        NumberAnimation {
+                            duration: Appearance.reduceMotion ? 0 : 380
+                            easing.type: Easing.OutBack
+                        }
+                    }
+                    Behavior on iconSize {
+                        NumberAnimation { duration: Appearance.reduceMotion ? 0 : 180 }
+                    }
+                    Behavior on color {
+                        ColorAnimation { duration: Appearance.reduceMotion ? 0 : 160 }
+                    }
+                }
             }
 
             StyledText {
                 anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - 32 - trailingSlot.width
+                width: Math.max(0, parent.width - 36 - trailingSlot.width)
                 text: root.text
                 elide: Text.ElideRight
                 font.pixelSize: Appearance.fontSize.small

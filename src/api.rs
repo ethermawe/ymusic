@@ -418,6 +418,24 @@ impl Api {
         Ok(parsed)
     }
 
+    pub async fn own_playlists(&self, uid: u64) -> Result<Vec<PlaylistCard>> {
+        let result = self.get(&format!("/users/{uid}/playlists/list"), &[]).await?;
+        let items = result.as_array().ok_or_else(|| anyhow!("некорректный список плейлистов"))?;
+        Ok(items.iter().filter_map(parse_playlist).filter(|p| p.uid == uid).collect())
+    }
+
+    pub async fn insert_playlist_track(&self, uid: u64, kind: u64, track: &Track) -> Result<()> {
+        let album = track.album_id.as_ref().ok_or_else(|| anyhow!("у трека нет идентификатора альбома"))?;
+        let playlist = self.get(&format!("/users/{uid}/playlists/{kind}"), &[]).await?;
+        anyhow::ensure!(id_str(&playlist["owner"]["uid"]).as_deref() == Some(&uid.to_string()), "плейлист принадлежит другому пользователю");
+        let revision = playlist["revision"].as_u64().ok_or_else(|| anyhow!("сервер не вернул ревизию плейлиста"))?.to_string();
+        let at = playlist["trackCount"].as_u64().ok_or_else(|| anyhow!("сервер не вернул размер плейлиста"))?;
+        let diff = json!([{"op": "insert", "at": at, "tracks": [{"id": track.id, "albumId": album}]}]).to_string();
+        self.post_form(&format!("/users/{uid}/playlists/{kind}/change"),
+            &[("kind", &kind.to_string()), ("revision", &revision), ("diff", &diff)]).await?;
+        Ok(())
+    }
+
     pub async fn liked_albums(&self, uid: u64) -> Result<Vec<AlbumCard>> {
         let r = self
             .get(

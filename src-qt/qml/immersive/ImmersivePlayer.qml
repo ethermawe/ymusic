@@ -97,7 +97,7 @@ Item {
 
                     Image {
                         anchors.fill: parent
-                        source: backend.hasCover ? backend.nowCover : ""
+                        source: appSettings.coversEnabled && backend.hasCover ? backend.nowCover : ""
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
                         cache: true
@@ -128,6 +128,15 @@ Item {
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideRight
                     Layout.fillWidth: true
+                    font.underline: immersiveTitleHover.hovered && backend.nowHasAlbum
+                    HoverHandler {
+                        id: immersiveTitleHover
+                        cursorShape: backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    }
+                    TapHandler {
+                        enabled: backend.nowHasAlbum
+                        onTapped: { backend.openNowAlbum(); root.closeRequested(); }
+                    }
                 }
 
                 Text {
@@ -137,6 +146,12 @@ Item {
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideRight
                     Layout.fillWidth: true
+                    font.underline: immersiveArtistHover.hovered && backend.nowHasArtist
+                    HoverHandler { id: immersiveArtistHover; cursorShape: backend.nowHasArtist ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                    TapHandler {
+                        enabled: backend.nowHasArtist
+                        onTapped: { backend.openNowArtist(); root.closeRequested(); }
+                    }
                 }
             }
 
@@ -148,6 +163,8 @@ Item {
                 StyledSlider {
                     Layout.fillWidth: true
                     value: backend.progress
+                    animatedWave: true
+                    playing: backend.playing
                     trackHeight: 6
                     activeTrackHeight: 8
                     onUserSeek: (fraction) => backend.seek(fraction)
@@ -156,20 +173,18 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
 
-                    Text {
+                    RollingText {
                         text: backend.positionText
                         color: Appearance.colors.onSurfaceVariant
-                        font.pixelSize: Appearance.fontSize.smallest
-                        font.family: "monospace"
+                        pixelSize: Appearance.fontSize.smallest
                     }
 
                     Item { Layout.fillWidth: true }
 
-                    Text {
+                    RollingText {
                         text: backend.durationText
                         color: Appearance.colors.onSurfaceVariant
-                        font.pixelSize: Appearance.fontSize.smallest
-                        font.family: "monospace"
+                        pixelSize: Appearance.fontSize.smallest
                     }
                 }
             }
@@ -179,16 +194,18 @@ Item {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 16
 
-                IconButton {
+                TransportButton {
                     symbol: "shuffle"
+                    effect: TransportButton.Bounce
                     size: 44
                     iconSize: 22
                     toggled: backend.shuffle
                     onClicked: backend.toggleShuffle()
                 }
 
-                IconButton {
+                TransportButton {
                     symbol: "skip_previous"
+                    effect: TransportButton.NudgeLeft
                     size: 48
                     iconSize: 28
                     onClicked: backend.prev()
@@ -200,15 +217,17 @@ Item {
                     onClicked: backend.toggle()
                 }
 
-                IconButton {
+                TransportButton {
                     symbol: "skip_next"
+                    effect: TransportButton.NudgeRight
                     size: 48
                     iconSize: 28
                     onClicked: backend.next()
                 }
 
-                IconButton {
+                TransportButton {
                     symbol: backend.repeatMode === 2 ? "repeat_one" : "repeat"
+                    effect: TransportButton.Bounce
                     size: 44
                     iconSize: 22
                     toggled: backend.repeatMode !== 0
@@ -255,9 +274,10 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    model: backend.tracks
+                    model: backend.queue
                     delegate: TrackRow {
                         width: queueList.width
+                        queueView: true
                     }
 
                     ScrollBar.vertical: ScrollBar {

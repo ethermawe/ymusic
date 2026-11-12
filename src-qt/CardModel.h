@@ -16,6 +16,7 @@ struct CardData {
 
 class CardModel : public QAbstractListModel {
     Q_OBJECT
+    Q_PROPERTY(int count READ count NOTIFY countChanged)
 
 public:
     enum CardRoles {
@@ -32,7 +33,11 @@ public:
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
 
+    int count() const { return m_cards.size(); }
     void setCards(const QJsonArray &cardsArray);
+
+signals:
+    void countChanged();
 
 private:
     QList<CardData> m_cards;

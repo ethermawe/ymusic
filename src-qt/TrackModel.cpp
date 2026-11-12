@@ -22,6 +22,7 @@ QVariant TrackModel::data(const QModelIndex &index, int role) const {
     case DurationMsRole: return t.durationMs;
     case AvailableRole: return t.available;
     case LikedRole: return t.liked;
+    case DownloadedRole: return t.downloaded;
     case CoverUrlRole: return t.coverUrl;
     case HasCoverRole: return t.hasCover;
     case HasArtistRole: return t.hasArtist;
@@ -42,6 +43,7 @@ QHash<int, QByteArray> TrackModel::roleNames() const {
     roles[DurationMsRole] = "durationMs";
     roles[AvailableRole] = "available";
     roles[LikedRole] = "liked";
+    roles[DownloadedRole] = "downloaded";
     roles[CoverUrlRole] = "coverUrl";
     roles[HasCoverRole] = "hasCover";
     roles[HasArtistRole] = "hasArtist";
@@ -76,10 +78,20 @@ void TrackModel::setPlaying(bool playing) {
 }
 
 void TrackModel::setTracks(const QJsonArray &tracksArray, int currentIndex) {
-    beginResetModel();
-    m_tracks.clear();
-    m_tracks.reserve(tracksArray.size());
+    const int oldCount = m_tracks.size();
+    bool sameOrder = oldCount == tracksArray.size();
+    for (int i = 0; sameOrder && i < oldCount; ++i)
+        sameOrder = m_tracks[i].id == tracksArray[i].toObject()["id"].toString();
 
+    // Progress/like/queue refreshes must not destroy and rebuild every delegate
+    // (including its image textures and multisampled icon surfaces).
+    if (!sameOrder) {
+        beginResetModel();
+        m_tracks.clear();
+        m_tracks.reserve(tracksArray.size());
+    }
+
+    int row = 0;
     for (const QJsonValue &val : tracksArray) {
         QJsonObject obj = val.toObject();
         TrackData t;
@@ -91,13 +103,19 @@ void TrackModel::setTracks(const QJsonArray &tracksArray, int currentIndex) {
         t.durationMs = obj["duration_ms"].toInteger();
         t.available = obj["available"].toBool();
         t.liked = obj["liked"].toBool();
+        t.downloaded = obj["downloaded"].toBool();
         t.coverUrl = obj["cover_url"].toString();
         t.hasCover = obj["has_cover"].toBool();
         t.hasArtist = obj["has_artist"].toBool();
         t.hasAlbum = obj["has_album"].toBool();
-        m_tracks.append(t);
+        if (sameOrder) m_tracks[row] = t;
+        else m_tracks.append(t);
+        ++row;
     }
+    const int oldCurrent = m_currentIndex;
     m_currentIndex = currentIndex;
-    endResetModel();
-    emit currentIndexChanged();
+    if (!sameOrder) endResetModel();
+    else if (!m_tracks.isEmpty()) emit dataChanged(index(0), index(m_tracks.size() - 1));
+    if (oldCurrent != m_currentIndex) emit currentIndexChanged();
+    if (oldCount != m_tracks.size()) emit countChanged();
 }

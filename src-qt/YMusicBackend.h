@@ -3,6 +3,8 @@
 #include <QObject>
 #include <QString>
 #include <QPointer>
+#include <QUrl>
+#include <QVariantList>
 #include "TrackModel.h"
 #include "CardModel.h"
 #include "ymusic_core.h"
@@ -12,6 +14,7 @@ class YMusicBackend : public QObject {
 
     // Auth
     Q_PROPERTY(bool loggedIn READ loggedIn NOTIFY authChanged)
+    Q_PROPERTY(bool authReady READ authReady NOTIFY authChanged)
     Q_PROPERTY(bool loginBusy READ loginBusy NOTIFY authChanged)
     Q_PROPERTY(QString loginCode READ loginCode NOTIFY authChanged)
     Q_PROPERTY(QString loginUrl READ loginUrl NOTIFY authChanged)
@@ -24,6 +27,7 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(int page READ page NOTIFY viewHeaderChanged)
     Q_PROPERTY(bool canGoBack READ canGoBack NOTIFY viewHeaderChanged)
     Q_PROPERTY(QString listTitle READ listTitle NOTIFY viewHeaderChanged)
+    Q_PROPERTY(QString listCover READ listCover NOTIFY viewHeaderChanged)
     Q_PROPERTY(QString listSubtitle READ listSubtitle NOTIFY viewHeaderChanged)
     Q_PROPERTY(bool listLoading READ listLoading NOTIFY viewHeaderChanged)
     Q_PROPERTY(bool isArtistView READ isArtistView NOTIFY viewHeaderChanged)
@@ -60,6 +64,7 @@ class YMusicBackend : public QObject {
 
     // Models
     Q_PROPERTY(TrackModel* tracks READ tracks CONSTANT)
+    Q_PROPERTY(TrackModel* queue READ queue CONSTANT)
     Q_PROPERTY(CardModel* cards READ cards CONSTANT)
 
 public:
@@ -67,6 +72,7 @@ public:
     ~YMusicBackend() override;
 
     bool loggedIn() const { return m_loggedIn; }
+    bool authReady() const { return m_authReady; }
     bool loginBusy() const { return m_loginBusy; }
     QString loginCode() const { return m_loginCode; }
     QString loginUrl() const { return m_loginUrl; }
@@ -78,6 +84,7 @@ public:
     int page() const { return m_page; }
     bool canGoBack() const { return m_page == 6; }
     QString listTitle() const { return m_listTitle; }
+    QString listCover() const { return m_listCover; }
     QString listSubtitle() const { return m_listSubtitle; }
     bool listLoading() const { return m_listLoading; }
     bool isArtistView() const { return m_isArtistView; }
@@ -110,6 +117,7 @@ public:
     int repeatMode() const { return m_repeatMode; }
 
     TrackModel* tracks() { return &m_trackModel; }
+    TrackModel* queue() { return &m_queueModel; }
     CardModel* cards() { return &m_cardModel; }
 
     // Q_INVOKABLE Actions
@@ -119,6 +127,11 @@ public:
 
     Q_INVOKABLE void loadHome();
     Q_INVOKABLE void loadLikes();
+    Q_INVOKABLE void loadDownloads();
+    Q_INVOKABLE void loadPlaylistChoices(const QString &id);
+    Q_INVOKABLE void addToPlaylist(const QString &id, const QString &kind);
+    Q_INVOKABLE void removeDownload(const QString &id);
+    Q_INVOKABLE bool isDownloaded(const QString &id) const;
     Q_INVOKABLE void loadPlaylists();
     Q_INVOKABLE void loadAlbums();
     Q_INVOKABLE void loadArtists();
@@ -135,6 +148,13 @@ public:
     Q_INVOKABLE void openNowAlbum();
 
     Q_INVOKABLE void play(int index);
+    Q_INVOKABLE void trackAction(const QString &id, int action);
+    Q_INVOKABLE void saveOffline(const QString &id);
+    Q_INVOKABLE void downloadTrack(const QString &id, const QUrl &destination);
+    Q_INVOKABLE void copyText(const QString &text);
+    Q_INVOKABLE void requestTrackMenu(const QString &id, const QString &title, bool available, qreal x, qreal y) {
+        emit trackMenuRequested(id, title, available, x, y);
+    }
     Q_INVOKABLE void toggle();
     Q_INVOKABLE void next();
     Q_INVOKABLE void prev();
@@ -150,6 +170,8 @@ public:
     Q_INVOKABLE void clearStatus();
 
 signals:
+    void playlistPickerResult(const QString &id, const QString &stage, const QVariantList &playlists, const QString &message);
+    void trackMenuRequested(const QString &id, const QString &title, bool available, qreal x, qreal y);
     void authChanged();
     void statusChanged();
     void viewHeaderChanged();
@@ -164,9 +186,11 @@ private:
 
     CoreHandle *m_core = nullptr;
     TrackModel m_trackModel;
+    TrackModel m_queueModel;
     CardModel m_cardModel;
 
     bool m_loggedIn = false;
+    bool m_authReady = false;
     bool m_loginBusy = false;
     QString m_loginCode;
     QString m_loginUrl;
@@ -178,6 +202,7 @@ private:
     int m_page = 0;
     int m_previousPage = 0;
     QString m_listTitle;
+    QString m_listCover;
     QString m_listSubtitle;
     bool m_listLoading = false;
     bool m_isArtistView = false;

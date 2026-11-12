@@ -1,13 +1,12 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Effects
 import ymusic.ui
 
 Flickable {
     id: root
 
-    contentHeight: homeColumn.implicitHeight + Appearance.sizes.playerBarClearance
+    contentHeight: homeColumn.y + homeColumn.implicitHeight + Appearance.sizes.playerBarClearance
     clip: true
     boundsBehavior: Flickable.StopAtBounds
 
@@ -16,81 +15,81 @@ Flickable {
                                          : (currentHour < 12 ? "Доброе утро"
                                          : (currentHour < 18 ? "Добрый день" : "Добрый вечер"))
 
+    // Subtle organic stickers floating faintly in background (Swiftify style)
+    Stickers {
+        anchors.fill: parent
+        opacity: 0.75
+        z: 0
+    }
+
     ColumnLayout {
         id: homeColumn
+        y: Appearance.sizes.pageMargin
         width: parent.width
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.margins: Appearance.sizes.pageMargin
         spacing: Appearance.sizes.sectionGap
+        z: 1
 
-        // Header: Greeting + Title
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 6
-
-            RowLayout {
-                spacing: 8
-                MaterialSymbol {
-                    text: root.currentHour < 5 ? "nightlight"
-                        : (root.currentHour < 18 ? "wb_sunny" : "nightlight")
-                    iconSize: 20
-                    color: Appearance.colors.primary
-                }
-
-                StyledText {
-                    text: root.greetingText + (backend.loggedIn && backend.userName.length > 0 ? ", " + backend.userName : "")
-                    font.pixelSize: Appearance.fontSize.large
-                    font.weight: Font.DemiBold
-                    color: Appearance.colors.onSurfaceVariant
-                }
-            }
-
-            TitleText {
-                text: "Yandex Music"
-                level: "display"
-                color: Appearance.colors.onSurface
-            }
+        // Header: Display Title (Swiftify style)
+        TitleText {
+            text: "Yandex Music"
+            level: "display"
+            color: Appearance.colors.onSurface
+            Layout.topMargin: 4
         }
 
-        // Spotlight Card: Now Playing Hero Card
+        // Spotlight Card: Now Playing Hero Card (Swiftify-inspired frosted card)
         Rectangle {
             id: spotlightCard
             Layout.fillWidth: true
-            Layout.preferredHeight: 180
+            Layout.preferredHeight: 186
             radius: Appearance.rounding.large
             color: Appearance.colors.surfaceContainerLow
             clip: true
             border.width: 1
             border.color: Qt.rgba(1, 1, 1, 0.08)
 
-            // Blurred backdrop from artwork
-            Item {
-                id: blurSource
+            // Blurred luminous backdrop from artwork
+            Image {
+                id: backdropImage
                 anchors.fill: parent
                 visible: false
-                layer.enabled: true
-
-                Image {
-                    anchors.fill: parent
-                    source: backend.hasCover ? backend.nowCover : ""
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    sourceSize.width: 64
-                    sourceSize.height: 64
-                    visible: backend.hasCover
-                }
+                source: appSettings.coversEnabled && backend.hasCover ? backend.nowCover : ""
+                asynchronous: true
+                sourceSize: Qt.size(64, 64)
+                smooth: true
+                mipmap: true
             }
 
-            MultiEffect {
+            ShaderEffect {
+                id: horizontalBlur
+                width: 256
+                height: 64
+                property variant source: backdropImage
+                property vector2d texelStep: Qt.vector2d(1 / 256, 0)
+                fragmentShader: "qrc:/shaders/gaussian_blur.frag.qsb"
+            }
+
+            ShaderEffectSource {
+                id: blurredTexture
+                sourceItem: horizontalBlur
+                hideSource: true
+                visible: false
+                textureSize: Qt.size(256, 64)
+                smooth: true
+                live: backdropImage.status === Image.Ready
+            }
+
+            ShaderEffect {
                 anchors.fill: parent
-                source: blurSource
-                blurEnabled: true
-                blur: 1.0
-                blurMax: 48
-                saturation: 0.3
-                opacity: 0.35
-                visible: backend.hasCover
+                property variant source: blurredTexture
+                property size itemSize: Qt.size(width, height)
+                property real radius: spotlightCard.radius
+                fragmentShader: "qrc:/shaders/artwork_backdrop.frag.qsb"
+                opacity: 0.38
+                visible: backdropImage.status === Image.Ready
             }
 
             // Spotlight Content
@@ -101,14 +100,14 @@ Flickable {
 
                 // Cover Artwork with true rounded corners
                 RoundedImage {
-                    Layout.preferredWidth: 140
-                    Layout.preferredHeight: 140
+                    Layout.preferredWidth: 144
+                    Layout.preferredHeight: 144
                     radius: Appearance.rounding.normal
                     source: backend.hasCover ? backend.nowCover : ""
                     fallbackSymbol: "music_note"
                     fallbackIconSize: 48
-                    sourceSize.width: 280
-                    sourceSize.height: 280
+                    sourceSize.width: 288
+                    sourceSize.height: 288
                     borderWidth: 1
                     borderColor: Qt.rgba(1, 1, 1, 0.08)
                 }
@@ -134,6 +133,12 @@ Flickable {
                         text: backend.hasTrack ? backend.nowTitle : "Моя волна"
                         level: "headline"
                         elide: Text.ElideRight
+                        font.underline: homeTitleHover.hovered && backend.nowHasAlbum
+                        HoverHandler {
+                            id: homeTitleHover
+                            cursorShape: backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        }
+                        TapHandler { enabled: backend.nowHasAlbum; onTapped: backend.openNowAlbum() }
                     }
 
                     // Artist & Album
@@ -146,6 +151,9 @@ Flickable {
                         font.weight: Font.Medium
                         color: Appearance.colors.onSurfaceVariant
                         elide: Text.ElideRight
+                        font.underline: homeArtistHover.hovered && backend.nowHasArtist
+                        HoverHandler { id: homeArtistHover; cursorShape: backend.nowHasArtist ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                        TapHandler { enabled: backend.nowHasArtist; onTapped: backend.openNowArtist() }
                     }
 
                     // Action buttons
@@ -153,42 +161,15 @@ Flickable {
                         spacing: 12
                         Layout.topMargin: 6
 
-                        Rectangle {
-                            height: 40
-                            width: playBtnRow.implicitWidth + 28
-                            radius: Appearance.rounding.full
-                            color: playHeroMouse.containsMouse ? Appearance.colors.primaryHover : Appearance.colors.primary
-
-                            RowLayout {
-                                id: playBtnRow
-                                anchors.centerIn: parent
-                                spacing: 8
-
-                                MaterialSymbol {
-                                    text: backend.hasTrack ? (backend.playing ? "pause" : "play_arrow") : "auto_awesome"
-                                    iconSize: 20
-                                    color: Appearance.colors.onPrimary
-                                }
-
-                                StyledText {
-                                    text: backend.hasTrack ? (backend.playing ? "Пауза" : "Слушать") : "Запустить волну"
-                                    font.pixelSize: Appearance.fontSize.small
-                                    font.weight: Font.DemiBold
-                                    color: Appearance.colors.onPrimary
-                                }
-                            }
-
-                            MouseArea {
-                                id: playHeroMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (backend.hasTrack) {
-                                        backend.toggle();
-                                    } else {
-                                        backend.startWave();
-                                    }
+                        // Play Button with Swiftify softCookie / cookie9 shape
+                        PlayHeroButton {
+                            size: 42
+                            playing: backend.playing
+                            onClicked: {
+                                if (backend.hasTrack) {
+                                    backend.toggle();
+                                } else {
+                                    backend.startWave();
                                 }
                             }
                         }
@@ -202,20 +183,41 @@ Flickable {
                             onClicked: backend.toggleNowLike()
                         }
 
-                        IconButton {
+                        TransportButton {
                             symbol: "skip_next"
+                            effect: TransportButton.NudgeRight
                             size: 38
                             iconSize: 22
                             iconColor: Appearance.colors.onSurfaceVariant
                             visible: backend.hasTrack
                             onClicked: backend.next()
                         }
+
+                        // Wavy Sound Wave running across the bottom of spotlight card
+                        WavyLine {
+                            Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredHeight: 10
+                            wavelength: 22
+                            amplitude: backend.playing && !Appearance.reduceMotion ? 2.8 : 0
+                            running: backend.playing
+                            opacity: backend.playing ? 1 : 0.45
+                            Behavior on amplitude {
+                                NumberAnimation { duration: Appearance.reduceMotion ? 0 : 420; easing.type: Easing.InOutCubic }
+                            }
+                            Behavior on opacity {
+                                NumberAnimation { duration: Appearance.reduceMotion ? 0 : 300; easing.type: Easing.InOutCubic }
+                            }
+                            color: Qt.rgba(Appearance.colors.primary.r,
+                                           Appearance.colors.primary.g,
+                                           Appearance.colors.primary.b, 0.35)
+                        }
                     }
                 }
             }
         }
 
-        // Two Shortcuts Side by Side
+        // Two Shortcuts Side by Side (Swiftify HomeShortcut)
         RowLayout {
             Layout.fillWidth: true
             spacing: 14
@@ -234,26 +236,25 @@ Flickable {
                 Layout.fillWidth: true
                 title: "Моя волна"
                 subtitle: "Умные рекомендации потока"
-                symbol: "auto_awesome"
+                symbol: "my_wave"
                 badgeColor: Qt.rgba(Appearance.colors.secondary.r, Appearance.colors.secondary.g, Appearance.colors.secondary.b, 0.16)
                 badgeIconColor: Appearance.colors.secondary
                 onClicked: backend.startWave()
             }
         }
 
-        // Recommendations Section
+        // Recommendations Section with Swiftify SectionHeader and WavyLine
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 14
 
-            RowLayout {
+            SectionHeader {
                 Layout.fillWidth: true
-
-                TitleText {
-                    text: "Ваша музыка и рекомендации"
-                    level: "title"
-                    Layout.fillWidth: true
-                }
+                title: "Ваши плейлисты и альбомы"
+                symbol: "auto_awesome"
+                showsAction: backend.cards.count > 0
+                actionText: "Смотреть все"
+                onActionClicked: backend.loadPlaylists()
             }
 
             // Grid of recommendation cards
@@ -267,11 +268,21 @@ Flickable {
                 cellHeight: 254
                 reuseItems: true
                 model: backend.cards
+                visible: count > 0
 
                 delegate: CardItem {
                     width: 178
                     height: 238
                 }
+            }
+
+            EmptyState {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 180
+                visible: backend.cards.count === 0
+                symbol: "auto_awesome"
+                title: "Подборки появятся здесь"
+                description: "Музыка, плейлисты и альбомы из вашей библиотеки"
             }
         }
     }

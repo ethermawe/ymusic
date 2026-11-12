@@ -52,8 +52,8 @@ Item {
                 radius: root.isArtist ? width / 2 : Appearance.rounding.normal
                 source: root.isArtist
                         ? (backend.artistHasAvatar ? backend.artistAvatar : "")
-                        : (backend.hasCover ? backend.nowCover : "")
-                fallbackSymbol: root.isArtist ? "person" : (backend.page === 1 ? "auto_awesome" : (backend.page === 2 ? "favorite" : "album"))
+                        : backend.listCover
+                fallbackSymbol: root.isArtist ? "artists" : (backend.page === 1 ? "my_wave" : (backend.page === 2 ? "favorite" : "album"))
                 fallbackIconSize: 64
                 sourceSize.width: 320
                 sourceSize.height: 320
@@ -70,8 +70,8 @@ Item {
 
             // Kind Chip
             Rectangle {
-                height: 24
-                width: kindRow.implicitWidth + 20
+                Layout.preferredHeight: 24
+                Layout.preferredWidth: kindRow.implicitWidth + 20
                 radius: Appearance.rounding.full
                 color: Appearance.colors.primaryContainer
 
@@ -81,13 +81,13 @@ Item {
                     spacing: 6
 
                     MaterialSymbol {
-                        text: root.isArtist ? "person" : (backend.page === 1 ? "auto_awesome" : (backend.page === 2 ? "favorite" : "album"))
+                        text: root.isArtist ? "artists" : (backend.page === 1 ? "my_wave" : (backend.page === 2 ? "favorite" : "album"))
                         iconSize: 14
                         color: Appearance.colors.onPrimaryContainer
                     }
 
                     Text {
-                        text: root.isArtist ? "АРТИСТ" : (backend.page === 1 ? "ПОТОК" : (backend.page === 2 ? "ИЗБРАННОЕ" : "КОЛЛЕКЦИЯ"))
+                        text: backend.page === 7 ? "НА УСТРОЙСТВЕ" : (root.isArtist ? "АРТИСТ" : (backend.page === 1 ? "ВОЛНА" : (backend.page === 2 ? "ИЗБРАННОЕ" : "КОЛЛЕКЦИЯ")))
                         color: Appearance.colors.onPrimaryContainer
                         font.pixelSize: Appearance.fontSize.smallest
                         font.weight: Font.Bold
@@ -125,12 +125,12 @@ Item {
                 // Play Hero Button
                 PlayHeroButton {
                     size: 44
-                    playing: backend.playing
+                    playing: backend.playing && backend.tracks.currentIndex >= 0
                     onClicked: {
-                        if (backend.tracks && backend.tracks.rowCount() > 0) {
-                            backend.play(0);
-                        } else {
+                        if (backend.tracks.currentIndex >= 0) {
                             backend.toggle();
+                        } else if (backend.tracks.count > 0) {
+                            backend.play(0);
                         }
                     }
                 }
@@ -141,7 +141,7 @@ Item {
                     height: 44
                     width: waveRow.implicitWidth + 28
                     radius: Appearance.rounding.full
-                    color: waveHover.containsMouse ? Appearance.colors.surfaceContainerHighest : Appearance.colors.surfaceContainerHigh
+                    color: waveHover.hovered ? Appearance.colors.surfaceContainerHighest : Appearance.colors.surfaceContainerHigh
                     border.width: 1
                     border.color: Qt.rgba(1, 1, 1, 0.1)
 
@@ -155,7 +155,7 @@ Item {
                         spacing: 8
 
                         MaterialSymbol {
-                            text: "auto_awesome"
+                            text: "my_wave"
                             iconSize: 20
                             color: Appearance.colors.primary
                         }
