@@ -22,9 +22,10 @@ ThemeManager::ThemeManager(QObject *parent)
 
     QString home = QDir::homePath();
     QStringList paths = {
-        home + "/.config/noctalia/colors.json",
         home + "/.local/state/quickshell/user/generated/colors.json",
-        home + "/.config/presets/user/colors.json"
+        home + "/.cache/wal/colors.json",
+        home + "/.config/presets/user/colors.json",
+        home + "/.config/noctalia/colors.json"
     };
 
     for (const QString &p : paths) {
@@ -143,21 +144,71 @@ bool ThemeManager::tryLoadQuickshell() {
 
     if (!obj.contains("primary") || !obj.contains("surface")) return false;
 
+    m_background = QColor(obj["background"].toString("#141314"));
+    m_surface = QColor(obj["surface"].toString("#141314"));
+    m_surfaceDim = obj.contains("surface_dim") ? QColor(obj["surface_dim"].toString()) : m_surface.darker(110);
+    m_surfaceBright = obj.contains("surface_bright") ? QColor(obj["surface_bright"].toString()) : m_surface.lighter(130);
+    m_surfaceContainerLowest = obj.contains("surface_container_lowest") ? QColor(obj["surface_container_lowest"].toString()) : m_background.darker(115);
+    m_surfaceContainerLow = obj.contains("surface_container_low") ? QColor(obj["surface_container_low"].toString()) : m_surface.darker(108);
+    m_surfaceContainer = obj.contains("surface_container") ? QColor(obj["surface_container"].toString()) : m_surface;
+    m_surfaceContainerHigh = obj.contains("surface_container_high") ? QColor(obj["surface_container_high"].toString()) : m_surface.lighter(120);
+    m_surfaceContainerHighest = obj.contains("surface_container_highest") ? QColor(obj["surface_container_highest"].toString()) : m_surface.lighter(140);
+
+    m_onSurface = QColor(obj["on_surface"].toString("#e7e1e3"));
+    m_onSurfaceVariant = QColor(obj["on_surface_variant"].toString("#cac5c7"));
+    m_outline = QColor(obj["outline"].toString("#949091"));
+    m_outlineVariant = QColor(obj["outline_variant"].toString("#494648"));
+
     m_primary = QColor(obj["primary"].toString());
+    m_primaryContainer = obj.contains("primary_container") ? QColor(obj["primary_container"].toString()) : m_primary.darker(200);
     m_onPrimary = QColor(obj["on_primary"].toString("#ffffff"));
-    m_background = QColor(obj["background"].toString("#0a0c10"));
-    m_surface = QColor(obj["surface"].toString("#12151c"));
-    m_surfaceContainerLow = QColor(obj["surface_container_low"].toString());
-    m_surfaceContainer = QColor(obj["surface_container"].toString());
-    m_surfaceContainerHigh = QColor(obj["surface_container_high"].toString());
-    m_surfaceContainerHighest = QColor(obj["surface_container_highest"].toString());
-    m_onSurface = QColor(obj["on_surface"].toString("#f0f2f8"));
-    m_onSurfaceVariant = QColor(obj["on_surface_variant"].toString("#9ea3b5"));
-    m_outline = QColor(obj["outline"].toString("#4b5166"));
-    m_outlineVariant = QColor(obj["outline_variant"].toString("#262b3a"));
-    m_secondary = QColor(obj["secondary"].toString("#e59b24"));
-    m_secondaryContainer = QColor(obj["secondary_container"].toString("#362712"));
+    m_onPrimaryContainer = obj.contains("on_primary_container") ? QColor(obj["on_primary_container"].toString()) : m_primary.lighter(170);
     m_primaryHover = m_primary.lighter(115);
+
+    m_secondary = QColor(obj["secondary"].toString("#cec3cd"));
+    m_secondaryContainer = obj.contains("secondary_container") ? QColor(obj["secondary_container"].toString()) : m_secondary.darker(200);
+    m_tertiary = QColor(obj["tertiary"].toString("#d4c0d7"));
+    m_error = QColor(obj["error"].toString("#ffb4ab"));
+
+    m_isDark = (m_background.lightnessF() < 0.5);
+    return true;
+}
+
+bool ThemeManager::tryLoadWal() {
+    QString path = QDir::homePath() + "/.cache/wal/colors.json";
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return false;
+
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    if (!doc.isObject()) return false;
+    QJsonObject root = doc.object();
+    if (!root.contains("colors")) return false;
+
+    QJsonObject colors = root["colors"].toObject();
+    QString bgStr = colors["color0"].toString();
+    if (bgStr.isEmpty()) return false;
+
+    m_background = QColor(bgStr);
+    m_surface = m_background.lighter(115);
+    QString fgStr = colors["color15"].toString();
+    m_onSurface = fgStr.isEmpty() ? QColor("#e2e2e2") : QColor(fgStr);
+    m_onSurfaceVariant = m_onSurface.darker(130);
+
+    QString accentStr = colors["color10"].toString();
+    if (accentStr.isEmpty()) accentStr = colors["color3"].toString();
+    if (accentStr.isEmpty()) accentStr = colors["color1"].toString();
+    if (accentStr.isEmpty()) accentStr = "#ffb3ae";
+
+    m_primary = QColor(accentStr);
+    m_primaryHover = m_primary.lighter(115);
+    m_onPrimary = m_primary.lightnessF() > 0.6 ? QColor("#131313") : QColor("#ffffff");
+
+    QString secStr = colors["color5"].toString();
+    if (secStr.isEmpty()) secStr = colors["color13"].toString();
+    m_secondary = secStr.isEmpty() ? m_primary.darker(120) : QColor(secStr);
+
+    QString outStr = colors["color7"].toString();
+    m_outline = outStr.isEmpty() ? QColor("#353535") : QColor(outStr);
 
     deriveSurfaces();
     return true;
@@ -192,9 +243,10 @@ bool ThemeManager::tryLoadPresets() {
 }
 
 void ThemeManager::loadColors() {
-    bool ok = tryLoadNoctalia();
-    if (!ok) ok = tryLoadQuickshell();
+    bool ok = tryLoadQuickshell();
+    if (!ok) ok = tryLoadWal();
     if (!ok) ok = tryLoadPresets();
+    if (!ok) ok = tryLoadNoctalia();
     if (!ok) setDefaults();
 
     emit themeChanged();

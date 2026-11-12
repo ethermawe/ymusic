@@ -203,6 +203,7 @@ pub struct State {
     pub views: HashMap<String, CachedView>,
     pub generation: u64,
     pub view_id: u64,
+    pub page: i32,
     pub audio_started: bool,
     pub last_saved_sec: u64,
     pub repeat_mode: u8,
@@ -577,6 +578,7 @@ impl YMusicCore {
         let (view, has_cache, eff_title, eff_subtitle, cards_payload, tracks_payload, current_idx, can_wave, artist_info) = {
             let mut st = self.state.lock().unwrap();
             st.view_id += 1;
+            st.page = page;
             let view = st.view_id;
 
             let cached = key.and_then(|k| {
@@ -666,7 +668,7 @@ impl YMusicCore {
         }
 
         let can_wave = viewed_artist_id.is_some();
-        let (tracks_p, cards_p, current_idx) = {
+        let (tracks_p, cards_p, current_idx, current_page) = {
             let mut st = self.state.lock().unwrap();
             if st.view_id != view {
                 return false;
@@ -680,7 +682,7 @@ impl YMusicCore {
                 .collect();
             let cards_p: Vec<CardItemPayload> = cards.iter().map(card_payload).collect();
             st.list = tracks;
-            (tracks_p, cards_p, current_list_index(&st))
+            (tracks_p, cards_p, current_list_index(&st), st.page)
         };
 
         let artist_info_val = artist_view.unwrap_or_default();
@@ -689,7 +691,7 @@ impl YMusicCore {
 
         if let (Some(t), Some(s)) = (title, subtitle) {
             self.send_event(EVENT_VIEW_HEADER, &ViewHeaderPayload {
-                page: 0,
+                page: current_page,
                 title: t,
                 subtitle: s,
                 loading: false,
@@ -838,6 +840,7 @@ impl YMusicCore {
                 let tracks = w.tracks.clone();
                 let w_title = w.title.clone();
                 st.view_id += 1;
+                st.page = 1;
                 let view = st.view_id;
                 st.cards.clear();
                 st.viewed_artist_id = None;

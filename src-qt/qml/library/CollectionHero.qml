@@ -48,12 +48,14 @@ Item {
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     cache: true
+                    sourceSize.width: 280
+                    sourceSize.height: 280
                     visible: root.isArtist ? backend.artistHasAvatar : backend.hasCover
                 }
 
                 MaterialSymbol {
                     anchors.centerIn: parent
-                    text: root.isArtist ? "person" : (backend.page === 2 ? "auto_awesome" : "album")
+                    text: root.isArtist ? "person" : (backend.page === 1 ? "auto_awesome" : (backend.page === 2 ? "favorite" : "album"))
                     iconSize: 56
                     color: Appearance.colors.onSurfaceVariant
                     visible: root.isArtist ? !backend.artistHasAvatar : !backend.hasCover
@@ -77,7 +79,7 @@ Item {
                 Text {
                     id: kindText
                     anchors.centerIn: parent
-                    text: root.isArtist ? "АРТИСТ" : (backend.page === 2 ? "ПОТОК" : (backend.page === 1 ? "ИЗБРАННОЕ" : "КОЛЛЕКЦИЯ"))
+                    text: root.isArtist ? "АРТИСТ" : (backend.page === 1 ? "ПОТОК" : (backend.page === 2 ? "ИЗБРАННОЕ" : "КОЛЛЕКЦИЯ"))
                     color: Appearance.colors.primary
                     font.pixelSize: Appearance.fontSize.smallest
                     font.weight: Font.Bold

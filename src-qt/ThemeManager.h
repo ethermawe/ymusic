@@ -71,9 +71,10 @@ private slots:
 
 private:
     void loadColors();
-    bool tryLoadNoctalia();
     bool tryLoadQuickshell();
+    bool tryLoadWal();
     bool tryLoadPresets();
+    bool tryLoadNoctalia();
     void setDefaults();
     void deriveSurfaces();
 

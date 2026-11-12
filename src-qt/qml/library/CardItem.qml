@@ -70,6 +70,8 @@ Item {
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     cache: true
+                    sourceSize.width: 200
+                    sourceSize.height: 200
                     visible: model.hasCover
                 }
 

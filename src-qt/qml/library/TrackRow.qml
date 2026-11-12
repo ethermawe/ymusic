@@ -12,36 +12,28 @@ Item {
     implicitHeight: 56
     implicitWidth: 600
 
-    scale: isHovered ? 1.012 : 1.0
-    z: isHovered ? 2 : 1
-    Behavior on scale {
-        NumberAnimation {
-            duration: 180
-            easing.type: Easing.OutBack
-            easing.overshoot: 1.6
-        }
-    }
-
     Rectangle {
         id: bg
         anchors.fill: parent
+        anchors.leftMargin: 4
+        anchors.rightMargin: 4
         radius: Appearance.rounding.small
         color: root.isCurrent
-               ? Qt.rgba(Appearance.colors.primary.r, Appearance.colors.primary.g, Appearance.colors.primary.b, 0.12)
-               : (root.isHovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent")
+               ? Qt.rgba(Appearance.colors.primary.r, Appearance.colors.primary.g, Appearance.colors.primary.b, 0.14)
+               : (root.isHovered ? Appearance.colors.surfaceContainerHigh : "transparent")
 
         border.width: root.isCurrent ? 1 : 0
         border.color: Qt.rgba(Appearance.colors.primary.r, Appearance.colors.primary.g, Appearance.colors.primary.b, 0.25)
 
         Behavior on color {
-            ColorAnimation { duration: 130 }
+            ColorAnimation { duration: 120 }
         }
     }
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 12
-        anchors.rightMargin: 12
+        anchors.leftMargin: 14
+        anchors.rightMargin: 14
         spacing: 12
 
         // Left: Index or Play icon or Equalizer
@@ -92,6 +84,8 @@ Item {
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
                 cache: true
+                sourceSize.width: 80
+                sourceSize.height: 80
                 visible: model.hasCover
             }
 

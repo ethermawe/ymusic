@@ -15,7 +15,7 @@ ApplicationWindow {
     color: Appearance.colors.surfaceContainerLowest
 
     property bool immersiveOpen: false
-    readonly property bool isCardsPage: backend.page === 0 || backend.page === 3 || backend.page === 4 || backend.page === 5 || (!backend.isArtistView && backend.tracks.rowCount() === 0 && backend.cards.rowCount() > 0)
+    readonly property bool isCardsPage: (backend.page === 0 || backend.page === 3 || backend.page === 4 || backend.page === 5) || (backend.page === 6 && !backend.isArtistView && backend.tracks.rowCount() === 0)
 
     // Root layout
     Item {
@@ -238,17 +238,29 @@ ApplicationWindow {
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 20
-                    spacing: 16
+                    spacing: 14
 
-                    Text {
-                        text: backend.page === 0 ? "Главная"
-                            : (backend.page === 3 ? "Плейлисты"
-                            : (backend.page === 4 ? "Альбомы"
-                            : (backend.page === 5 ? "Любимые артисты"
-                            : backend.listTitle)))
-                        color: Appearance.colors.onSurface
-                        font.pixelSize: 28
-                        font.weight: Font.Bold
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+
+                        Text {
+                            text: backend.page === 0 ? "Главная"
+                                : (backend.page === 3 ? "Плейлисты"
+                                : (backend.page === 4 ? "Альбомы"
+                                : (backend.page === 5 ? "Любимые артисты"
+                                : (backend.listTitle.length > 0 ? backend.listTitle : "Обзор"))))
+                            color: Appearance.colors.onSurface
+                            font.pixelSize: 28
+                            font.weight: Font.Bold
+                        }
+
+                        Text {
+                            visible: backend.listSubtitle.length > 0
+                            text: backend.listSubtitle
+                            color: Appearance.colors.onSurfaceVariant
+                            font.pixelSize: Appearance.fontSize.small
+                        }
                     }
 
                     GridView {
@@ -258,6 +270,9 @@ ApplicationWindow {
                         clip: true
                         cellWidth: 194
                         cellHeight: 254
+                        reuseItems: true
+                        displayMarginBeginning: 200
+                        displayMarginEnd: 200
                         model: backend.cards
 
                         delegate: CardItem {
@@ -271,6 +286,27 @@ ApplicationWindow {
                         }
 
                         ScrollBar.vertical: ScrollBar { active: true }
+                    }
+                }
+
+                // Loading indicator for cards
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 12
+                    visible: backend.cards.rowCount() === 0 && backend.listLoading
+
+                    MaterialSymbol {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "progress_activity"
+                        iconSize: 42
+                        color: Appearance.colors.primary
+                    }
+
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "Загрузка контента..."
+                        color: Appearance.colors.onSurfaceVariant
+                        font.pixelSize: Appearance.fontSize.normal
                     }
                 }
             }
@@ -288,6 +324,9 @@ ApplicationWindow {
                     anchors.leftMargin: 16
                     anchors.rightMargin: 16
                     clip: true
+                    reuseItems: true
+                    displayMarginBeginning: 200
+                    displayMarginEnd: 200
                     model: backend.tracks
 
                     header: CollectionHero {
@@ -340,22 +379,22 @@ ApplicationWindow {
                     ScrollBar.vertical: ScrollBar { active: true }
                 }
 
-                // Wave loading indicator if page == 1 and no tracks yet
+                // Loading indicator if no tracks yet and loading
                 ColumnLayout {
                     anchors.centerIn: parent
                     spacing: 16
-                    visible: backend.page === 1 && backend.tracks.rowCount() === 0
+                    visible: backend.tracks.rowCount() === 0 && backend.listLoading
 
                     MaterialSymbol {
                         Layout.alignment: Qt.AlignHCenter
-                        text: "auto_awesome"
-                        iconSize: 56
+                        text: backend.page === 1 ? "auto_awesome" : "progress_activity"
+                        iconSize: 52
                         color: Appearance.colors.primary
                     }
 
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: "Настраиваем Мою волну..."
+                        text: backend.page === 1 ? "Настраиваем Мою волну..." : "Загрузка треков..."
                         color: Appearance.colors.onSurface
                         font.pixelSize: Appearance.fontSize.large
                         font.weight: Font.DemiBold
@@ -363,7 +402,7 @@ ApplicationWindow {
 
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: "Подбираем треки под ваше настроение"
+                        text: backend.page === 1 ? "Подбираем треки под ваше настроение" : "Секундочку..."
                         color: Appearance.colors.onSurfaceVariant
                         font.pixelSize: Appearance.fontSize.small
                     }
