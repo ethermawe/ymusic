@@ -1,13 +1,16 @@
 # Maintainer: ethermawe
 pkgname=ymusic
 pkgver=0.1.0
-pkgrel=2
+pkgrel=3
 pkgdesc="Нативный клиент Яндекс Музыки на Rust и Qt Quick"
 arch=('x86_64')
 url="https://github.com/ethermawe/ymusic"
 license=('custom')
-depends=('alsa-lib' 'gcc-libs' 'glibc' 'qt6-base' 'qt6-declarative' 'hicolor-icon-theme')
-makedepends=('cargo' 'cmake' 'ninja' 'pkgconf' 'qt6-shadertools')
+depends=('alsa-lib' 'gcc-libs' 'glibc' 'qt6-base' 'qt6-declarative' 'qt6-svg' 'hicolor-icon-theme')
+makedepends=('cmake' 'ninja' 'pkgconf' 'qt6-shadertools')
+if ! command -v cargo >/dev/null 2>&1; then
+    makedepends+=('cargo')
+fi
 optdepends=('xdg-utils: открытие страницы входа и папки загрузок')
 conflicts=('ymusic-git')
 options=('!lto' '!debug')
@@ -22,7 +25,7 @@ sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 prepare() {
     mkdir -p "$srcdir/ymusic"
-    cp -a "$startdir/src" "$startdir/src-qt" "$srcdir/ymusic/"
+    cp -a "$startdir/src" "$startdir/src-qt" "$startdir/icons" "$srcdir/ymusic/"
     cp "$srcdir/Cargo.toml" "$srcdir/Cargo.lock" \
         "$srcdir/ymusic.desktop" "$srcdir/icon.svg" "$srcdir/ymusic/"
     cd "$srcdir/ymusic"

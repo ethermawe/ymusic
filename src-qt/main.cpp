@@ -1,4 +1,5 @@
 #include <QGuiApplication>
+#include <QIcon>
 #include <QFont>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -73,6 +74,19 @@ int main(int argc, char *argv[]) {
     app.setApplicationName("ymusic");
     app.setOrganizationName("finrixx");
     app.setApplicationDisplayName("Yandex Music");
+    app.setDesktopFileName("ymusic");
+
+    QIcon appIcon = QIcon::fromTheme(QStringLiteral("ymusic"));
+    if (appIcon.isNull()) {
+        appIcon = QIcon(QStringLiteral(":/icons/ymusic.svg"));
+    }
+    if (appIcon.isNull()) {
+        appIcon = QIcon(QStringLiteral(":/icons/ymusic.png"));
+    }
+    if (appIcon.isNull()) {
+        appIcon = QIcon(QStringLiteral(":/icon.svg"));
+    }
+    app.setWindowIcon(appIcon);
 
     // A lock distinguishes a stale socket from a live instance. Never unlink
     // another instance's socket just because it has not started listening yet.

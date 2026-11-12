@@ -71,6 +71,7 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(QString searchFilter READ searchFilter NOTIFY featuresChanged)
     Q_PROPERTY(bool collectionDownloadable READ collectionDownloadable NOTIFY featuresChanged)
     Q_PROPERTY(QVariantMap batch READ batch NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantMap waveSettings READ waveSettings NOTIFY featuresChanged)
 
 public:
     explicit YMusicBackend(QObject *parent = nullptr);
@@ -129,6 +130,7 @@ public:
     QString searchFilter() const { return m_searchFilter; }
     bool collectionDownloadable() const { return m_collectionDownloadable; }
     QVariantMap batch() const { return m_batch; }
+    QVariantMap waveSettings() const { return m_waveSettings; }
     Q_INVOKABLE void feature(const QVariantMap &command);
 
     // Q_INVOKABLE Actions
@@ -206,6 +208,7 @@ private:
     QString m_searchFilter = "all";
     bool m_collectionDownloadable = false;
     QVariantMap m_batch;
+    QVariantMap m_waveSettings;
 
     bool m_loggedIn = false;
     bool m_authReady = false;

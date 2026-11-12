@@ -306,9 +306,12 @@ ApplicationWindow {
                     displayMarginEnd: 200
                     model: trackListView.visible ? backend.tracks : null
 
-                    header: CollectionHero {
+                    header: Loader {
                         width: listView.width
                         height: implicitHeight
+                        sourceComponent: backend.page === 1 ? waveHeader : collectionHeader
+                        Component { id: waveHeader; WaveHero {} }
+                        Component { id: collectionHeader; CollectionHero {} }
                     }
 
                     delegate: TrackRow {

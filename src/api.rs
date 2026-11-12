@@ -565,6 +565,10 @@ impl Api {
         })
     }
 
+    pub async fn wave_settings(&self) -> Result<Value> {
+        self.get("/rotor/wave/settings", &[("seeds", "user:onyourwave")]).await
+    }
+
     /// Догружает следующую партию треков для активной сессии волны.
     pub async fn rotor_session_tracks(
         &self,

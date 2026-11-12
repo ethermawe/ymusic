@@ -46,6 +46,10 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
             m_loginCode.clear();
             m_loginUrl.clear();
         }
+        if (!m_loggedIn && !m_loginBusy) {
+            m_waveSettings.clear();
+            emit featuresChanged();
+        }
         m_userName = obj["user_name"].toString();
         m_userAvatar = obj["user_avatar"].toString();
         m_userHasAvatar = obj["user_has_avatar"].toBool();
@@ -114,6 +118,8 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
             m_searchQuery = obj["query"].toString();
             m_searchFilter = obj["filter"].toString("all");
         } else if (type == "batch") m_batch = obj.toVariantMap();
+        else if (type == "wave_settings") m_waveSettings = obj.toVariantMap();
+        else if (type == "wave_applied") m_waveSettings["selected"] = obj["selected"].toObject().toVariantMap();
         emit featuresChanged();
         emit featureResult(obj.toVariantMap());
         break;

@@ -196,6 +196,8 @@ pub struct WaveState {
 
 #[derive(Default)]
 pub struct State {
+    pub wave_groups: Vec<crate::wave::Group>,
+    pub wave_selected: HashMap<String, String>,
     pub search_query: String,
     pub search_filter: String,
     pub collection_downloadable: bool,
@@ -473,6 +475,21 @@ impl YMusicCore {
 
     pub fn feature_command(self: Arc<Self>, cmd: serde_json::Value) {
         match cmd["action"].as_str().unwrap_or("") {
+            "wave_settings" => self.load_wave_settings(),
+            "wave_apply" => {
+                let Ok(selections) = serde_json::from_value::<HashMap<String, String>>(cmd["selected"].clone()) else {
+                    self.send_feature("wave_error", serde_json::json!({"message": "Некорректные настройки волны"}));
+                    return;
+                };
+                let validated = {
+                    let st = self.state.lock().unwrap();
+                    crate::wave::validate(&st.wave_groups, &selections)
+                };
+                match validated {
+                    Ok(seeds) => self.start_wave_filtered("user:onyourwave".into(), "Моя волна".into(), seeds, Some(selections)),
+                    Err(e) => self.send_feature("wave_error", serde_json::json!({"message": e.to_string()})),
+                }
+            }
             "history" => self.send_history_tracks(crate::history::load()),
             "clear_history" => {
                 if crate::history::clear().is_ok() { self.send_history_tracks(Vec::new()); }
@@ -1281,8 +1298,41 @@ impl YMusicCore {
     }
 
     pub fn start_wave(self: Arc<Self>, seed: String, title: String) {
+        let mut seeds: Vec<String> = if seed == "user:onyourwave" {
+            self.state.lock().unwrap().wave_selected.values().cloned().collect()
+        } else { Vec::new() };
+        seeds.sort();
+        self.start_wave_filtered(seed, title, seeds, None);
+    }
+
+    pub fn load_wave_settings(self: Arc<Self>) {
         let Some(api) = self.api() else { return };
-        let cache_key = format!("wave:{seed}");
+        let uid = self.state.lock().unwrap().uid;
+        let this = self.clone();
+        self.rt_handle.spawn(async move {
+            let result = api.wave_settings().await;
+            if this.state.lock().unwrap().uid != uid { return; }
+            match result {
+                Ok(response) => {
+                    let groups = crate::wave::groups(&response);
+                    let selected = {
+                        let mut st = this.state.lock().unwrap();
+                        if st.uid != uid { return; }
+                        st.wave_groups = groups.clone();
+                        st.wave_selected.retain(|key, seed| groups.iter().any(|g|
+                            &g.key == key && g.choices.iter().any(|c| &c.seed == seed)));
+                        st.wave_selected.clone()
+                    };
+                    this.send_feature("wave_settings", serde_json::json!({"groups": groups, "selected": selected}));
+                }
+                Err(e) => this.send_feature("wave_error", serde_json::json!({"message": format!("Не удалось получить фильтры: {e}")})),
+            }
+        });
+    }
+
+    pub fn start_wave_filtered(self: Arc<Self>, seed: String, title: String, filters: Vec<String>, selected: Option<HashMap<String, String>>) {
+        let Some(api) = self.api() else { return };
+        let cache_key = format!("wave:{seed}:{}", filters.join(","));
         let view = self.begin_cached_view(
             Some(&cache_key),
             1,
@@ -1291,11 +1341,16 @@ impl YMusicCore {
         );
         let this = self.clone();
         self.rt_handle.spawn(async move {
-            let session = match api.rotor_session_new(&[seed.as_str()]).await {
+            let seeds: Vec<&str> = std::iter::once(seed.as_str()).chain(filters.iter().map(String::as_str)).collect();
+            let session = match api.rotor_session_new(&seeds).await {
                 Ok(s) => s,
-                Err(e) => return this.view_failed(view, "Моя волна", e),
+                Err(e) => {
+                    this.send_feature("wave_error", serde_json::json!({"message": format!("Не удалось запустить волну: {e}")}));
+                    return this.view_failed(view, "Моя волна", e);
+                }
             };
             if session.tracks.is_empty() {
+                this.send_feature("wave_error", serde_json::json!({"message": "Волна не вернула треков. Попробуйте другие фильтры."}));
                 return this.view_failed(view, "Моя волна", anyhow::anyhow!("волна не вернула треков"));
             }
             {
@@ -1312,6 +1367,8 @@ impl YMusicCore {
                     fetching_more: false,
                     resume_on_load: false,
                 });
+                if let Some(selected) = selected { st.wave_selected = selected; }
+                st.unshuffled_queue = None;
                 st.queue = session.tracks.clone();
                 st.current = None;
             }
@@ -1330,7 +1387,9 @@ impl YMusicCore {
                 None,
                 None,
             );
-            this.play_index(0, false);
+            this.clone().play_index(0, false);
+            let selected = this.state.lock().unwrap().wave_selected.clone();
+            this.send_feature("wave_applied", serde_json::json!({"selected": selected}));
         });
     }
 

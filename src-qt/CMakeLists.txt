@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 QuickEffects Network ShaderTools)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 QuickEffects Network ShaderTools Svg)
 
 if(Qt6_VERSION VERSION_GREATER_EQUAL "6.8")
     qt_policy(SET QTP0004 NEW)
@@ -66,6 +66,7 @@ set(QML_FILES
     qml/library/PlaylistPicker.qml
     qml/library/CreatePlaylistDialog.qml
     qml/views/SearchView.qml
+    qml/views/WaveHero.qml
     qml/views/LoginView.qml
     qml/views/SettingsDialog.qml
     qml/library/CardItem.qml
@@ -95,6 +96,19 @@ qt_add_shaders(ymusic-qml "ymusic_shaders"
         shaders/gaussian_blur.frag
 )
 
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg" PROPERTIES
+    QT_RESOURCE_ALIAS "icons/ymusic.svg"
+)
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/256x256/apps/ymusic.png" PROPERTIES
+    QT_RESOURCE_ALIAS "icons/ymusic.png"
+)
+qt_add_resources(ymusic-qml "ymusic_icons"
+    PREFIX "/"
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/256x256/apps/ymusic.png"
+)
+
 target_include_directories(ymusic-qml PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_directories(ymusic-qml PRIVATE ${RUST_LIB_DIR})
@@ -106,6 +120,7 @@ target_link_libraries(ymusic-qml PRIVATE
     Qt6::QuickControls2
     Qt6::QuickEffects
     Qt6::Network
+    Qt6::Svg
     ymusic_core
     pthread
     dl
@@ -120,4 +135,11 @@ set_target_properties(ymusic-qml PROPERTIES
 install(TARGETS ymusic-qml RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES "${RUST_LIB_DIR}/libymusic_core.so" DESTINATION ${CMAKE_INSTALL_LIBDIR}/ymusic)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../ymusic.desktop" DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor" DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg" DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps RENAME ymusic.svg)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg" DESTINATION ${CMAKE_INSTALL_DATADIR}/pixmaps RENAME ymusic.svg)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/256x256/apps/ymusic.png" DESTINATION ${CMAKE_INSTALL_DATADIR}/pixmaps)
+
+install(CODE "
+    file(CREATE_LINK \"ymusic-qml\" \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/ymusic\" SYMBOLIC)
+")
