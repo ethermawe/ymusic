@@ -15,6 +15,7 @@ ApplicationWindow {
     color: Appearance.colors.surfaceContainerLowest
 
     property bool immersiveOpen: false
+    readonly property bool isCardsPage: backend.page === 0 || backend.page === 3 || backend.page === 4 || backend.page === 5 || (!backend.isArtistView && backend.tracks.rowCount() === 0 && backend.cards.rowCount() > 0)
 
     // Root layout
     Item {
@@ -228,55 +229,57 @@ ApplicationWindow {
                 }
             }
 
-            // View 2: Logged In - Home Cards View (backend.page === 0)
+            // View 2: Cards Grid View (Главная, Плейлисты, Альбомы, Артисты)
             Item {
-                id: homeView
+                id: cardsView
                 anchors.fill: parent
-                visible: backend.loggedIn && backend.page === 0
+                visible: backend.loggedIn && window.isCardsPage
 
-                Flickable {
+                ColumnLayout {
                     anchors.fill: parent
-                    contentWidth: width
-                    contentHeight: homeColumn.implicitHeight + 120
-                    clip: true
+                    anchors.margins: 20
+                    spacing: 16
 
-                    ColumnLayout {
-                        id: homeColumn
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.leftMargin: 24
-                        anchors.rightMargin: 24
-                        anchors.topMargin: 24
-                        spacing: 20
-
-                        Text {
-                            text: "Главная"
-                            color: Appearance.colors.onSurface
-                            font.pixelSize: 28
-                            font.weight: Font.Bold
-                        }
-
-                        Flow {
-                            Layout.fillWidth: true
-                            spacing: 16
-
-                            Repeater {
-                                model: backend.cards
-                                delegate: CardItem {}
-                            }
-                        }
+                    Text {
+                        text: backend.page === 0 ? "Главная"
+                            : (backend.page === 3 ? "Плейлисты"
+                            : (backend.page === 4 ? "Альбомы"
+                            : (backend.page === 5 ? "Любимые артисты"
+                            : backend.listTitle)))
+                        color: Appearance.colors.onSurface
+                        font.pixelSize: 28
+                        font.weight: Font.Bold
                     }
 
-                    ScrollBar.vertical: ScrollBar { active: true }
+                    GridView {
+                        id: cardsGrid
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        cellWidth: 194
+                        cellHeight: 254
+                        model: backend.cards
+
+                        delegate: CardItem {
+                            width: 178
+                            height: 238
+                        }
+
+                        footer: Item {
+                            width: cardsGrid.width
+                            height: 110
+                        }
+
+                        ScrollBar.vertical: ScrollBar { active: true }
+                    }
                 }
             }
 
-            // View 3: Logged In - Track List / Collection View (backend.page !== 0)
+            // View 3: Logged In - Track List / Collection View (Wave, Likes, Album/Artist tracks)
             Item {
                 id: trackListView
                 anchors.fill: parent
-                visible: backend.loggedIn && backend.page !== 0
+                visible: backend.loggedIn && !window.isCardsPage
 
                 ListView {
                     id: listView
@@ -289,18 +292,81 @@ ApplicationWindow {
 
                     header: CollectionHero {
                         width: listView.width
+                        height: implicitHeight
                     }
 
                     delegate: TrackRow {
                         width: listView.width
                     }
 
-                    footer: Item {
+                    footer: ColumnLayout {
                         width: listView.width
-                        height: 110 // Space for floating player bar
+                        spacing: 16
+
+                        // Artist releases section if on artist page
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 12
+                            visible: backend.isArtistView && backend.cards.rowCount() > 0
+
+                            Text {
+                                text: "Альбомы и релизы"
+                                color: Appearance.colors.onSurface
+                                font.pixelSize: 22
+                                font.weight: Font.Bold
+                                leftPadding: 8
+                                topPadding: 16
+                            }
+
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: 16
+
+                                Repeater {
+                                    model: backend.cards
+                                    delegate: CardItem {
+                                        width: 174
+                                        height: 234
+                                    }
+                                }
+                            }
+                        }
+
+                        Item {
+                            height: 110 // Space for floating player bar
+                        }
                     }
 
                     ScrollBar.vertical: ScrollBar { active: true }
+                }
+
+                // Wave loading indicator if page == 1 and no tracks yet
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 16
+                    visible: backend.page === 1 && backend.tracks.rowCount() === 0
+
+                    MaterialSymbol {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "auto_awesome"
+                        iconSize: 56
+                        color: Appearance.colors.primary
+                    }
+
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "Настраиваем Мою волну..."
+                        color: Appearance.colors.onSurface
+                        font.pixelSize: Appearance.fontSize.large
+                        font.weight: Font.DemiBold
+                    }
+
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "Подбираем треки под ваше настроение"
+                        color: Appearance.colors.onSurfaceVariant
+                        font.pixelSize: Appearance.fontSize.small
+                    }
                 }
             }
         }

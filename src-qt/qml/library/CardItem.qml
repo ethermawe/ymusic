@@ -60,7 +60,7 @@ Item {
 
             Rectangle {
                 anchors.fill: parent
-                radius: Appearance.rounding.small
+                radius: model.kind === "artist" ? width / 2 : Appearance.rounding.small
                 color: Appearance.colors.surfaceContainerHighest
                 clip: true
 

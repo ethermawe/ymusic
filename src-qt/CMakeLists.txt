@@ -18,6 +18,8 @@ qt_add_executable(ymusic-qml
     TrackModel.cpp
     CardModel.h
     CardModel.cpp
+    ThemeManager.h
+    ThemeManager.cpp
     ymusic_core.h
 )
 

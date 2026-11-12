@@ -163,8 +163,8 @@ Item {
                     model: ListModel {
                         id: navModel
                         ListElement { title: "Главная"; icon: "home"; pageIndex: 0 }
-                        ListElement { title: "Моя волна"; icon: "auto_awesome"; pageIndex: 2 }
-                        ListElement { title: "Любимые"; icon: "favorite"; pageIndex: 1 }
+                        ListElement { title: "Моя волна"; icon: "auto_awesome"; pageIndex: 1 }
+                        ListElement { title: "Любимые"; icon: "favorite"; pageIndex: 2 }
                         ListElement { title: "Плейлисты"; icon: "library_music"; pageIndex: 3 }
                         ListElement { title: "Альбомы"; icon: "album"; pageIndex: 4 }
                         ListElement { title: "Артисты"; icon: "person"; pageIndex: 5 }
@@ -211,8 +211,8 @@ Item {
                             onClicked: {
                                 switch (model.pageIndex) {
                                 case 0: backend.loadHome(); break;
-                                case 1: backend.loadLikes(); break;
-                                case 2: backend.startWave(); break;
+                                case 1: backend.startWave(); break;
+                                case 2: backend.loadLikes(); break;
                                 case 3: backend.loadPlaylists(); break;
                                 case 4: backend.loadAlbums(); break;
                                 case 5: backend.loadArtists(); break;
