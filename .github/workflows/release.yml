@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.2.3)'
+        required: true
+        default: 'v0.2.3'
 
 permissions:
   contents: write
@@ -12,7 +18,21 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  meta:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+    steps:
+      - id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
   build-linux:
+    needs: meta
     runs-on: ubuntu-24.04
 
     steps:
@@ -28,7 +48,8 @@ jobs:
             pkg-config \
             libasound2-dev \
             libgl1-mesa-dev \
-            libxkbcommon-dev
+            libxkbcommon-dev \
+            zstd
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -56,18 +77,54 @@ jobs:
             -DCMAKE_INSTALL_LIBDIR=lib
           cmake --build build-qt
 
-      - name: Stage and archive release bundle
+      - name: Stage and archive release bundles
         run: |
+          TAG="${{ needs.meta.outputs.tag }}"
           DESTDIR="$PWD/dist" cmake --install build-qt
-          tar -C dist -czf "ymusic-${{ github.ref_name }}-linux-x86_64.tar.gz" usr
+          mkdir -p out
+          tar -C dist -czf "out/ymusic-${TAG}-linux-x86_64.tar.gz" usr
+          tar -C dist --zstd -cf "out/ymusic-${TAG}-linux-x86_64.tar.zst" usr
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Linux release artifacts
+        uses: actions/upload-artifact@v4
         with:
-          generate_release_notes: true
-          files: ymusic-${{ github.ref_name }}-linux-x86_64.tar.gz
+          name: release-linux
+          path: out/
+
+  build-arch:
+    needs: meta
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Build Arch Linux .pkg.tar.zst
+        run: |
+          TAG="${{ needs.meta.outputs.tag }}"
+          PKGVER="${TAG#v}"
+          PKGVER="${PKGVER//-/_}"
+          docker run --rm -e PKGVER="$PKGVER" -v "$PWD:/work" -w /work archlinux:latest bash -euo pipefail -c '
+            pacman -Syu --noconfirm --needed base-devel git rust cmake ninja pkgconf alsa-lib qt6-base qt6-declarative qt6-svg qt6-shadertools hicolor-icon-theme
+            useradd -m builder
+            sed -i "s/^pkgver=.*/pkgver=$PKGVER/" PKGBUILD
+            chown -R builder:builder /work
+            su - builder -c "cd /work && makepkg -sf --noconfirm"
+            mkdir -p /work/out-arch
+            cp /work/*.pkg.tar.zst /work/out-arch/
+          '
+
+      - name: Upload Arch package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-arch
+          path: out-arch/*.pkg.tar.zst
 
   build-windows:
+    needs: meta
     runs-on: windows-2022
 
     steps:
@@ -107,7 +164,9 @@ jobs:
       - name: Build single-file portable EXE (NSIS)
         shell: pwsh
         run: |
-          $exeName = "ymusic-${{ github.ref_name }}-windows-x86_64.exe"
+          $tag = "${{ needs.meta.outputs.tag }}"
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          $exeName = "out/ymusic-$tag-windows-x86_64.exe"
           @"
           OutFile "$exeName"
           SilentInstall silent
@@ -124,11 +183,30 @@ jobs:
 
       - name: Archive Windows bundle
         shell: pwsh
-        run: Compress-Archive -Path dist/* -DestinationPath "ymusic-${{ github.ref_name }}-windows-x86_64.zip"
+        run: |
+          $tag = "${{ needs.meta.outputs.tag }}"
+          Compress-Archive -Path dist/* -DestinationPath "out/ymusic-$tag-windows-x86_64.zip"
 
-      - name: Attach Windows artifacts to Release
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: out/
+
+  release:
+    needs: [meta, build-linux, build-arch, build-windows]
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            ymusic-${{ github.ref_name }}-windows-x86_64.exe
-            ymusic-${{ github.ref_name }}-windows-x86_64.zip
+          tag_name: ${{ needs.meta.outputs.tag }}
+          generate_release_notes: true
+          files: release-assets/*
