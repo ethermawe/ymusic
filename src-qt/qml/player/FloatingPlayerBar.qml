@@ -285,6 +285,7 @@ Item {
                 iconColor: backend.nowLiked ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
                 activeIconColor: Appearance.colors.primary
                 toggled: backend.nowLiked
+                heartBurst: true
                 onClicked: backend.toggleNowLike()
             }
 

@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - master
+  pull_request:
+    branches:
+      - develop
+      - master
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libasound2-dev \
+            libgl1-mesa-dev \
+            libxkbcommon-dev
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          modules: 'qtshadertools'
+
+      - name: Run Rust unit tests
+        env:
+          XDG_DATA_HOME: ${{ runner.temp }}/xdg-data
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config
+          XDG_CACHE_HOME: ${{ runner.temp }}/xdg-cache
+        run: cargo test --locked --lib
+
+      - name: Build Rust core (release)
+        run: cargo build --release --locked --lib
+
+      - name: Configure Qt frontend
+        run: cmake -S src-qt -B build-qt -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Qt frontend
+        run: cmake --build build-qt
+
+  build-windows:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtshadertools'
+
+      - name: Run Rust unit tests
+        run: cargo test --locked --lib
+
+      - name: Build Rust core (release)
+        run: cargo build --release --locked --lib
+
+      - name: Configure and build Qt frontend
+        run: |
+          cmake -S src-qt -B build-qt -A x64
+          cmake --build build-qt --config Release
+          cmake --install build-qt --config Release --prefix dist
+
+      - name: Deploy Qt runtime (windeployqt)
+        shell: pwsh
+        run: |
+          windeployqt --qmldir src-qt/qml --release --no-translations --no-opengl-sw dist/ymusic-qml.exe
+          Remove-Item -Recurse -Force dist/qmltooling -ErrorAction SilentlyContinue
+
+      - name: Build single-file portable EXE (NSIS)
+        shell: pwsh
+        run: |
+          @'
+          OutFile "ymusic-portable-windows-x86_64.exe"
+          SilentInstall silent
+          RequestExecutionLevel user
+          SetCompressor /SOLID lzma
+          Section
+            InitPluginsDir
+            SetOutPath "$PLUGINSDIR"
+            File /r "dist\*.*"
+            ExecWait '"$PLUGINSDIR\ymusic-qml.exe"'
+          SectionEnd
+          '@ | Set-Content -Encoding ASCII portable.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" portable.nsi
+
+      - name: Upload Windows portable EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: ymusic-windows-x86_64
+          path: ymusic-portable-windows-x86_64.exe

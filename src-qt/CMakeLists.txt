@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 QuickEffects Network ShaderTools Svg)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Quick Qml QuickControls2 Network ShaderTools Svg)
 
 if(Qt6_VERSION VERSION_GREATER_EQUAL "6.8")
     qt_policy(SET QTP0004 NEW)
@@ -45,6 +45,7 @@ set(QML_FILES
     qml/components/StyledCheckBox.qml
     qml/components/TitleText.qml
     qml/components/IconButton.qml
+    qml/components/LikeBurst.qml
     qml/components/PlayHeroButton.qml
     qml/components/RoundedImage.qml
     qml/components/WavyLine.qml
@@ -115,31 +116,49 @@ target_link_directories(ymusic-qml PRIVATE ${RUST_LIB_DIR})
 target_link_libraries(ymusic-qml PRIVATE
     Qt6::Core
     Qt6::Gui
+    Qt6::Widgets
     Qt6::Quick
     Qt6::Qml
     Qt6::QuickControls2
-    Qt6::QuickEffects
     Qt6::Network
     Qt6::Svg
-    ymusic_core
-    pthread
-    dl
-    m
 )
 
-set_target_properties(ymusic-qml PROPERTIES
-    BUILD_RPATH "${RUST_LIB_DIR}"
-    INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/ymusic"
-)
+if(WIN32)
+    if(MSVC)
+        target_link_libraries(ymusic-qml PRIVATE "${RUST_LIB_DIR}/ymusic_core.dll.lib")
+    else()
+        target_link_libraries(ymusic-qml PRIVATE ymusic_core)
+    endif()
+    set_target_properties(ymusic-qml PROPERTIES WIN32_EXECUTABLE TRUE)
+    add_custom_command(TARGET ymusic-qml POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${RUST_LIB_DIR}/ymusic_core.dll"
+            "$<TARGET_FILE_DIR:ymusic-qml>/ymusic_core.dll"
+    )
+    install(TARGETS ymusic-qml RUNTIME DESTINATION .)
+    install(FILES "${RUST_LIB_DIR}/ymusic_core.dll" DESTINATION .)
+else()
+    target_link_libraries(ymusic-qml PRIVATE
+        ymusic_core
+        pthread
+        dl
+        m
+    )
+    set_target_properties(ymusic-qml PROPERTIES
+        BUILD_RPATH "${RUST_LIB_DIR}"
+        INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/ymusic"
+    )
 
-install(TARGETS ymusic-qml RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES "${RUST_LIB_DIR}/libymusic_core.so" DESTINATION ${CMAKE_INSTALL_LIBDIR}/ymusic)
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../ymusic.desktop" DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor" DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg" DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps RENAME ymusic.svg)
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg" DESTINATION ${CMAKE_INSTALL_DATADIR}/pixmaps RENAME ymusic.svg)
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/256x256/apps/ymusic.png" DESTINATION ${CMAKE_INSTALL_DATADIR}/pixmaps)
+    install(TARGETS ymusic-qml RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(FILES "${RUST_LIB_DIR}/libymusic_core.so" DESTINATION ${CMAKE_INSTALL_LIBDIR}/ymusic)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../ymusic.desktop" DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor" DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg" DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps RENAME ymusic.svg)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg" DESTINATION ${CMAKE_INSTALL_DATADIR}/pixmaps RENAME ymusic.svg)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/256x256/apps/ymusic.png" DESTINATION ${CMAKE_INSTALL_DATADIR}/pixmaps)
 
-install(CODE "
-    file(CREATE_LINK \"ymusic-qml\" \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/ymusic\" SYMBOLIC)
-")
+    install(CODE "
+        file(CREATE_LINK \"ymusic-qml\" \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/ymusic\" SYMBOLIC)
+    ")
+endif()

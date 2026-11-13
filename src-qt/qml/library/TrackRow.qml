@@ -214,6 +214,7 @@ Item {
             iconColor: model.liked ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
             activeIconColor: Appearance.colors.primary
             toggled: model.liked
+            heartBurst: true
             opacity: (model.liked || root.isHovered) ? 1.0 : 0.0
             enabled: model.liked || root.isHovered
             Behavior on opacity { NumberAnimation { duration: 120 } }

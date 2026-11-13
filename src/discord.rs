@@ -1,7 +1,8 @@
 use std::env;
 use std::io::{self, Read, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -118,6 +119,11 @@ fn apply_cmd(
     }
 }
 
+#[cfg(unix)]
+type IpcStream = UnixStream;
+#[cfg(windows)]
+type IpcStream = std::fs::File;
+
 fn run(rx: mpsc::Receiver<Cmd>) {
     let client_id = env::var("YM_DISCORD_CLIENT_ID")
         .ok()
@@ -125,7 +131,7 @@ fn run(rx: mpsc::Receiver<Cmd>) {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| DEFAULT_CLIENT_ID.to_string());
 
-    let mut conn: Option<UnixStream> = None;
+    let mut conn: Option<IpcStream> = None;
     let mut current: Option<TrackInfo> = None;
     let mut status = Status::Stopped;
     let mut pos_secs = 0.0f64;
@@ -304,13 +310,24 @@ fn pad_discord_str(s: &str, fallback: &str) -> String {
     out
 }
 
-fn connect(client_id: &str) -> Option<UnixStream> {
+#[cfg(unix)]
+fn open_ipc(path: &Path) -> io::Result<IpcStream> {
+    let stream = UnixStream::connect(path)?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    Ok(stream)
+}
+
+#[cfg(windows)]
+fn open_ipc(path: &Path) -> io::Result<IpcStream> {
+    std::fs::OpenOptions::new().read(true).write(true).open(path)
+}
+
+fn connect(client_id: &str) -> Option<IpcStream> {
     for path in socket_candidates() {
-        let Ok(mut stream) = UnixStream::connect(&path) else {
+        let Ok(mut stream) = open_ipc(&path) else {
             continue;
         };
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-        let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
         let handshake = json!({
             "v": 1,
             "client_id": client_id,
@@ -329,6 +346,7 @@ fn connect(client_id: &str) -> Option<UnixStream> {
     None
 }
 
+#[cfg(unix)]
 fn socket_candidates() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(xdg) = env::var("XDG_RUNTIME_DIR") {
@@ -354,8 +372,15 @@ fn socket_candidates() -> Vec<PathBuf> {
     out
 }
 
+#[cfg(windows)]
+fn socket_candidates() -> Vec<PathBuf> {
+    (0..10)
+        .map(|i| PathBuf::from(format!(r"\\.\pipe\discord-ipc-{i}")))
+        .collect()
+}
+
 fn send_activity(
-    stream: &mut UnixStream,
+    stream: &mut IpcStream,
     activity: Option<Value>,
     nonce: &mut u64,
 ) -> io::Result<()> {
@@ -386,7 +411,7 @@ fn send_activity(
     Err(io::Error::other("Discord не подтвердил SET_ACTIVITY"))
 }
 
-fn write_frame(stream: &mut UnixStream, opcode: u32, payload: &Value) -> io::Result<()> {
+fn write_frame(stream: &mut IpcStream, opcode: u32, payload: &Value) -> io::Result<()> {
     let data = serde_json::to_vec(payload).map_err(io::Error::other)?;
     let mut header = [0u8; 8];
     header[..4].copy_from_slice(&opcode.to_le_bytes());
@@ -396,7 +421,7 @@ fn write_frame(stream: &mut UnixStream, opcode: u32, payload: &Value) -> io::Res
     stream.flush()
 }
 
-fn read_frame(stream: &mut UnixStream) -> io::Result<(u32, Vec<u8>)> {
+fn read_frame(stream: &mut IpcStream) -> io::Result<(u32, Vec<u8>)> {
     loop {
         let mut header = [0u8; 8];
         stream.read_exact(&mut header)?;
@@ -468,6 +493,7 @@ mod tests {
         assert!(paused["state"].as_str().unwrap().contains("На паузе"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn waits_for_matching_activity_acknowledgement() {
         let (mut client, mut server) = UnixStream::pair().unwrap();
@@ -482,6 +508,7 @@ mod tests {
         worker.join().unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn reports_discord_rejection() {
         let (mut client, mut server) = UnixStream::pair().unwrap();
