@@ -96,8 +96,13 @@ int main(int argc, char *argv[]) {
     QString runtimeDir = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
     if (runtimeDir.isEmpty()) runtimeDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     QDir().mkpath(runtimeDir);
+    const QString lockPath = runtimeDir + "/ymusic-qml-instance.lock";
+#ifdef Q_OS_WIN
+    const QString socketName = QStringLiteral("ymusic-qml-instance");
+#else
     const QString socketName = runtimeDir + "/ymusic-qml-instance";
-    QLockFile instanceLock(socketName + ".lock");
+#endif
+    QLockFile instanceLock(lockPath);
     if (!instanceLock.tryLock(0)) {
         QLocalSocket socket;
         socket.connectToServer(socketName);

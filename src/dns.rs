@@ -1,5 +1,9 @@
+#[cfg(unix)]
 use std::ffi::{CStr, CString};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
+#[cfg(unix)]
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket};
+use std::net::SocketAddr;
+#[cfg(unix)]
 use std::sync::OnceLock;
 
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
@@ -20,6 +24,7 @@ impl Resolve for Resolver {
     }
 }
 
+#[cfg(unix)]
 fn has_ipv6() -> bool {
     static CACHE: OnceLock<bool> = OnceLock::new();
     // connect() у UDP не шлёт пакетов, только проверяет наличие маршрута
@@ -30,6 +35,7 @@ fn has_ipv6() -> bool {
     })
 }
 
+#[cfg(unix)]
 fn lookup(host: &str) -> std::io::Result<Vec<SocketAddr>> {
     let family = if has_ipv6() { libc::AF_UNSPEC } else { libc::AF_INET };
     let mut addrs = getaddrinfo(host, family)?;
@@ -38,6 +44,15 @@ fn lookup(host: &str) -> std::io::Result<Vec<SocketAddr>> {
     Ok(addrs)
 }
 
+#[cfg(not(unix))]
+fn lookup(host: &str) -> std::io::Result<Vec<SocketAddr>> {
+    use std::net::ToSocketAddrs;
+    let mut addrs: Vec<SocketAddr> = (host, 0).to_socket_addrs()?.collect();
+    addrs.sort_by_key(|a| a.is_ipv6());
+    Ok(addrs)
+}
+
+#[cfg(unix)]
 fn getaddrinfo(host: &str, family: libc::c_int) -> std::io::Result<Vec<SocketAddr>> {
     let c_host = CString::new(host).map_err(|_| std::io::Error::other("некорректное имя хоста"))?;
     // SAFETY: обнулённая addrinfo — корректные «подсказки» для getaddrinfo
