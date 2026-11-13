@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - master
+  pull_request:
+    branches:
+      - develop
+      - master
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libasound2-dev \
+            libgl1-mesa-dev \
+            libxkbcommon-dev
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          modules: 'qtshadertools qtsvg qtdeclarative'
+
+      - name: Run Rust unit tests
+        env:
+          XDG_DATA_HOME: ${{ runner.temp }}/xdg-data
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config
+          XDG_CACHE_HOME: ${{ runner.temp }}/xdg-cache
+        run: cargo test --locked --lib
+
+      - name: Build Rust core (release)
+        run: cargo build --release --locked --lib
+
+      - name: Configure Qt frontend
+        run: cmake -S src-qt -B build-qt -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Qt frontend
+        run: cmake --build build-qt
