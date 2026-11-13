@@ -205,6 +205,7 @@ Item {
                             size: 40
                             iconSize: 22
                             toggled: backend.nowLiked && root.inWave
+                            heartBurst: true
                             tooltip: "Мне нравится"
                             enabled: root.inWave
                             onClicked: backend.toggleNowLike()
