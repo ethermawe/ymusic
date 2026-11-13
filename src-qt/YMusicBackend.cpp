@@ -80,6 +80,8 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
     case EVENT_PLAYBACK_PROGRESS: {
         m_progress = obj["progress"].toDouble();
         m_positionText = obj["position_text"].toString();
+        m_positionSecs = obj["position_secs"].toDouble();
+        m_durationSecs = obj["duration_secs"].toDouble();
         emit progressChanged();
         break;
     }

@@ -100,6 +100,19 @@ pub struct RotorSession {
     pub tracks: Vec<Track>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct LyricsLine {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<f64>,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct TrackLyrics {
+    pub synced: bool,
+    pub lines: Vec<LyricsLine>,
+}
+
 pub struct Account {
     pub uid: u64,
     pub name: String,
@@ -665,6 +678,66 @@ impl Api {
         let sign = md5::compute(format!("{SIGN_SALT}{}{s}", path.get(1..).unwrap_or("")));
         Ok(format!("https://{host}/get-mp3/{sign:x}/{ts}{path}"))
     }
+
+    /// Загружает синхронизированный (LRC) или обычный текст трека.
+    pub async fn track_lyrics(&self, track_id: &str) -> Result<TrackLyrics> {
+        const LYRICS_SIGN_KEY: &[u8] = b"p93jhgh689SBReK6ghtw62";
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .to_string();
+        let msg = format!("{track_id}{ts}");
+        let sign = base64_encode(&hmac_sha256(LYRICS_SIGN_KEY, msg.as_bytes()));
+
+        if let Ok(r) = self
+            .get(
+                &format!("/tracks/{track_id}/lyrics"),
+                &[("format", "LRC"), ("timeStamp", &ts), ("sign", &sign)],
+            )
+            .await
+        {
+            if let Some(url) = r["downloadUrl"].as_str().filter(|s| !s.is_empty()) {
+                if let Ok((status, lrc_text)) =
+                    Self::send_with_retry(self.http.get(url)).await
+                {
+                    if status.is_success() {
+                        let lines = parse_lrc(&lrc_text);
+                        if !lines.is_empty() {
+                            return Ok(TrackLyrics {
+                                synced: true,
+                                lines,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let sup = self
+            .get(&format!("/tracks/{track_id}/supplement"), &[])
+            .await?;
+        if let Some(full) = sup["lyrics"]["fullLyrics"].as_str() {
+            let lines: Vec<LyricsLine> = full
+                .lines()
+                .map(|l| LyricsLine {
+                    time: None,
+                    text: l.trim_end().to_string(),
+                })
+                .collect();
+            if lines.iter().any(|l| !l.text.is_empty()) {
+                return Ok(TrackLyrics {
+                    synced: false,
+                    lines,
+                });
+            }
+        }
+
+        Ok(TrackLyrics {
+            synced: false,
+            lines: Vec::new(),
+        })
+    }
 }
 
 pub async fn request_device_code(http: &Client) -> Result<DeviceCode> {
@@ -974,6 +1047,163 @@ fn build_rotor_feedback_body(
     body
 }
 
+fn sha256(data: &[u8]) -> [u8; 32] {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ];
+
+    let bit_len = (data.len() as u64) * 8;
+    let mut padded = data.to_vec();
+    padded.push(0x80);
+    while (padded.len() % 64) != 56 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&bit_len.to_be_bytes());
+
+    for chunk in padded.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes([
+                chunk[i * 4],
+                chunk[i * 4 + 1],
+                chunk[i * 4 + 2],
+                chunk[i * 4 + 3],
+            ]);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = h;
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let temp1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+        }
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+        h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g);
+        h[7] = h[7].wrapping_add(hh);
+    }
+
+    let mut out = [0u8; 32];
+    for (i, word) in h.iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    out
+}
+
+fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    let mut k_block = [0u8; 64];
+    if key.len() > 64 {
+        let hashed = sha256(key);
+        k_block[..32].copy_from_slice(&hashed);
+    } else {
+        k_block[..key.len()].copy_from_slice(key);
+    }
+    let mut i_pad = Vec::with_capacity(64 + msg.len());
+    let mut o_pad = Vec::with_capacity(64 + 32);
+    for b in k_block {
+        i_pad.push(b ^ 0x36);
+        o_pad.push(b ^ 0x5c);
+    }
+    i_pad.extend_from_slice(msg);
+    let inner = sha256(&i_pad);
+    o_pad.extend_from_slice(&inner);
+    sha256(&o_pad)
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+        out.push(TABLE[(b0 >> 2) as usize] as char);
+        out.push(TABLE[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(b2 & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+fn parse_lrc_timestamp(tag: &str) -> Option<f64> {
+    let (min_s, sec_s) = tag.split_once(':')?;
+    let mins: f64 = min_s.trim().parse().ok()?;
+    let secs: f64 = sec_s.trim().parse().ok()?;
+    if mins.is_finite() && secs.is_finite() && mins >= 0.0 && secs >= 0.0 {
+        Some(mins * 60.0 + secs)
+    } else {
+        None
+    }
+}
+
+fn parse_lrc(raw: &str) -> Vec<LyricsLine> {
+    let mut lines = Vec::new();
+    for line in raw.lines() {
+        let mut rest = line.trim();
+        let mut times = Vec::new();
+        while rest.starts_with('[') {
+            let Some(end) = rest.find(']') else { break };
+            let tag = &rest[1..end];
+            if let Some(t) = parse_lrc_timestamp(tag) {
+                times.push(t);
+            }
+            rest = rest[end + 1..].trim_start();
+        }
+        let text = rest.trim().to_string();
+        for t in times {
+            lines.push(LyricsLine {
+                time: Some(t),
+                text: text.clone(),
+            });
+        }
+    }
+    lines.sort_by(|a, b| {
+        a.time
+            .unwrap_or(0.0)
+            .partial_cmp(&b.time.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1010,5 +1240,28 @@ mod tests {
         assert_eq!(started["from"], "ymusic");
         assert_eq!(started["event"]["type"], "radioStarted");
         assert_eq!(started["event"]["timestamp"], "2023-11-14T22:13:20.000Z");
+    }
+
+    #[test]
+    fn hmac_sha256_and_base64_match_known_vector() {
+        let mac = hmac_sha256(b"key", b"The quick brown fox jumps over the lazy dog");
+        let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex,
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+        );
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn parses_lrc_with_multiple_tags_and_sorts() {
+        let lrc = "[ti:Test]\n[00:25.50][00:05.00]Строка 1\n[00:12.345]Строка 2\n";
+        let parsed = parse_lrc(lrc);
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].time, Some(5.0));
+        assert_eq!(parsed[0].text, "Строка 1");
+        assert!((parsed[1].time.unwrap() - 12.345).abs() < 1e-6);
+        assert_eq!(parsed[1].text, "Строка 2");
+        assert_eq!(parsed[2].time, Some(25.5));
     }
 }

@@ -481,6 +481,8 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
 
     if !is_complete {
         let shared_bg = shared.clone();
+        let http_bg = http.clone();
+        let url_bg = url.clone();
         // Подготавливаем временный файл для постепенной записи трека на диск без дублирования буфера в RAM
         let mut disk_cache_file = track_path(&track_id).and_then(|path| {
             let dir = path.parent()?;
@@ -500,8 +502,9 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
         });
 
         tokio::spawn(async move {
+            let mut retries_left: u8 = 3;
             loop {
-                match resp.chunk().await {
+                let resume_from: Option<(u64, String)> = match resp.chunk().await {
                     Ok(Some(chunk)) => {
                         let mut st = shared_bg.state.lock().unwrap();
                         if st.cancelled {
@@ -516,36 +519,93 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
                         if let Some((_, _, ref mut f)) = disk_cache_file {
                             let _ = f.write_all(&chunk);
                         }
+                        None
                     }
                     Ok(None) => {
-                        {
-                            let mut st = shared_bg.state.lock().unwrap();
-                            st.done = true;
-                            st.total_len = Some(st.buf.len() as u64);
+                        let (downloaded, expected, cancelled) = {
+                            let st = shared_bg.state.lock().unwrap();
+                            (st.buf.len() as u64, st.total_len, st.cancelled)
+                        };
+                        if cancelled {
+                            if let Some((tmp, _, f)) = disk_cache_file.take() {
+                                drop(f);
+                                let _ = fs::remove_file(&tmp);
+                            }
+                            break;
                         }
-                        shared_bg.cvar.notify_all();
-                        if let Some((tmp, path, mut f)) = disk_cache_file.take() {
-                            let _ = f.flush();
-                            drop(f);
-                            if fs::rename(&tmp, &path).is_ok() {
-                                if let Some(dir) = path.parent() {
-                                    trim_cache(dir);
+                        if expected.is_some_and(|len| downloaded < len) && retries_left > 0 {
+                            Some((
+                                downloaded,
+                                format!("преждевременный обрыв потока на {downloaded} байт"),
+                            ))
+                        } else {
+                            {
+                                let mut st = shared_bg.state.lock().unwrap();
+                                st.done = true;
+                                st.total_len = Some(downloaded);
+                            }
+                            shared_bg.cvar.notify_all();
+                            if let Some((tmp, path, mut f)) = disk_cache_file.take() {
+                                let _ = f.flush();
+                                drop(f);
+                                if fs::rename(&tmp, &path).is_ok() {
+                                    if let Some(dir) = path.parent() {
+                                        trim_cache(dir);
+                                    }
                                 }
                             }
+                            break;
                         }
-                        break;
                     }
                     Err(e) => {
-                        let mut st = shared_bg.state.lock().unwrap();
-                        st.error = Some(e.to_string());
-                        st.done = true;
-                        shared_bg.cvar.notify_all();
-                        if let Some((tmp, _, f)) = disk_cache_file.take() {
-                            drop(f);
-                            let _ = fs::remove_file(&tmp);
+                        let (downloaded, cancelled) = {
+                            let st = shared_bg.state.lock().unwrap();
+                            (st.buf.len() as u64, st.cancelled)
+                        };
+                        if cancelled {
+                            if let Some((tmp, _, f)) = disk_cache_file.take() {
+                                drop(f);
+                                let _ = fs::remove_file(&tmp);
+                            }
+                            break;
                         }
-                        break;
+                        Some((downloaded, e.to_string()))
                     }
+                };
+
+                if let Some((offset, reason)) = resume_from {
+                    let mut resumed = None;
+                    while retries_left > 0 {
+                        retries_left -= 1;
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        if shared_bg.state.lock().unwrap().cancelled {
+                            break;
+                        }
+                        if let Ok(r) = http_bg
+                            .get(&url_bg)
+                            .header(reqwest::header::RANGE, format!("bytes={offset}-"))
+                            .send()
+                            .await
+                        {
+                            if r.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+                                resumed = Some(r);
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(new_resp) = resumed {
+                        resp = new_resp;
+                        continue;
+                    }
+                    let mut st = shared_bg.state.lock().unwrap();
+                    st.error = Some(reason);
+                    st.done = true;
+                    shared_bg.cvar.notify_all();
+                    if let Some((tmp, _, f)) = disk_cache_file.take() {
+                        drop(f);
+                        let _ = fs::remove_file(&tmp);
+                    }
+                    break;
                 }
             }
         });
