@@ -46,7 +46,7 @@ jobs:
         with:
           version: '6.8.*'
           python-version: '3.12'
-          modules: 'qtshadertools qtsvg qtdeclarative'
+          modules: 'qtshadertools'
 
       - name: Run Rust unit tests
         env:
@@ -85,7 +85,7 @@ jobs:
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'
-          modules: 'qtshadertools qtsvg qtdeclarative'
+          modules: 'qtshadertools'
 
       - name: Run Rust unit tests
         run: cargo test --locked --lib

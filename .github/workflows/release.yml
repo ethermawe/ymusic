@@ -44,7 +44,7 @@ jobs:
         with:
           version: '6.8.*'
           python-version: '3.12'
-          modules: 'qtshadertools qtsvg qtdeclarative'
+          modules: 'qtshadertools'
 
       - name: Build Rust core (release)
         run: cargo build --release --locked --lib
@@ -89,7 +89,7 @@ jobs:
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'
-          modules: 'qtshadertools qtsvg qtdeclarative'
+          modules: 'qtshadertools'
 
       - name: Build Rust core (release)
         run: cargo build --release --locked --lib
