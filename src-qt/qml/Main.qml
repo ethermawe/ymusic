@@ -14,6 +14,13 @@ ApplicationWindow {
     title: "Yandex Music"
     color: Appearance.colors.surfaceContainerLowest
 
+    onClosing: (close) => {
+        if (trayAvailable) {
+            close.accepted = false;
+            window.hide();
+        }
+    }
+
     property bool immersiveOpen: false
     CreatePlaylistDialog { id: createPlaylist; parent: Overlay.overlay }
     Shortcut { sequence: "Ctrl+N"; enabled: backend.loggedIn; onActivated: createPlaylist.open() }

@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 
@@ -83,6 +83,24 @@ impl Audio {
     }
 }
 
+const FADE_IN_STEPS: u8 = 12;
+const FADE_IN_TICK: Duration = Duration::from_millis(15);
+const FADE_OUT_PAUSE: Duration = Duration::from_millis(140);
+const FADE_OUT_SWITCH: Duration = Duration::from_millis(90);
+
+fn fade_out(player: &Player, from_vol: f32, duration: Duration) {
+    if from_vol <= 0.001 || player.is_paused() || player.empty() {
+        player.set_volume(0.0);
+        return;
+    }
+    const STEPS: u32 = 12;
+    let step_sleep = duration / STEPS;
+    for i in (0..STEPS).rev() {
+        player.set_volume(from_vol * (i as f32 / STEPS as f32));
+        thread::sleep(step_sleep);
+    }
+}
+
 fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(Event)) {
     let mut sink = match DeviceSinkBuilder::open_default_sink() {
         Ok(sink) => sink,
@@ -96,6 +114,10 @@ fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(Event)) {
     let mut active = false;
     let mut generation = 0u64;
     let mut stream: Option<StreamReader> = None;
+    let mut target_volume: f32 = 1.0;
+    let mut current_volume: f32 = 1.0;
+    let mut fade_in_remaining: u8 = 0;
+    let mut last_pos_emit = Instant::now();
 
     // Отпускает текущий поток, чтобы `clear()` не ждал сеть внутри `read()`.
     let release = |stream: &mut Option<StreamReader>| {
@@ -105,15 +127,21 @@ fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(Event)) {
     };
 
     loop {
-        let tick = if active && !player.is_paused() {
+        let tick = if fade_in_remaining > 0 && active && !player.is_paused() {
+            FADE_IN_TICK
+        } else if active && !player.is_paused() {
             Duration::from_millis(50)
         } else {
             Duration::from_millis(250)
         };
         match rx.recv_timeout(tick) {
             Ok(Cmd::Load(new_generation, data)) => {
+                if active && !player.is_paused() {
+                    fade_out(&player, current_volume, FADE_OUT_SWITCH);
+                }
                 release(&mut stream);
                 player.clear();
+                fade_in_remaining = 0;
                 generation = new_generation;
                 let res = match data {
                     SourceData::Cached { file, len } => Decoder::builder()
@@ -137,12 +165,18 @@ fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(Event)) {
                 };
                 match res {
                     Ok(()) => {
+                        current_volume = 0.0;
+                        player.set_volume(0.0);
                         player.play();
                         active = true;
+                        fade_in_remaining = FADE_IN_STEPS;
+                        last_pos_emit = Instant::now();
                         on_event(Event::Started(generation));
                     }
                     Err(e) => {
                         active = false;
+                        current_volume = target_volume;
+                        player.set_volume(target_volume);
                         release(&mut stream);
                         on_event(Event::Error(
                             generation,
@@ -151,13 +185,33 @@ fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(Event)) {
                     }
                 }
             }
-            Ok(Cmd::Play) if active => player.play(),
-            Ok(Cmd::Pause) if active => player.pause(),
+            Ok(Cmd::Play) if active => {
+                if player.is_paused() {
+                    current_volume = 0.0;
+                    player.set_volume(0.0);
+                    player.play();
+                    fade_in_remaining = FADE_IN_STEPS;
+                }
+            }
+            Ok(Cmd::Pause) if active => {
+                if !player.is_paused() {
+                    fade_out(&player, current_volume, FADE_OUT_PAUSE);
+                    player.pause();
+                    current_volume = 0.0;
+                    fade_in_remaining = 0;
+                }
+            }
             Ok(Cmd::Toggle) if active => {
                 if player.is_paused() {
+                    current_volume = 0.0;
+                    player.set_volume(0.0);
                     player.play();
+                    fade_in_remaining = FADE_IN_STEPS;
                 } else {
+                    fade_out(&player, current_volume, FADE_OUT_PAUSE);
                     player.pause();
+                    current_volume = 0.0;
+                    fade_in_remaining = 0;
                 }
             }
             Ok(Cmd::Seek(secs)) if active => {
@@ -167,11 +221,23 @@ fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(Event)) {
                 let cur = player.get_pos().as_secs_f64();
                 let _ = player.try_seek(Duration::from_secs_f64((cur + delta).max(0.0)));
             }
-            Ok(Cmd::Volume(v)) => player.set_volume(v),
+            Ok(Cmd::Volume(v)) => {
+                target_volume = v;
+                if fade_in_remaining == 0 {
+                    current_volume = target_volume;
+                    player.set_volume(current_volume);
+                }
+            }
             Ok(Cmd::Stop) => {
+                if active && !player.is_paused() {
+                    fade_out(&player, current_volume, FADE_OUT_PAUSE);
+                }
                 release(&mut stream);
                 player.clear();
                 active = false;
+                fade_in_remaining = 0;
+                current_volume = target_volume;
+                player.set_volume(current_volume);
             }
             Ok(_) => {}
             Err(RecvTimeoutError::Timeout) => {}
@@ -181,12 +247,23 @@ fn run(rx: mpsc::Receiver<Cmd>, on_event: impl Fn(Event)) {
             }
         }
 
+        if fade_in_remaining > 0 && active && !player.is_paused() {
+            fade_in_remaining -= 1;
+            let progress = 1.0 - (f32::from(fade_in_remaining) / f32::from(FADE_IN_STEPS));
+            current_volume = target_volume * progress;
+            player.set_volume(current_volume);
+        }
+
         if active {
             if player.empty() {
                 active = false;
+                fade_in_remaining = 0;
+                current_volume = target_volume;
+                player.set_volume(current_volume);
                 stream = None;
                 on_event(Event::Ended(generation));
-            } else {
+            } else if last_pos_emit.elapsed() >= Duration::from_millis(45) {
+                last_pos_emit = Instant::now();
                 on_event(Event::Position {
                     generation,
                     secs: player.get_pos().as_secs_f64(),
