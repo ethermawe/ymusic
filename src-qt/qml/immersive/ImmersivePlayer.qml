@@ -322,12 +322,12 @@ Item {
 
                     StyledButton {
                         text: "Очередь · " + backend.queue.count
-                        primary: !rightPanel.showLyrics
+                        highlighted: !rightPanel.showLyrics
                         onClicked: rightPanel.showLyrics = false
                     }
                     StyledButton {
                         text: "Текст"
-                        primary: rightPanel.showLyrics
+                        highlighted: rightPanel.showLyrics
                         onClicked: rightPanel.showLyrics = true
                     }
                     Item { Layout.fillWidth: true }
