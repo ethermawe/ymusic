@@ -59,3 +59,46 @@ jobs:
 
       - name: Build Qt frontend
         run: cmake --build build-qt
+
+  build-windows:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtshadertools qtsvg qtdeclarative'
+
+      - name: Run Rust unit tests
+        run: cargo test --locked --lib
+
+      - name: Build Rust core (release)
+        run: cargo build --release --locked --lib
+
+      - name: Configure and build Qt frontend
+        run: |
+          cmake -S src-qt -B build-qt -A x64
+          cmake --build build-qt --config Release
+          cmake --install build-qt --config Release --prefix dist
+
+      - name: Deploy Qt runtime (windeployqt)
+        run: windeployqt --qmldir src-qt/qml --release dist/ymusic-qml.exe
+
+      - name: Upload Windows build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ymusic-windows-x86_64
+          path: dist/

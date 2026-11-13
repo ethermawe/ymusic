@@ -1,13 +1,21 @@
+#[cfg(target_os = "linux")]
 use std::collections::HashMap;
+#[cfg(target_os = "linux")]
 use std::sync::{Arc, Mutex};
 
 use tokio::runtime::Handle;
+#[cfg(target_os = "linux")]
 use tokio::sync::mpsc;
+#[cfg(target_os = "linux")]
 use zbus::interface;
+#[cfg(target_os = "linux")]
 use zbus::object_server::SignalEmitter;
+#[cfg(target_os = "linux")]
 use zbus::zvariant::{ObjectPath, Value};
 
+#[cfg(target_os = "linux")]
 const PATH: &str = "/org/mpris/MediaPlayer2";
+#[cfg(target_os = "linux")]
 const BUS_NAME: &str = "org.mpris.MediaPlayer2.ymusic";
 
 #[derive(Clone, Debug)]
@@ -41,6 +49,7 @@ pub enum Status {
     Paused,
 }
 
+#[cfg(target_os = "linux")]
 impl Status {
     fn as_str(self) -> &'static str {
         match self {
@@ -51,6 +60,7 @@ impl Status {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Default)]
 struct Shared {
     status: Status,
@@ -59,17 +69,38 @@ struct Shared {
     volume: f64,
 }
 
+#[cfg(target_os = "linux")]
 enum Notify {
     MetadataAndStatus,
     Status,
     Volume,
 }
 
+#[cfg(not(target_os = "linux"))]
+pub struct Mpris;
+
+#[cfg(not(target_os = "linux"))]
+impl Mpris {
+    pub fn spawn(_rt: &Handle, _on_action: impl Fn(Action) + Send + Sync + 'static) -> Self {
+        Self
+    }
+
+    pub fn set_track(&self, _meta: Meta, _status: Status) {}
+
+    pub fn set_status(&self, _status: Status, _position_secs: f64) {}
+
+    pub fn set_stopped(&self) {}
+
+    pub fn set_volume(&self, _volume: f32) {}
+}
+
+#[cfg(target_os = "linux")]
 pub struct Mpris {
     shared: Arc<Mutex<Shared>>,
     tx: mpsc::UnboundedSender<Notify>,
 }
 
+#[cfg(target_os = "linux")]
 impl Mpris {
     pub fn spawn(rt: &Handle, on_action: impl Fn(Action) + Send + Sync + 'static) -> Self {
         let shared = Arc::new(Mutex::new(Shared {
@@ -123,6 +154,7 @@ impl Mpris {
     }
 }
 
+#[cfg(target_os = "linux")]
 async fn serve(
     shared: Arc<Mutex<Shared>>,
     on_action: Arc<dyn Fn(Action) + Send + Sync>,
@@ -167,10 +199,12 @@ async fn serve(
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 struct Root {
     on_action: Arc<dyn Fn(Action) + Send + Sync>,
 }
 
+#[cfg(target_os = "linux")]
 #[interface(name = "org.mpris.MediaPlayer2")]
 impl Root {
     fn raise(&self) {}
@@ -215,11 +249,13 @@ impl Root {
     }
 }
 
+#[cfg(target_os = "linux")]
 struct PlayerIface {
     shared: Arc<Mutex<Shared>>,
     on_action: Arc<dyn Fn(Action) + Send + Sync>,
 }
 
+#[cfg(target_os = "linux")]
 #[interface(name = "org.mpris.MediaPlayer2.Player")]
 impl PlayerIface {
     fn next(&self) {
