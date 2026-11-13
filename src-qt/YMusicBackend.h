@@ -54,6 +54,8 @@ class YMusicBackend : public QObject {
     // Progress
     Q_PROPERTY(qreal progress READ progress NOTIFY progressChanged)
     Q_PROPERTY(QString positionText READ positionText NOTIFY progressChanged)
+    Q_PROPERTY(qreal positionSecs READ positionSecs NOTIFY progressChanged)
+    Q_PROPERTY(qreal durationSecs READ durationSecs NOTIFY progressChanged)
 
     // Playback State
     Q_PROPERTY(bool playing READ playing NOTIFY playbackStateChanged)
@@ -115,6 +117,8 @@ public:
 
     qreal progress() const { return m_progress; }
     QString positionText() const { return m_positionText; }
+    qreal positionSecs() const { return m_positionSecs; }
+    qreal durationSecs() const { return m_durationSecs; }
 
     bool playing() const { return m_playing; }
     bool buffering() const { return m_buffering; }
@@ -248,6 +252,8 @@ private:
 
     qreal m_progress = 0.0;
     QString m_positionText = "0:00";
+    qreal m_positionSecs = 0.0;
+    qreal m_durationSecs = 0.0;
 
     bool m_playing = false;
     bool m_buffering = false;

@@ -59,6 +59,11 @@ Menu {
         enabled: root.trackAvailable
         onTriggered: backend.trackAction(root.trackId, 2)
     }
+    Entry {
+        text: "Волна по треку"
+        enabled: backend.loggedIn && root.trackId !== ""
+        onTriggered: backend.feature({action: "track_wave", id: root.trackId, title: root.trackTitle})
+    }
     MenuSeparator {}
     Entry {
         text: "Добавить в плейлист…"

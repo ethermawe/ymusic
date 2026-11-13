@@ -536,6 +536,57 @@ impl YMusicCore {
                 self.batch_cancel_tx.send_replace(true);
             }
             "queue" => self.edit_queue(&cmd),
+            "track_wave" => {
+                let Some(id) = cmd["id"].as_str().filter(|s| !s.is_empty()) else { return };
+                let title = cmd["title"].as_str().filter(|s| !s.is_empty()).unwrap_or("трек");
+                self.start_wave(format!("track:{id}"), format!("Волна: {title}"));
+            }
+            "lyrics" => {
+                let id = cmd["id"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        let st = self.state.lock().unwrap();
+                        current_track(&st).map(|t| t.id.clone())
+                    });
+                let Some(track_id) = id else { return };
+                let Some(api) = self.api() else {
+                    self.send_feature("lyrics", serde_json::json!({
+                        "trackId": track_id,
+                        "synced": false,
+                        "lines": [],
+                        "message": "Для загрузки текста нужен вход в аккаунт"
+                    }));
+                    return;
+                };
+                let this = self.clone();
+                self.rt_handle.spawn(async move {
+                    match api.track_lyrics(&track_id).await {
+                        Ok(lyrics) => {
+                            let message = if lyrics.lines.is_empty() {
+                                "Текст для этого трека не найден"
+                            } else {
+                                ""
+                            };
+                            this.send_feature("lyrics", serde_json::json!({
+                                "trackId": track_id,
+                                "synced": lyrics.synced,
+                                "lines": lyrics.lines,
+                                "message": message
+                            }));
+                        }
+                        Err(e) => {
+                            this.send_feature("lyrics", serde_json::json!({
+                                "trackId": track_id,
+                                "synced": false,
+                                "lines": [],
+                                "message": format!("Не удалось загрузить текст: {e}")
+                            }));
+                        }
+                    }
+                });
+            }
             _ => (),
         }
     }
