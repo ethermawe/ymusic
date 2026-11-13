@@ -45,7 +45,6 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.*'
-          python-version: '3.12'
           modules: 'qtshadertools'
 
       - name: Run Rust unit tests
@@ -81,7 +80,6 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.*'
-          python-version: '3.12'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'
