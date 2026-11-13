@@ -118,6 +118,9 @@ pub fn http_client() -> Client {
     Client::builder()
         .user_agent("ymusic/0.2")
         .dns_resolver(crate::dns::Resolver)
+        .http1_only()
+        .pool_idle_timeout(Duration::from_secs(15))
+        .tcp_keepalive(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(10))
         .read_timeout(Duration::from_secs(30))
         .build()
@@ -145,10 +148,39 @@ impl Api {
             .header("Accept-Language", "ru")
     }
 
+    async fn send_with_retry(rb: RequestBuilder) -> Result<(reqwest::StatusCode, String)> {
+        const MAX_ATTEMPTS: usize = 3;
+        for attempt in 0..MAX_ATTEMPTS {
+            let Some(req) = rb.try_clone() else {
+                let resp = rb.send().await.context("нет соединения с сервером")?;
+                let status = resp.status();
+                let text = resp.text().await?;
+                return Ok((status, text));
+            };
+            let is_last = attempt + 1 == MAX_ATTEMPTS;
+            match req.send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.text().await {
+                        Ok(text) => return Ok((status, text)),
+                        Err(e) if !is_last && is_retryable_reqwest_err(&e) => {
+                            tokio::time::sleep(Duration::from_millis(150 * (attempt as u64 + 1)))
+                                .await;
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                Err(e) if !is_last && is_retryable_reqwest_err(&e) => {
+                    tokio::time::sleep(Duration::from_millis(150 * (attempt as u64 + 1))).await;
+                }
+                Err(e) => return Err(e).context("нет соединения с сервером"),
+            }
+        }
+        unreachable!()
+    }
+
     async fn result(rb: RequestBuilder) -> Result<Value> {
-        let resp = rb.send().await.context("нет соединения с сервером")?;
-        let status = resp.status();
-        let text = resp.text().await?;
+        let (status, text) = Self::send_with_retry(rb).await?;
         let body: Value = match serde_json::from_str(&text) {
             Ok(v) => v,
             Err(_) if !status.is_success() => bail!("HTTP {}", status.as_u16()),
@@ -592,30 +624,19 @@ impl Api {
         track_id: Option<&str>,
         total_played_seconds: Option<f64>,
     ) {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0);
-        let mut event = json!({
-            "type": event_type,
-            "timestamp": ts,
-        });
-        if let Some(tid) = track_id {
-            event["trackId"] = Value::String(tid.to_string());
-        }
-        if let Some(secs) = total_played_seconds {
-            event["totalPlayedSeconds"] = json!(secs);
-        }
-        let mut body = json!({ "event": event });
-        if !batch_id.is_empty() {
-            body["batchId"] = Value::String(batch_id.to_string());
-        }
-        if event_type == "radioStarted" {
-            body["from"] = Value::String("ymusic".to_string());
-        }
-        let _ = self
+        let body = build_rotor_feedback_body(
+            batch_id,
+            event_type,
+            track_id,
+            total_played_seconds,
+            SystemTime::now(),
+        );
+        if let Err(e) = self
             .post_json(&format!("/rotor/session/{session_id}/feedback"), &body)
-            .await;
+            .await
+        {
+            eprintln!("Rotor feedback ({event_type}) error: {e:#}");
+        }
     }
 
     /// Получает прямую подписанную ссылку на MP3 (лучший битрейт, 320 kbps).
@@ -633,13 +654,10 @@ impl Api {
             .as_str()
             .ok_or_else(|| anyhow!("нет downloadInfoUrl"))?;
 
-        let xml = self
-            .auth(self.http.get(info_url))
-            .send()
-            .await?
-            .error_for_status()?
-            .text()
-            .await?;
+        let (status, xml) = Self::send_with_retry(self.auth(self.http.get(info_url))).await?;
+        if !status.is_success() {
+            bail!("HTTP {}", status.as_u16());
+        }
         let host = xml_tag(&xml, "host")?;
         let path = xml_tag(&xml, "path")?;
         let ts = xml_tag(&xml, "ts")?;
@@ -898,4 +916,99 @@ fn random_device_id() -> String {
             ALPHABET[(x % ALPHABET.len() as u64) as usize] as char
         })
         .collect()
+}
+
+fn is_retryable_reqwest_err(e: &reqwest::Error) -> bool {
+    e.is_connect() || e.is_request() || e.is_body() || e.is_decode() || e.is_timeout()
+}
+
+fn format_iso8601_utc(t: SystemTime) -> String {
+    let dur = t.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let total_secs = dur.as_secs();
+    let millis = dur.subsec_millis();
+    let days = (total_secs / 86_400) as i64;
+    let rem_secs = total_secs % 86_400;
+    let hour = rem_secs / 3_600;
+    let min = (rem_secs % 3_600) / 60;
+    let sec = rem_secs % 60;
+
+    // Howard Hinnant's civil_from_days algorithm for UTC date without external crates.
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = (yoe as i64) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = y + i64::from(m <= 2);
+
+    format!("{y:04}-{m:02}-{d:02}T{hour:02}:{min:02}:{sec:02}.{millis:03}Z")
+}
+
+fn build_rotor_feedback_body(
+    batch_id: &str,
+    event_type: &str,
+    track_id: Option<&str>,
+    total_played_seconds: Option<f64>,
+    timestamp: SystemTime,
+) -> Value {
+    let mut event = json!({
+        "type": event_type,
+        "timestamp": format_iso8601_utc(timestamp),
+    });
+    if let Some(tid) = track_id {
+        event["trackId"] = Value::String(tid.to_string());
+    }
+    if let Some(secs) = total_played_seconds.filter(|s| s.is_finite()) {
+        event["totalPlayedSeconds"] = json!(secs.max(0.0));
+    }
+    let mut body = json!({ "event": event });
+    if !batch_id.is_empty() {
+        body["batchId"] = Value::String(batch_id.to_string());
+    }
+    if event_type == "radioStarted" {
+        body["from"] = Value::String("ymusic".to_string());
+    }
+    body
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn formats_iso8601_utc_timestamps() {
+        assert_eq!(format_iso8601_utc(UNIX_EPOCH), "1970-01-01T00:00:00.000Z");
+        let t = UNIX_EPOCH + Duration::from_millis(1_700_000_000_123);
+        assert_eq!(format_iso8601_utc(t), "2023-11-14T22:13:20.123Z");
+        // 2024-02-29T12:34:56.789Z (leap day)
+        let leap = UNIX_EPOCH + Duration::from_secs(1_709_210_096) + Duration::from_millis(789);
+        assert_eq!(format_iso8601_utc(leap), "2024-02-29T12:34:56.789Z");
+    }
+
+    #[test]
+    fn builds_rotor_feedback_payload_with_iso_timestamp() {
+        let t = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let skip = build_rotor_feedback_body(
+            "batch-42",
+            "skip",
+            Some("123:456"),
+            Some(12.5),
+            t,
+        );
+        assert_eq!(skip["batchId"], "batch-42");
+        assert_eq!(skip["event"]["type"], "skip");
+        assert_eq!(skip["event"]["trackId"], "123:456");
+        assert_eq!(skip["event"]["totalPlayedSeconds"], 12.5);
+        assert_eq!(skip["event"]["timestamp"], "2023-11-14T22:13:20.000Z");
+        assert!(skip.get("from").is_none());
+
+        let started = build_rotor_feedback_body("batch-42", "radioStarted", None, None, t);
+        assert_eq!(started["from"], "ymusic");
+        assert_eq!(started["event"]["type"], "radioStarted");
+        assert_eq!(started["event"]["timestamp"], "2023-11-14T22:13:20.000Z");
+    }
 }
