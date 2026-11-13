@@ -45,6 +45,7 @@ set(QML_FILES
     qml/components/StyledCheckBox.qml
     qml/components/TitleText.qml
     qml/components/IconButton.qml
+    qml/components/LikeBurst.qml
     qml/components/PlayHeroButton.qml
     qml/components/RoundedImage.qml
     qml/components/WavyLine.qml

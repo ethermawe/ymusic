@@ -179,6 +179,8 @@ Flickable {
                             size: 38
                             iconSize: 20
                             iconColor: backend.nowLiked ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
+                            toggled: backend.nowLiked
+                            heartBurst: true
                             visible: backend.hasTrack
                             onClicked: backend.toggleNowLike()
                         }

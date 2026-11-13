@@ -11,6 +11,7 @@ T.AbstractButton {
     property color iconColor: Appearance.colors.onSurface
     property color activeIconColor: Appearance.colors.primary
     property bool toggled: false
+    property bool heartBurst: false
     property string tooltip: ""
 
     implicitWidth: size
@@ -46,6 +47,18 @@ T.AbstractButton {
 
         Behavior on color {
             ColorAnimation { duration: 140 }
+        }
+    }
+
+    LikeBurst {
+        id: likeBurst
+        anchors.centerIn: parent
+        color: root.activeIconColor
+    }
+
+    onClicked: {
+        if (root.heartBurst && !root.toggled) {
+            likeBurst.trigger();
         }
     }
 }
