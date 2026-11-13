@@ -99,13 +99,36 @@ jobs:
           cmake --install build-qt --config Release --prefix dist
 
       - name: Deploy Qt runtime (windeployqt)
-        run: windeployqt --qmldir src-qt/qml --release dist/ymusic-qml.exe
+        shell: pwsh
+        run: |
+          windeployqt --qmldir src-qt/qml --release --no-translations --no-opengl-sw dist/ymusic-qml.exe
+          Remove-Item -Recurse -Force dist/qmltooling -ErrorAction SilentlyContinue
+
+      - name: Build single-file portable EXE (NSIS)
+        shell: pwsh
+        run: |
+          $exeName = "ymusic-${{ github.ref_name }}-windows-x86_64.exe"
+          @"
+          OutFile "$exeName"
+          SilentInstall silent
+          RequestExecutionLevel user
+          SetCompressor /SOLID lzma
+          Section
+            InitPluginsDir
+            SetOutPath "`$PLUGINSDIR"
+            File /r "dist\*.*"
+            ExecWait '"`$PLUGINSDIR\ymusic-qml.exe"'
+          SectionEnd
+          "@ | Set-Content -Encoding ASCII portable.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" portable.nsi
 
       - name: Archive Windows bundle
         shell: pwsh
         run: Compress-Archive -Path dist/* -DestinationPath "ymusic-${{ github.ref_name }}-windows-x86_64.zip"
 
-      - name: Attach Windows bundle to Release
+      - name: Attach Windows artifacts to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ymusic-${{ github.ref_name }}-windows-x86_64.zip
+          files: |
+            ymusic-${{ github.ref_name }}-windows-x86_64.exe
+            ymusic-${{ github.ref_name }}-windows-x86_64.zip
