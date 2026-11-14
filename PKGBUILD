@@ -19,14 +19,14 @@ if [[ ${BUILDDIR:-$startdir} -ef "$startdir" ]]; then
 fi
 # Local checkout recipe: run makepkg from the repository root.
 # Do not use an unpushed release archive or include target/.git in sources.zc
-source=('Cargo.toml' 'Cargo.lock' 'ymusic.desktop' 'icon.png')
-sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+source=('Cargo.toml' 'Cargo.lock' 'ymusic.desktop' 'icon.svg' 'icon.png')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 prepare() {
     mkdir -p "$srcdir/ymusic"
     cp -a "$startdir/src" "$startdir/src-qt" "$startdir/icons" "$srcdir/ymusic/"
     cp "$srcdir/Cargo.toml" "$srcdir/Cargo.lock" \
-        "$srcdir/ymusic.desktop" "$srcdir/icon.svg" "$srcdir/ymusic/"
+        "$srcdir/ymusic.desktop" "$srcdir/icon.svg" "$srcdir/icon.png" "$srcdir/ymusic/"
     cd "$srcdir/ymusic"
     export CARGO_TARGET_DIR="$srcdir/ymusic/target"
     cargo fetch --locked
