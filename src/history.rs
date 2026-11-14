@@ -47,7 +47,7 @@ mod tests {
     use super::*;
     fn track(id: &str) -> Track { Track {
         id: id.into(), title: id.into(), artists: String::new(), album_id: None,
-        album_title: String::new(), artist_id: None, duration_ms: 1000, cover_uri: None, available: true,
+        album_title: String::new(), artist_id: None, artist_links: Vec::new(), duration_ms: 1000, cover_uri: None, available: true,
     } }
     #[test]
     fn history_is_recent_unique_and_bounded() {

@@ -21,6 +21,8 @@ pub struct Track {
     pub album_id: Option<String>,
     pub album_title: String,
     pub artist_id: Option<String>,
+    #[serde(default)]
+    pub artist_links: Vec<(String, String)>,
     pub title: String,
     pub artists: String,
     pub duration_ms: u64,
@@ -111,6 +113,14 @@ pub struct LyricsLine {
 pub struct TrackLyrics {
     pub synced: bool,
     pub lines: Vec<LyricsLine>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LyricsQueryMeta {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub duration_secs: f64,
 }
 
 pub struct Account {
@@ -679,8 +689,12 @@ impl Api {
         Ok(format!("https://{host}/get-mp3/{sign:x}/{ts}{path}"))
     }
 
-    /// Загружает синхронизированный (LRC) или обычный текст трека.
-    pub async fn track_lyrics(&self, track_id: &str) -> Result<TrackLyrics> {
+    /// Загружает синхронизированный (LRC) текст с Яндекса или LRCLIB, либо обычный текст.
+    pub async fn track_lyrics(
+        &self,
+        track_id: &str,
+        meta: Option<&LyricsQueryMeta>,
+    ) -> Result<TrackLyrics> {
         const LYRICS_SIGN_KEY: &[u8] = b"p93jhgh689SBReK6ghtw62";
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -690,41 +704,81 @@ impl Api {
         let msg = format!("{track_id}{ts}");
         let sign = base64_encode(&hmac_sha256(LYRICS_SIGN_KEY, msg.as_bytes()));
 
-        if let Ok(r) = self
+        match self
             .get(
                 &format!("/tracks/{track_id}/lyrics"),
                 &[("format", "LRC"), ("timeStamp", &ts), ("sign", &sign)],
             )
             .await
         {
-            if let Some(url) = r["downloadUrl"].as_str().filter(|s| !s.is_empty()) {
-                if let Ok((status, lrc_text)) =
-                    Self::send_with_retry(self.http.get(url)).await
-                {
-                    if status.is_success() {
-                        let lines = parse_lrc(&lrc_text);
-                        if !lines.is_empty() {
-                            return Ok(TrackLyrics {
-                                synced: true,
-                                lines,
-                            });
+            Ok(r) => {
+                if let Some(url) = r["downloadUrl"].as_str().filter(|s| !s.is_empty()) {
+                    match Self::send_with_retry(self.http.get(url)).await {
+                        Ok((status, lrc_text)) if status.is_success() => {
+                            let lines = parse_lrc(&lrc_text);
+                            if !lines.is_empty() {
+                                return Ok(TrackLyrics {
+                                    synced: true,
+                                    lines,
+                                });
+                            }
+                            eprintln!(
+                                "[lyrics] yandex track {track_id}: downloadUrl returned {} bytes without LRC tags",
+                                lrc_text.len()
+                            );
+                        }
+                        Ok((status, _)) => {
+                            eprintln!("[lyrics] yandex track {track_id}: downloadUrl HTTP {status}");
+                        }
+                        Err(e) => {
+                            eprintln!("[lyrics] yandex track {track_id}: downloadUrl failed: {e}");
                         }
                     }
+                } else {
+                    eprintln!("[lyrics] yandex track {track_id}: no downloadUrl in /lyrics response");
+                }
+            }
+            Err(e) => {
+                eprintln!("[lyrics] yandex track {track_id}: /lyrics failed: {e}");
+            }
+        }
+
+        let mut lrclib_plain: Option<String> = None;
+        if let Some(m) = meta.filter(|m| !m.title.trim().is_empty() && !m.artist.trim().is_empty()) {
+            match self.lrclib_lyrics(m).await {
+                Ok(Some(found)) if found.synced => return Ok(found),
+                Ok(Some(found)) => {
+                    let joined = found
+                        .lines
+                        .into_iter()
+                        .map(|l| l.text)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if !joined.trim().is_empty() {
+                        lrclib_plain = Some(joined);
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("[lyrics] lrclib lookup failed for {} - {}: {e}", m.artist, m.title);
                 }
             }
         }
 
-        let sup = self
-            .get(&format!("/tracks/{track_id}/supplement"), &[])
-            .await?;
-        if let Some(full) = sup["lyrics"]["fullLyrics"].as_str() {
-            let lines: Vec<LyricsLine> = full
-                .lines()
-                .map(|l| LyricsLine {
-                    time: None,
-                    text: l.trim_end().to_string(),
-                })
-                .collect();
+        if let Ok(sup) = self.get(&format!("/tracks/{track_id}/supplement"), &[]).await {
+            if let Some(full) = sup["lyrics"]["fullLyrics"].as_str() {
+                let lines = plain_lyrics_lines(full);
+                if lines.iter().any(|l| !l.text.is_empty()) {
+                    return Ok(TrackLyrics {
+                        synced: false,
+                        lines,
+                    });
+                }
+            }
+        }
+
+        if let Some(plain) = lrclib_plain {
+            let lines = plain_lyrics_lines(&plain);
             if lines.iter().any(|l| !l.text.is_empty()) {
                 return Ok(TrackLyrics {
                     synced: false,
@@ -737,6 +791,75 @@ impl Api {
             synced: false,
             lines: Vec::new(),
         })
+    }
+
+    async fn lrclib_lyrics(&self, meta: &LyricsQueryMeta) -> Result<Option<TrackLyrics>> {
+        let mut get_params: Vec<(&str, String)> = vec![
+            ("track_name", meta.title.trim().to_string()),
+            ("artist_name", meta.artist.trim().to_string()),
+        ];
+        if !meta.album.trim().is_empty() {
+            get_params.push(("album_name", meta.album.trim().to_string()));
+        }
+        if meta.duration_secs > 1.0 {
+            get_params.push(("duration", format!("{}", meta.duration_secs.round() as u64)));
+        }
+
+        if let Ok(resp) = self
+            .http
+            .get("https://lrclib.net/api/get")
+            .query(&get_params)
+            .timeout(Duration::from_secs(6))
+            .send()
+            .await
+        {
+            if resp.status().is_success() {
+                if let Ok(val) = resp.json::<Value>().await {
+                    if let Some(res) = extract_lrclib_entry(&val) {
+                        if res.synced {
+                            return Ok(Some(res));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback search (also handles Yandex titles with "(feat. ...)" / "(Remaster)" suffixes).
+        let clean_title = strip_title_suffix(&meta.title);
+        let search_params = [
+            ("track_name", clean_title.as_str()),
+            ("artist_name", meta.artist.trim()),
+        ];
+        let resp = self
+            .http
+            .get("https://lrclib.net/api/search")
+            .query(&search_params)
+            .timeout(Duration::from_secs(6))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
+        let arr: Vec<Value> = resp.json().await.unwrap_or_default();
+        let mut best_plain: Option<TrackLyrics> = None;
+        for entry in &arr {
+            if meta.duration_secs > 1.0 {
+                if let Some(d) = entry["duration"].as_f64() {
+                    if (d - meta.duration_secs).abs() > 6.0 {
+                        continue;
+                    }
+                }
+            }
+            if let Some(parsed) = extract_lrclib_entry(entry) {
+                if parsed.synced {
+                    return Ok(Some(parsed));
+                }
+                if best_plain.is_none() {
+                    best_plain = Some(parsed);
+                }
+            }
+        }
+        Ok(best_plain)
     }
 }
 
@@ -811,9 +934,15 @@ fn parse_track(v: &Value) -> Option<Track> {
         title = format!("{title} ({version})");
     }
     let artists_arr = v["artists"].as_array();
-    let artist_id = artists_arr
-        .and_then(|a| a.first())
-        .and_then(|x| id_str(&x["id"]));
+    let artist_links: Vec<(String, String)> = artists_arr
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| Some((id_str(&x["id"])?, x["name"].as_str()?.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+    let artist_id = artist_links.first().map(|(id, _)| id.clone())
+        .or_else(|| artists_arr.and_then(|a| a.first()).and_then(|x| id_str(&x["id"])));
     let artists = artists_arr
         .map(|a| {
             a.iter()
@@ -830,6 +959,7 @@ fn parse_track(v: &Value) -> Option<Track> {
         album_id,
         album_title,
         artist_id,
+        artist_links,
         title,
         artists,
         duration_ms: v["durationMs"].as_u64().unwrap_or(0),
@@ -1163,12 +1293,74 @@ fn base64_encode(bytes: &[u8]) -> String {
     out
 }
 
+fn plain_lyrics_lines(raw: &str) -> Vec<LyricsLine> {
+    raw.lines()
+        .map(|l| LyricsLine {
+            time: None,
+            text: l.trim_end().to_string(),
+        })
+        .collect()
+}
+
+fn strip_title_suffix(title: &str) -> String {
+    let trimmed = title.trim();
+    if let Some((head, _)) = trimmed.split_once(" (") {
+        let h = head.trim();
+        if !h.is_empty() {
+            return h.to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+fn extract_lrclib_entry(v: &Value) -> Option<TrackLyrics> {
+    if let Some(synced) = v["syncedLyrics"].as_str().filter(|s| !s.trim().is_empty()) {
+        let lines = parse_lrc(synced);
+        if !lines.is_empty() {
+            return Some(TrackLyrics {
+                synced: true,
+                lines,
+            });
+        }
+    }
+    if let Some(plain) = v["plainLyrics"].as_str().filter(|s| !s.trim().is_empty()) {
+        let lines = plain_lyrics_lines(plain);
+        if lines.iter().any(|l| !l.text.is_empty()) {
+            return Some(TrackLyrics {
+                synced: false,
+                lines,
+            });
+        }
+    }
+    None
+}
+
 fn parse_lrc_timestamp(tag: &str) -> Option<f64> {
-    let (min_s, sec_s) = tag.split_once(':')?;
-    let mins: f64 = min_s.trim().parse().ok()?;
-    let secs: f64 = sec_s.trim().parse().ok()?;
-    if mins.is_finite() && secs.is_finite() && mins >= 0.0 && secs >= 0.0 {
-        Some(mins * 60.0 + secs)
+    let normalized = tag.replace(',', ".");
+    let parts: Vec<&str> = normalized.split(':').map(str::trim).collect();
+    let total = match parts.as_slice() {
+        [min_s, sec_s] => {
+            let mins: f64 = min_s.parse().ok()?;
+            let secs: f64 = sec_s.parse().ok()?;
+            mins * 60.0 + secs
+        }
+        [a, b, c] if !c.contains('.') && c.len() <= 2 => {
+            let mins: f64 = a.parse().ok()?;
+            let secs: f64 = b.parse().ok()?;
+            let frac: f64 = c.parse().ok()?;
+            let scale = if c.len() == 1 { 10.0 } else { 100.0 };
+            mins * 60.0 + secs + frac / scale
+        }
+        [h_s, m_s, s_s] => {
+            let hours: f64 = h_s.parse().ok()?;
+            let mins: f64 = m_s.parse().ok()?;
+            let secs: f64 = s_s.parse().ok()?;
+            hours * 3600.0 + mins * 60.0 + secs
+        }
+        _ => return None,
+    };
+    if total.is_finite() && total >= 0.0 {
+        Some(total)
     } else {
         None
     }
@@ -1255,13 +1447,38 @@ mod tests {
 
     #[test]
     fn parses_lrc_with_multiple_tags_and_sorts() {
-        let lrc = "[ti:Test]\n[00:25.50][00:05.00]Строка 1\n[00:12.345]Строка 2\n";
+        let lrc = "[ti:Test]\n[00:25.50][00:05.00]Строка 1\n[00:12.345]Строка 2\n[01:02:25]Строка 3\n";
         let parsed = parse_lrc(lrc);
-        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed.len(), 4);
         assert_eq!(parsed[0].time, Some(5.0));
         assert_eq!(parsed[0].text, "Строка 1");
         assert!((parsed[1].time.unwrap() - 12.345).abs() < 1e-6);
         assert_eq!(parsed[1].text, "Строка 2");
         assert_eq!(parsed[2].time, Some(25.5));
+        assert!((parsed[3].time.unwrap() - 62.25).abs() < 1e-6);
+        assert_eq!(parsed[3].text, "Строка 3");
+    }
+
+    #[test]
+    fn extracts_lrclib_synced_and_strips_title_suffix() {
+        assert_eq!(strip_title_suffix("Song Name (feat. Someone)"), "Song Name");
+        assert_eq!(strip_title_suffix("Plain Song"), "Plain Song");
+
+        let payload = serde_json::json!({
+            "syncedLyrics": "[00:10.50] Первый куплет\n[00:15.00] Второй",
+            "plainLyrics": "Первый куплет\nВторой"
+        });
+        let extracted = extract_lrclib_entry(&payload).expect("lyrics should parse");
+        assert!(extracted.synced);
+        assert_eq!(extracted.lines.len(), 2);
+        assert_eq!(extracted.lines[0].time, Some(10.5));
+
+        let plain_only = serde_json::json!({
+            "syncedLyrics": "",
+            "plainLyrics": "Строка без времени\n"
+        });
+        let extracted_plain = extract_lrclib_entry(&plain_only).expect("plain should parse");
+        assert!(!extracted_plain.synced);
+        assert_eq!(extracted_plain.lines.len(), 1);
     }
 }

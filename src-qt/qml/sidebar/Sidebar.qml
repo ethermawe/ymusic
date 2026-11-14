@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import ymusic.ui
@@ -6,14 +7,17 @@ Item {
     id: root
 
     readonly property int activePage: backend.page
+    property bool compact: false
+    property bool searchExpanded: false
+    readonly property bool isCompact: compact && !searchExpanded
     signal settingsRequested()
 
-    implicitWidth: 220
+    implicitWidth: isCompact ? 72 : 220
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 12
+        anchors.margins: root.isCompact ? 10 : 12
+        spacing: 10
 
         // User Profile Header
         Rectangle {
@@ -22,68 +26,77 @@ Item {
             radius: Appearance.rounding.normal
             color: Appearance.colors.surfaceContainerLow
             border.width: 1
-            border.color: Qt.rgba(1, 1, 1, 0.04)
+            border.color: Appearance.colors.layer0Border
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 8
-                spacing: 10
+                anchors.leftMargin: root.isCompact ? 0 : 10
+                anchors.rightMargin: root.isCompact ? 0 : 8
+                spacing: root.isCompact ? 0 : 10
 
-                // Avatar with true circular rounding
-                RoundedImage {
+                ArtworkImage {
                     Layout.preferredWidth: 34
                     Layout.preferredHeight: 34
-                    radius: width / 2
+                    Layout.alignment: root.isCompact ? Qt.AlignHCenter | Qt.AlignVCenter : Qt.AlignVCenter
+                    circular: true
+                    squiggly: false
                     source: backend.userHasAvatar ? backend.userAvatar : ""
-                    fallbackSymbol: "person"
-                    fallbackIconSize: 20
-                    sourceSize.width: 100
-                    sourceSize.height: 100
+                    placeholderSymbol: "person"
                     borderWidth: 1
-                    borderColor: Qt.rgba(1, 1, 1, 0.08)
+                    borderColor: Appearance.colors.layer0Border
                 }
 
-                // Name
                 StyledText {
                     Layout.fillWidth: true
-                    text: backend.loggedIn ? backend.userName : "Гость"
+                    visible: !root.isCompact
+                    text: backend.loggedIn ? backend.userName : qsTr("Гость")
                     font.pixelSize: Appearance.fontSize.small
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
 
-                // Logout button
                 IconButton {
                     symbol: "logout"
                     size: 28
                     iconSize: 16
-                    iconColor: Appearance.colors.onSurfaceVariant
-                    visible: backend.loggedIn
+                    tooltip: qsTr("Выйти из аккаунта")
+                    visible: !root.isCompact && backend.loggedIn
                     onClicked: backend.logout()
                 }
             }
         }
 
-        // Search Input Field
+        // Quick Search Input Field
         Rectangle {
             id: searchBox
             Layout.fillWidth: true
             Layout.preferredHeight: 38
             radius: Appearance.rounding.full
-            color: Appearance.colors.surfaceContainerLow
-            border.width: 1
-            border.color: searchInput.activeFocus ? Appearance.colors.primary : Qt.rgba(1, 1, 1, 0.08)
+            color: searchInput.activeFocus ? Qt.alpha(Appearance.colors.surfaceContainerHighest, 0.5)
+                                           : Appearance.colors.surfaceContainerHigh
+            border.width: searchInput.activeFocus ? 2 : 0
+            border.color: Appearance.colors.primary
 
-            Behavior on border.color { ColorAnimation { duration: 140 } }
+            Behavior on color { ElementMoveFastColor {} }
+
+            MouseArea {
+                anchors.fill: parent
+                enabled: root.isCompact
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    root.searchExpanded = true
+                    searchInput.forceActiveFocus()
+                }
+            }
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                spacing: 8
+                anchors.leftMargin: root.isCompact ? 0 : 12
+                anchors.rightMargin: root.isCompact ? 0 : 12
+                spacing: root.isCompact ? 0 : 8
 
                 MaterialSymbol {
+                    Layout.alignment: root.isCompact ? Qt.AlignHCenter | Qt.AlignVCenter : Qt.AlignVCenter
                     text: "search"
                     iconSize: 18
                     color: searchInput.activeFocus ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
@@ -92,14 +105,22 @@ Item {
                 TextInput {
                     id: searchInput
                     Layout.fillWidth: true
+                    visible: !root.isCompact
                     color: Appearance.colors.onSurface
+                    selectionColor: Appearance.colors.primary
+                    selectedTextColor: Appearance.colors.onPrimary
+                    font.family: Appearance.fontFamily
                     font.pixelSize: Appearance.fontSize.smaller
                     selectByMouse: true
                     clip: true
 
-                    Text {
+                    onActiveFocusChanged: {
+                        if (!activeFocus) root.searchExpanded = false
+                    }
+
+                    StyledText {
                         anchors.fill: parent
-                        text: "Поиск музыки…"
+                        text: qsTr("Поиск музыки…")
                         color: Appearance.colors.onSurfaceVariant
                         font.pixelSize: Appearance.fontSize.smaller
                         visible: !searchInput.text && !searchInput.activeFocus
@@ -107,14 +128,14 @@ Item {
 
                     onAccepted: {
                         if (text.trim().length > 0) {
-                            backend.search(text.trim());
+                            backend.search(text.trim())
+                            root.searchExpanded = false
                         }
                     }
                 }
             }
         }
 
-        // Navigation Items
         Flickable {
             id: navigationFlickable
             Layout.fillWidth: true
@@ -126,11 +147,13 @@ Item {
             Column {
                 id: navColumn
                 width: parent.width
-                spacing: 4
+                spacing: 3
 
                 NavigationItem {
                     width: parent.width
-                    text: "Главная"
+                    compact: root.isCompact
+                    text: qsTr("Главная")
+                    iconShape: "cookie9"
                     symbol: "home"
                     selected: root.activePage === 0
                     onClicked: backend.loadHome()
@@ -138,20 +161,26 @@ Item {
 
                 NavigationItem {
                     width: parent.width
-                    text: "Моя волна"
-                    symbol: "my_wave"
+                    compact: root.isCompact
+                    text: qsTr("Моя волна")
+                    iconShape: "softBurst"
+                    symbol: "waves"
                     selected: root.activePage === 1
                     onClicked: backend.startWave()
                 }
 
                 SectionLabel {
                     width: parent.width
-                    text: "Медиатека"
+                    compact: root.isCompact
+                    text: qsTr("Медиатека")
                 }
 
                 NavigationItem {
                     width: parent.width
-                    text: "Мне нравится"
+                    compact: root.isCompact
+                    text: qsTr("Мне нравится")
+                    iconShape: "heart"
+                    keepsShape: true
                     symbol: "favorite"
                     selected: root.activePage === 2
                     onClicked: backend.loadLikes()
@@ -159,7 +188,9 @@ Item {
 
                 NavigationItem {
                     width: parent.width
-                    text: "Загружено"
+                    compact: root.isCompact
+                    text: qsTr("Загружено")
+                    iconShape: "clamShell"
                     symbol: "download_done"
                     selected: root.activePage === 7
                     onClicked: backend.loadDownloads()
@@ -167,12 +198,23 @@ Item {
 
                 SectionLabel {
                     width: parent.width
-                    text: "Коллекции"
+                    compact: root.isCompact
+                    text: qsTr("Коллекции")
+                    trailing: IconButton {
+                        symbol: "add"
+                        size: 30
+                        iconSize: 18
+                        iconColor: Appearance.colors.primary
+                        tooltip: qsTr("Создать плейлист")
+                        onClicked: UiState.createPlaylistRequested()
+                    }
                 }
 
                 NavigationItem {
                     width: parent.width
-                    text: "Плейлисты"
+                    compact: root.isCompact
+                    text: qsTr("Плейлисты")
+                    iconShape: "bun"
                     symbol: "library_music"
                     selected: root.activePage === 3
                     onClicked: backend.loadPlaylists()
@@ -180,7 +222,9 @@ Item {
 
                 NavigationItem {
                     width: parent.width
-                    text: "Альбомы"
+                    compact: root.isCompact
+                    text: qsTr("Альбомы")
+                    iconShape: "sunny"
                     symbol: "album"
                     selected: root.activePage === 4
                     onClicked: backend.loadAlbums()
@@ -188,8 +232,10 @@ Item {
 
                 NavigationItem {
                     width: parent.width
-                    text: "Артисты"
-                    symbol: "artists"
+                    compact: root.isCompact
+                    text: qsTr("Артисты")
+                    iconShape: "clover4"
+                    symbol: "group"
                     selected: root.activePage === 5
                     onClicked: backend.loadArtists()
                 }
@@ -198,7 +244,9 @@ Item {
 
         NavigationItem {
             Layout.fillWidth: true
-            text: "Настройки"
+            compact: root.isCompact
+            text: qsTr("Настройки")
+            iconShape: "cookie12"
             symbol: "settings"
             onClicked: root.settingsRequested()
         }

@@ -1,111 +1,108 @@
+pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Templates as T
 import ymusic.ui
 
-Item {
+T.Slider {
     id: root
 
-    property real value: 0.0 // 0.0 to 1.0
-    property real trackHeight: 4
-    property real activeTrackHeight: 6
-    property color trackColor: Qt.rgba(1, 1, 1, 0.15)
-    property color fillColor: Appearance.colors.primary
-    property color hoverFillColor: Appearance.colors.primaryHover
-    property color thumbColor: Appearance.colors.onPrimary
-    property bool interactive: true
-    property bool showThumb: true
-    property bool animatedWave: false
-    property bool playing: false
+    property MaterialScheme scheme: Appearance.colors
+    property real trackThickness: 16
+    property real handleLength: trackThickness + 14
+    property color activeColor: scheme.primary
+    property color inactiveColor: scheme.secondaryContainer
+    property color handleColor: activeColor
+    property bool showStopIndicator: true
+    property bool showValueTip: false
+    property string valueText: Math.round(position * 100) + "%"
+    readonly property real trackLength: horizontal ? availableWidth : availableHeight
+    readonly property real handleThickness: pressed ? 2 : 4
+    readonly property real handleAt: visualPosition * trackLength
+    readonly property real gap: 4
+    readonly property real outerRadius: Math.min(trackThickness / 2, 8)
 
-    signal userSeek(real fraction)
+    implicitWidth: horizontal ? 200 : handleLength
+    implicitHeight: horizontal ? handleLength : 200
+    padding: 0
+    hoverEnabled: true
+    opacity: enabled ? 1 : 0.38
 
-    implicitHeight: 20
-    implicitWidth: 200
+    background: Item {
+        x: root.leftPadding
+        y: root.topPadding
+        width: root.availableWidth
+        height: root.availableHeight
 
-    readonly property bool isHovered: mouseArea.containsMouse
-    readonly property bool isDragging: mouseArea.pressed
-
-    // Keep the committed pointer position until the async backend acknowledges
-    // it. Otherwise releasing the pointer briefly restores the old value.
-    readonly property real visualProgress: isDragging || awaitingCommit ? dragProgress : value
-    property real dragProgress: 0.0
-    property bool awaitingCommit: false
-    onValueChanged: {
-        if (awaitingCommit && Math.abs(value - dragProgress) < 0.002) {
-            awaitingCommit = false;
-            commitTimeout.stop();
-        }
-    }
-    Timer {
-        id: commitTimeout
-        interval: 1000
-        onTriggered: root.awaitingCommit = false
-    }
-
-    ShaderEffect {
-        id: progressShader
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
-        // Keep the rendering area fixed and leave room for the full wave,
-        // antialiasing fringe and handle, including during hover transitions.
-        height: Math.max(root.height, root.activeTrackHeight + 8, 22)
-        property size itemSize: Qt.size(width, height)
-        property real progress: Math.max(0, Math.min(1, root.visualProgress))
-        property real amplitude: root.animatedWave && root.playing && !Appearance.reduceMotion
-                                 ? (root.isHovered || root.isDragging ? 2.4 : 1.6) : 0
-        property real wavelength: 34
-        property real phase: 0
-        property real thickness: root.isHovered || root.isDragging ? root.activeTrackHeight : root.trackHeight
-        property real handleWidth: root.showThumb && (root.animatedWave || root.isHovered || root.isDragging) ? 4 : 0
-        property real handleHeight: 18
-        property real gap: 4
-        property color activeColor: (root.isHovered || root.isDragging) ? root.hoverFillColor : root.fillColor
-        property color trackColor: root.trackColor
-        property color handleColor: root.animatedWave ? root.fillColor : root.thumbColor
-        fragmentShader: "qrc:/shaders/wavy_progress.frag.qsb"
-
-        Behavior on thickness { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        Behavior on amplitude { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-        Behavior on handleWidth { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-
-        NumberAnimation on phase {
-            from: 0
-            to: 6.283185
-            duration: 2200
-            loops: Animation.Infinite
-            running: root.animatedWave && root.playing && root.visible && !Appearance.reduceMotion
-        }
-    }
-
-    MouseArea {
-        id: mouseArea
-        anchors.fill: parent
-        hoverEnabled: root.interactive
-        enabled: root.interactive
-        preventStealing: true
-        cursorShape: Qt.PointingHandCursor
-
-        onPressed: (mouse) => {
-            commitTimeout.stop();
-            root.awaitingCommit = true;
-            root.dragProgress = Math.max(0.0, Math.min(1.0, mouse.x / width))
+        Rectangle {
+            readonly property real length: Math.max(0, root.horizontal ? root.handleAt - root.gap - root.handleThickness / 2
+                                                                       : root.trackLength - root.handleAt - root.gap - root.handleThickness / 2)
+            visible: length > 0.5
+            color: root.activeColor
+            x: root.horizontal ? 0 : (parent.width - root.trackThickness) / 2
+            y: root.horizontal ? (parent.height - root.trackThickness) / 2 : root.trackLength - length
+            width: root.horizontal ? length : root.trackThickness
+            height: root.horizontal ? root.trackThickness : length
+            topLeftRadius: root.horizontal ? root.outerRadius : Appearance.rounding.unsharpen
+            topRightRadius: Appearance.rounding.unsharpen
+            bottomLeftRadius: root.outerRadius
+            bottomRightRadius: root.horizontal ? Appearance.rounding.unsharpen : root.outerRadius
         }
 
-        onPositionChanged: (mouse) => {
-            if (pressed) {
-                root.dragProgress = Math.max(0.0, Math.min(1.0, mouse.x / width))
+        Rectangle {
+            id: inactiveTrack
+            readonly property real start: root.horizontal ? root.handleAt + root.gap + root.handleThickness / 2 : 0
+            readonly property real length: Math.max(0, root.horizontal ? root.trackLength - start
+                                                                       : root.handleAt - root.gap - root.handleThickness / 2)
+            visible: length > 0.5
+            color: root.inactiveColor
+            x: root.horizontal ? start : (parent.width - root.trackThickness) / 2
+            y: root.horizontal ? (parent.height - root.trackThickness) / 2 : 0
+            width: root.horizontal ? length : root.trackThickness
+            height: root.horizontal ? root.trackThickness : length
+            topLeftRadius: root.horizontal ? Appearance.rounding.unsharpen : root.outerRadius
+            topRightRadius: root.outerRadius
+            bottomLeftRadius: Appearance.rounding.unsharpen
+            bottomRightRadius: root.horizontal ? root.outerRadius : Appearance.rounding.unsharpen
+
+            Rectangle {
+                visible: root.showStopIndicator && inactiveTrack.length > 12
+                width: 4
+                height: 4
+                radius: 2
+                color: root.scheme.onSecondaryContainer
+                x: root.horizontal ? inactiveTrack.width - 6 - width / 2 : (inactiveTrack.width - width) / 2
+                y: root.horizontal ? (inactiveTrack.height - height) / 2 : 6 - height / 2
             }
         }
+    }
 
-        onReleased: (mouse) => {
-            var target = Math.max(0.0, Math.min(1.0, mouse.x / width))
-            root.dragProgress = target;
-            commitTimeout.restart();
-            root.userSeek(target)
+    handle: Rectangle {
+        x: root.leftPadding + (root.horizontal ? root.handleAt - width / 2 : (root.availableWidth - width) / 2)
+        y: root.topPadding + (root.horizontal ? (root.availableHeight - height) / 2 : root.handleAt - height / 2)
+        width: root.horizontal ? root.handleThickness : root.handleLength
+        height: root.horizontal ? root.handleLength : root.handleThickness
+        radius: Appearance.rounding.full
+        color: root.handleColor
+
+        Behavior on width {
+            ElementMoveFast {}
         }
-        onCanceled: {
-            commitTimeout.stop();
-            root.awaitingCommit = false;
+        Behavior on height {
+            ElementMoveFast {}
+        }
+
+        StyledToolTip {
+            visible: root.showValueTip && root.pressed
+            delay: 0
+            text: root.valueText
+        }
+    }
+
+    Item {
+        anchors.fill: parent
+
+        HoverHandler {
+            cursorShape: root.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
         }
     }
 }

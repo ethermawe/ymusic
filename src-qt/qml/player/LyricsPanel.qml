@@ -1,0 +1,400 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+import QtQuick.Controls.Basic
+import ymusic.ui
+
+Item {
+    id: root
+
+    property bool suspended: false
+    property MaterialScheme scheme: Appearance.colors
+    readonly property bool hasLyrics: Boolean(UiState.lyricsLines && UiState.lyricsLines.length > 0)
+
+    Column {
+        anchors.centerIn: parent
+        Reveal.shown: UiState.lyricsLoading
+        spacing: 12
+        LoadingSpinner { anchors.horizontalCenter: parent.horizontalCenter }
+        StyledText {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: qsTr("Загрузка текста…")
+            color: root.scheme.onSurfaceVariant
+        }
+    }
+
+    EmptyState {
+        anchors.centerIn: parent
+        width: parent.width - 32
+        Reveal.shown: !UiState.lyricsLoading && !root.hasLyrics
+        symbol: "lyrics"
+        title: qsTr("Текст недоступен")
+        description: UiState.lyricsMessage.length > 0 ? UiState.lyricsMessage : qsTr("Для этого трека текст не найден")
+        scheme: root.scheme
+    }
+
+    Item {
+        id: headerBar
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.leftMargin: 18
+        anchors.rightMargin: 16
+        anchors.topMargin: 14
+        height: 36
+        Reveal.shown: !UiState.lyricsLoading && root.hasLyrics
+
+        StyledText {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("Текст")
+            font.pixelSize: Appearance.fontSize.normal
+            font.weight: Font.DemiBold
+            color: root.scheme.onSurface
+        }
+
+        Rectangle {
+            id: jumpButton
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            height: 26
+            radius: 13
+            width: jumpLabel.implicitWidth + 20
+            visible: list.scrolledAway && UiState.lyricsSynced && UiState.activeLyricIndex >= 0
+            color: jumpMouse.containsMouse ? root.scheme.primary : Qt.alpha(root.scheme.primary, 0.18)
+            border.width: 1
+            border.color: Qt.alpha(root.scheme.primary, 0.45)
+
+            Behavior on color {
+                ColorAnimation { duration: 140 }
+            }
+
+            StyledText {
+                id: jumpLabel
+                anchors.centerIn: parent
+                text: qsTr("К текущей")
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                color: jumpMouse.containsMouse ? root.scheme.onPrimary : root.scheme.primary
+            }
+
+            MouseArea {
+                id: jumpMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    list.manualBrowsing = false
+                    manualCooldown.stop()
+                    list.follow(true)
+                }
+            }
+        }
+    }
+
+    // Intro progress bar shown while playback is before the first synced lyric timestamp
+    Rectangle {
+        id: introProgressTrack
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: headerBar.bottom
+        anchors.leftMargin: 18
+        anchors.rightMargin: 18
+        anchors.topMargin: 4
+        height: visible ? 3 : 0
+        radius: 1.5
+        visible: !UiState.lyricsLoading && root.hasLyrics && UiState.lyricsSynced
+            && UiState.activeLyricIndex < 0 && UiState.firstLyricTimeSecs > 0
+        color: Qt.alpha(root.scheme.onSurface, 0.10)
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            radius: parent.radius
+            width: parent.width * UiState.activeLyricProgress
+            color: root.scheme.primary
+        }
+    }
+
+    Timer {
+        id: manualCooldown
+        interval: 3500
+        onTriggered: {
+            list.manualBrowsing = false
+            list.follow(true)
+        }
+    }
+
+    ListView {
+        id: list
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.top: introProgressTrack.visible ? introProgressTrack.bottom : headerBar.bottom
+        anchors.topMargin: 6
+        Reveal.shown: !UiState.lyricsLoading && root.hasLyrics
+        model: UiState.lyricsLines
+        spacing: 10
+        topMargin: 10
+        bottomMargin: 22
+        leftMargin: 14
+        rightMargin: 14
+        clip: true
+        boundsBehavior: Flickable.DragAndOvershootBounds
+        cacheBuffer: 2000
+        signal stepped(real delta)
+
+        property bool autoScrolling: false
+        property bool manualBrowsing: false
+        property bool scrolledAway: false
+
+        function updateScrolledAway() {
+            const index = UiState.activeLyricIndex
+            if (!UiState.lyricsSynced || index < 0) {
+                scrolledAway = false
+                return
+            }
+            const item = list.itemAtIndex(index)
+            if (!item) {
+                scrolledAway = true
+                return
+            }
+            const top = item.y
+            const bottom = item.y + item.height
+            const viewTop = list.contentY + 8
+            const viewBottom = list.contentY + list.height - 8
+            scrolledAway = bottom < viewTop || top > viewBottom
+        }
+
+        onDraggingChanged: {
+            if (dragging) {
+                manualBrowsing = true
+                manualCooldown.restart()
+            }
+        }
+
+        onContentYChanged: {
+            if (!autoScrolling && !scroll.running && (moving || dragging)) {
+                manualBrowsing = true
+                manualCooldown.restart()
+            }
+            updateScrolledAway()
+        }
+
+        onHeightChanged: Qt.callLater(list.follow, false)
+
+        ScrollBar.vertical: StyledScrollBar {}
+        FastWheel { target: list }
+
+        function follow(animated: bool) {
+            const index = UiState.activeLyricIndex
+            if (root.suspended) {
+                return
+            }
+            if (index < 0) {
+                if (UiState.lyricsSynced && list.count > 0 && !manualBrowsing) {
+                    autoScrolling = true
+                    list.contentY = list.originY - list.topMargin
+                    autoScrolling = false
+                }
+                updateScrolledAway()
+                return
+            }
+            const item = list.itemAtIndex(index)
+            if (!item) {
+                scroll.stop()
+                autoScrolling = true
+                list.positionViewAtIndex(index, ListView.Center)
+                autoScrolling = false
+                updateScrolledAway()
+                return
+            }
+            const maxY = Math.max(list.originY - list.topMargin,
+                                  list.contentHeight + list.originY - list.height + list.bottomMargin)
+            const target = Math.max(list.originY - list.topMargin,
+                                    Math.min(item.y + item.height / 2 - list.height / 2, maxY))
+            const delta = target - list.contentY
+            scroll.stop()
+            if (animated && Appearance.reduceMotion && !Appearance.performanceMode) {
+                scroll.to = target
+                scroll.start()
+                return
+            }
+            autoScrolling = true
+            list.contentY = target
+            autoScrolling = false
+            if (animated && !Appearance.reduceMotion) {
+                list.stepped(delta)
+            }
+            updateScrolledAway()
+        }
+
+        NumberAnimation {
+            id: scroll
+            target: list
+            property: "contentY"
+            duration: 420
+            easing.type: Easing.OutCubic
+            onStopped: list.updateScrolledAway()
+        }
+
+        Connections {
+            target: UiState
+            function onActiveLyricIndexChanged() {
+                if (!list.manualBrowsing) {
+                    list.follow(true)
+                } else {
+                    list.updateScrolledAway()
+                }
+            }
+            function onLyricsLinesChanged() {
+                list.manualBrowsing = false
+                manualCooldown.stop()
+                Qt.callLater(list.follow, false)
+            }
+        }
+        Connections {
+            target: root
+            function onSuspendedChanged() {
+                if (!root.suspended) {
+                    Qt.callLater(list.follow, false)
+                }
+            }
+        }
+        Component.onCompleted: Qt.callLater(list.follow, false)
+
+        delegate: Item {
+            id: line
+
+            required property int index
+            required property var modelData
+            readonly property bool hasTime: Boolean(modelData && modelData.time !== undefined && modelData.time !== null)
+            readonly property real timeSecs: hasTime ? Number(modelData.time) : -1
+            readonly property bool isCurrent: UiState.lyricsSynced && UiState.activeLyricIndex === index
+            readonly property bool isPast: UiState.lyricsSynced && UiState.activeLyricIndex >= 0 && index < UiState.activeLyricIndex
+            readonly property bool isHovered: mouseArea.containsMouse
+
+            width: list.width - list.leftMargin - list.rightMargin
+            height: text.implicitHeight + 22
+
+            property real lag: 0
+            transform: Translate { y: line.lag }
+
+            Connections {
+                target: list
+                function onStepped(delta: real) {
+                    line.lag += delta
+                    settle.restart()
+                }
+            }
+            SequentialAnimation {
+                id: settle
+                PauseAnimation { duration: Math.min(Math.abs(line.index - UiState.activeLyricIndex), 8) * 16 }
+                NumberAnimation { target: line; property: "lag"; to: 0; duration: 560; easing.type: Easing.OutBack; easing.overshoot: 0.6 }
+            }
+
+            Rectangle {
+                id: highlightCard
+                anchors.fill: parent
+                radius: 14
+                color: line.isHovered && UiState.lyricsSynced && line.hasTime
+                    ? Qt.alpha(root.scheme.onSurface, 0.06)
+                    : "transparent"
+
+                Behavior on color {
+                    ColorAnimation { duration: Appearance.duration(200); easing.type: Easing.InOutQuad }
+                }
+            }
+
+            StyledText {
+                id: text
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 18
+                anchors.rightMargin: timeBadge.visible ? timeBadge.implicitWidth + 24 : 14
+                transformOrigin: Item.Left
+                text: line.modelData && line.modelData.text && line.modelData.text.length > 0 ? line.modelData.text : "♪"
+                wrapMode: Text.Wrap
+                font.pixelSize: 20
+                font.weight: line.isCurrent || !UiState.lyricsSynced ? Font.Bold : Font.DemiBold
+                color: root.scheme.onSurface
+                property real springing: {
+                    if (!UiState.lyricsSynced) return 0.94
+                    return line.isCurrent ? 1.0 : 0.90
+                }
+                property real eased: springing
+                scale: Appearance.reduceMotion ? eased : springing
+                opacity: {
+                    if (!UiState.lyricsSynced) {
+                        return line.isHovered ? 1.0 : 0.86
+                    }
+                    if (line.isCurrent) return 1.0
+                    if (line.isHovered && line.hasTime) return 0.86
+                    return line.isPast ? 0.34 : 0.56
+                }
+
+                layer.enabled: line.isCurrent
+                layer.smooth: true
+                layer.effect: ShaderEffect {
+                    property variant source
+                    property color accentColor: root.scheme.primary
+                    property color sungColor: root.scheme.onSurface
+                    property size itemSize: Qt.size(text.width, text.height)
+                    property real progress: UiState.activeLyricProgress
+                    property real lineCount: Math.max(1, text.lineCount)
+                    property real textWidthFrac: text.width > 0 ? Math.min(1.0, Math.max(0.06, text.contentWidth / text.width)) : 1.0
+                    property real dimAlpha: 0.28
+                    property real glowAmount: Appearance.performanceMode ? 0.0 : 0.85
+                    fragmentShader: "qrc:/shaders/lyric_karaoke.frag.qsb"
+                }
+
+                Behavior on springing {
+                    enabled: !root.suspended && !Appearance.reduceMotion
+                    Bounce {}
+                }
+                Behavior on eased {
+                    enabled: !root.suspended && Appearance.reduceMotion && !Appearance.performanceMode
+                    NumberAnimation { duration: 420; easing.type: Easing.OutCubic }
+                }
+                Behavior on opacity {
+                    enabled: !root.suspended
+                    NumberAnimation { duration: Appearance.duration(260); easing.type: Easing.InOutQuad }
+                }
+            }
+
+            StyledText {
+                id: timeBadge
+                anchors.right: parent.right
+                anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                visible: UiState.lyricsSynced && line.hasTime && line.isHovered
+                text: UiState.formatLyricTime(line.timeSecs)
+                font.pixelSize: 11
+                font.weight: Font.Medium
+                color: root.scheme.onSurfaceVariant
+            }
+
+            MouseArea {
+                id: mouseArea
+                anchors.fill: parent
+                hoverEnabled: true
+                enabled: UiState.lyricsSynced && line.hasTime && backend.durationSecs > 0
+                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: {
+                    list.manualBrowsing = false
+                    manualCooldown.stop()
+                    backend.seek(Math.max(0.0, Math.min(1.0, line.timeSecs / backend.durationSecs)))
+                }
+            }
+        }
+
+        footer: StyledText {
+            topPadding: 18
+            leftPadding: 14
+            text: qsTr("Яндекс Музыка")
+            font.pixelSize: Appearance.fontSize.smaller
+            color: root.scheme.outline
+        }
+    }
+}

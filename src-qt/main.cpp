@@ -21,11 +21,37 @@
 #include <QLockFile>
 #include <QDir>
 #include <QFileInfo>
+
 #include "YMusicBackend.h"
 #include "TrackModel.h"
 #include "CardModel.h"
 #include "ThemeManager.h"
 #include "AppSettings.h"
+#include "app/Fonts.h"
+#include "app/WindowController.h"
+#include "artwork/ArtworkCache.h"
+#include "motion/AmbientClock.h"
+#include "motion/ScrollMomentum.h"
+#include "render/SpectrumSource.h"
+#include "theme/PlayerStyle.h"
+#include "theme/Theme.h"
+
+namespace {
+
+void tuneSceneGraph() {
+    const auto fallback = [](const char *name, const char *value) {
+        if (!qEnvironmentVariableIsSet(name)) {
+            qputenv(name, value);
+        }
+    };
+    fallback("QSG_ATLAS_WIDTH", "64");
+    fallback("QSG_ATLAS_HEIGHT", "64");
+    fallback("QSG_ATLAS_SIZE_LIMIT", "1");
+    fallback("QSG_TRANSIENT_IMAGES", "1");
+    fallback("QT_MAX_CACHED_GLYPH_SIZE", "512");
+}
+
+} // namespace
 
 class CustomNetworkAccessManager : public QNetworkAccessManager {
     Q_OBJECT
@@ -47,7 +73,7 @@ public:
         auto *diskCache = new QNetworkDiskCache(nam);
         QString cachePath = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/ymusic_qt_cache";
         diskCache->setCacheDirectory(cachePath);
-        diskCache->setMaximumCacheSize(100 * 1024 * 1024); // 100 MB
+        diskCache->setMaximumCacheSize(100 * 1024 * 1024);
         nam->setCache(diskCache);
         return nam;
     }
@@ -55,7 +81,6 @@ public:
 
 int main(int argc, char *argv[]) {
     bool graphicsOverride = qEnvironmentVariableIsSet("QSG_RHI_BACKEND");
-    // Opt-in: keep Qt's default and user environment unless explicitly selected.
     for (int i = 1; i < argc; ++i) {
         const QByteArray arg(argv[i]);
         if (arg == "--graphics=vulkan") {
@@ -69,10 +94,8 @@ int main(int argc, char *argv[]) {
             return 2;
         }
     }
-    // Release decoded CPU-side cover pixels once uploaded to the GPU.
-    // Respect an explicit user override when diagnosing a graphics driver.
-    if (!qEnvironmentVariableIsSet("QSG_TRANSIENT_IMAGES"))
-        qputenv("QSG_TRANSIENT_IMAGES", "1");
+    tuneSceneGraph();
+
     QApplication app(argc, argv);
     app.setApplicationName("ymusic");
     app.setOrganizationName("finrixx");
@@ -80,19 +103,11 @@ int main(int argc, char *argv[]) {
     app.setDesktopFileName("ymusic");
 
     QIcon appIcon = QIcon::fromTheme(QStringLiteral("ymusic"));
-    if (appIcon.isNull()) {
-        appIcon = QIcon(QStringLiteral(":/icons/ymusic.svg"));
-    }
-    if (appIcon.isNull()) {
-        appIcon = QIcon(QStringLiteral(":/icons/ymusic.png"));
-    }
-    if (appIcon.isNull()) {
-        appIcon = QIcon(QStringLiteral(":/icon.svg"));
-    }
+    if (appIcon.isNull()) appIcon = QIcon(QStringLiteral(":/icons/ymusic.svg"));
+    if (appIcon.isNull()) appIcon = QIcon(QStringLiteral(":/icons/ymusic.png"));
+    if (appIcon.isNull()) appIcon = QIcon(QStringLiteral(":/icon.svg"));
     app.setWindowIcon(appIcon);
 
-    // A lock distinguishes a stale socket from a live instance. Never unlink
-    // another instance's socket just because it has not started listening yet.
     QString runtimeDir = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
     if (runtimeDir.isEmpty()) runtimeDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     QDir().mkpath(runtimeDir);
@@ -122,6 +137,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+#ifdef Q_OS_LINUX
+    ymusic::ScrollMomentum scrollMomentum;
+    app.installEventFilter(&scrollMomentum);
+#endif
+
     AppSettings settings;
     if (!graphicsOverride) {
         if (settings.graphicsBackend() == "vulkan")
@@ -130,11 +150,16 @@ int main(int argc, char *argv[]) {
             QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     }
 
-    QFont appFont("Rubik", 10);
+    QQuickStyle::setStyle("Basic");
+    ymusic::fonts::loadIconFont();
+    ymusic::fonts::loadInterfaceFont();
+
+    QFont appFont(ymusic::fonts::interfaceFamily(), 10);
     appFont.setStyleHint(QFont::SansSerif);
     app.setFont(appFont);
 
-    QQuickStyle::setStyle("Basic");
+    extern void qml_register_types_ymusic_ui();
+    qml_register_types_ymusic_ui();
 
     qmlRegisterUncreatableType<TrackModel>("ymusic.ui", 1, 0, "TrackModel", "Provided by backend");
     qmlRegisterUncreatableType<CardModel>("ymusic.ui", 1, 0, "CardModel", "Provided by backend");
@@ -142,19 +167,40 @@ int main(int argc, char *argv[]) {
     qmlRegisterUncreatableType<ThemeManager>("ymusic.ui", 1, 0, "ThemeManager", "Provided by context");
     qmlRegisterUncreatableType<AppSettings>("ymusic.ui", 1, 0, "AppSettings", "Provided by context");
 
+    CustomNetworkAccessManager network;
     YMusicBackend backend;
+    ymusic::ArtworkCache artwork(&network);
+    ymusic::Theme theme(&settings);
+    ymusic::PlayerStyle playerStyle(&backend, &theme, &artwork);
+    ymusic::SpectrumSource spectrum(&backend);
+
+    ThemeManager::instance().setPreset(settings.themePreset());
+    backend.setDiscordRpcEnabled(settings.discordRpcEnabled());
+    backend.setTempo(settings.playbackSpeed());
+    QObject::connect(&settings, &AppSettings::changed, &backend, [&]() {
+        ThemeManager::instance().setPreset(settings.themePreset());
+        backend.setDiscordRpcEnabled(settings.discordRpcEnabled());
+        if (!qFuzzyCompare(backend.tempo() + 1.0, settings.playbackSpeed() + 1.0)) {
+            backend.setTempo(settings.playbackSpeed());
+        }
+    });
 
     const bool trayAvailable = QSystemTrayIcon::isSystemTrayAvailable();
     if (trayAvailable) {
         app.setQuitOnLastWindowClosed(false);
     }
 
+    ymusic::WindowController windowController;
+
     QQmlApplicationEngine engine;
     engine.setNetworkAccessManagerFactory(new CustomNamFactory);
+    engine.addImageProvider(QStringLiteral("art"), new ymusic::ArtworkImageProvider);
     engine.rootContext()->setContextProperty("backend", &backend);
     engine.rootContext()->setContextProperty("themeManager", &ThemeManager::instance());
     engine.rootContext()->setContextProperty("appSettings", &settings);
+    engine.rootContext()->setContextProperty("spinClock", ymusic::AmbientClock::spin());
     engine.rootContext()->setContextProperty("trayAvailable", trayAvailable);
+    engine.rootContext()->setContextProperty("windowController", &windowController);
 
     engine.loadFromModule("ymusic.ui", "Main");
 

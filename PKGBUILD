@@ -1,6 +1,6 @@
 # Maintainer: ethermawe
 pkgname=ymusic
-pkgver=0.1.0
+pkgver=0.2.2
 pkgrel=3
 pkgdesc="Нативный клиент Яндекс Музыки на Rust и Qt Quick"
 arch=('x86_64')
@@ -14,13 +14,12 @@ fi
 optdepends=('xdg-utils: открытие страницы входа и папки загрузок')
 conflicts=('ymusic-git')
 options=('!lto' '!debug')
-# makepkg normally uses ./src, which is already our Rust source directory.
 if [[ ${BUILDDIR:-$startdir} -ef "$startdir" ]]; then
     BUILDDIR="$startdir/build-makepkg"
 fi
-# Local-checkout recipe: run makepkg from the repository root.
-# Do not use an unpushed release archive or include target/.git in sources.
-source=('Cargo.toml' 'Cargo.lock' 'ymusic.desktop' 'icon.svg')
+# Local checkout recipe: run makepkg from the repository root.
+# Do not use an unpushed release archive or include target/.git in sources.zc
+source=('Cargo.toml' 'Cargo.lock' 'ymusic.desktop' 'icon.png')
 sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 prepare() {
@@ -49,7 +48,6 @@ check() {
     cd "$srcdir/ymusic"
     export CARGO_TARGET_DIR="$srcdir/ymusic/target"
     export CARGO_INCREMENTAL=0
-    # Keep tests away from the user's real downloads and settings.
     mkdir -p "$srcdir/test-data" "$srcdir/test-config"
     XDG_DATA_HOME="$srcdir/test-data" XDG_CONFIG_HOME="$srcdir/test-config" \
         cargo test --release --frozen --lib

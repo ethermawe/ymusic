@@ -233,7 +233,7 @@ mod download_tests {
         let id = format!("offline-test-{}", std::process::id());
         let track = crate::api::Track {
             id: id.clone(), title: "Offline test".into(), artists: "Test artist".into(),
-            album_id: None, album_title: String::new(), artist_id: None,
+            album_id: None, album_title: String::new(), artist_id: None, artist_links: Vec::new(),
             duration_ms: 1000, cover_uri: None, available: false,
         };
         let path = offline_track_path(&id).unwrap();

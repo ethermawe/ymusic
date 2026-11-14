@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
@@ -5,6 +6,7 @@ import ymusic.ui
 
 Item {
     id: root
+
     property var selected: ({})
     property bool fetching: true
     property bool applying: false
@@ -13,9 +15,10 @@ Item {
     readonly property bool inWave: backend.tracks.currentIndex >= 0
     readonly property string artwork: inWave && backend.hasCover ? backend.nowCover : backend.listCover
     readonly property bool compact: width < 760
-    readonly property real artworkSize: compact ? 210 : Math.min(380, Math.max(250, (width - 104) * 0.31))
+    readonly property real artworkSize: compact ? 128 : Math.min(360, Math.max(240, (width - 104) * 0.30))
     readonly property bool changed: JSON.stringify(selected) !== JSON.stringify(backend.waveSettings.selected || {})
-    implicitHeight: card.height + 76
+
+    implicitHeight: card.height + (compact ? 40 : 76)
     implicitWidth: 600
 
     function select(key, seed) {
@@ -24,11 +27,13 @@ Item {
         else delete next[key];
         selected = next;
     }
+
     function reload() {
         fetching = true;
         errorMessage = "";
         backend.feature({action: "wave_settings"});
     }
+
     Component.onCompleted: {
         selected = Object.assign({}, backend.waveSettings.selected || {});
         reload();
@@ -43,37 +48,49 @@ Item {
         rightPadding: 13
         hoverEnabled: true
         opacity: enabled ? 1 : 0.5
-        contentItem: Text {
+        scale: down ? 0.95 : (hovered ? 1.03 : 1)
+        Behavior on scale { enabled: !Appearance.performanceMode; Bounce {} }
+
+        contentItem: StyledText {
             id: label
             text: chip.text
-            font.family: Appearance.fontFamily
-            font.pixelSize: 12
+            font.pixelSize: Appearance.fontSize.smaller
             font.weight: chip.chosen ? Font.DemiBold : Font.Medium
             color: chip.chosen ? Appearance.colors.onPrimary : Appearance.colors.onSurface
             verticalAlignment: Text.AlignVCenter
             horizontalAlignment: Text.AlignHCenter
         }
         background: Rectangle {
-            radius: 11
+            radius: 17
             color: chip.chosen ? Appearance.colors.primary
                  : (chip.hovered ? Appearance.colors.surfaceContainerHighest : Appearance.colors.surfaceContainerHigh)
             border.width: chip.visualFocus ? 2 : 0
             border.color: Appearance.colors.primary
-            Behavior on color { ColorAnimation { duration: Appearance.duration(150) } }
+            Behavior on color { ElementMoveFastColor {} }
         }
     }
 
     Rectangle {
         id: card
         anchors.top: parent.top
-        anchors.topMargin: 20
+        anchors.topMargin: root.compact ? 12 : 20
         anchors.horizontalCenter: parent.horizontalCenter
-        width: parent.width - 24
-        height: content.implicitHeight + 48
-        radius: 30
+        width: Math.max(0, parent.width - (root.compact ? 16 : 24))
+        height: content.implicitHeight + (root.compact ? 32 : 48)
+        radius: root.compact ? 22 : 30
         color: Appearance.colors.surfaceContainerLow
         border.width: 1
         border.color: Appearance.colors.outlineVariant
+        clip: true
+
+        Stickers {
+            anchors.fill: parent
+            key: "wave-hero"
+            count: 5
+            minimumSize: 80
+            maximumSize: 210
+            clipRadius: card.radius
+        }
 
         Image {
             id: backdrop
@@ -90,7 +107,7 @@ Item {
             property real radius: card.radius
             fragmentShader: "qrc:/shaders/artwork_backdrop.frag.qsb"
             visible: backdrop.status === Image.Ready
-            opacity: 0.12
+            opacity: 0.14
         }
 
         ColumnLayout {
@@ -98,17 +115,22 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: 24
-            spacing: 24
+            anchors.margins: root.compact ? 16 : 24
+            spacing: root.compact ? 16 : 24
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 10
-                MaterialSymbol { text: "my_wave"; iconSize: 24; color: Appearance.colors.primary }
+                spacing: 12
+                ShapeIcon {
+                    size: root.compact ? 32 : 38
+                    iconSize: root.compact ? 18 : 22
+                    shape: "sunny"
+                    symbol: "my_wave"
+                }
                 TitleText {
                     Layout.fillWidth: true
                     text: backend.listTitle || "Моя волна"
-                    font.pixelSize: 26
+                    font.pixelSize: root.compact ? 20 : 26
                     elide: Text.ElideRight
                 }
             }
@@ -117,38 +139,52 @@ Item {
                 Layout.fillWidth: true
                 columns: root.compact ? 1 : 2
                 columnSpacing: 24
-                rowSpacing: 24
+                rowSpacing: root.compact ? 16 : 24
 
-                ColumnLayout {
-                    Layout.preferredWidth: root.compact ? content.width : root.artworkSize
+                GridLayout {
+                    Layout.fillWidth: root.compact
+                    Layout.preferredWidth: root.compact ? -1 : root.artworkSize
                     Layout.maximumWidth: root.compact ? content.width : root.artworkSize
                     Layout.alignment: Qt.AlignTop
-                    spacing: 14
+                    columns: root.compact ? 2 : 1
+                    columnSpacing: 16
+                    rowSpacing: 14
 
                     Item {
                         Layout.preferredWidth: root.artworkSize
                         Layout.preferredHeight: width
-                        Layout.alignment: Qt.AlignHCenter
-                        RoundedImage {
+                        Layout.alignment: root.compact ? Qt.AlignVCenter : Qt.AlignHCenter
+
+                        ArtworkGlow {
+                            anchors.fill: parent
+                            source: root.artwork
+                            intensity: 0.25
+                            glowRadius: 28
+                        }
+
+                        ArtworkImage {
                             id: cover
                             anchors.fill: parent
-                            radius: 22
+                            radius: root.compact ? 16 : 22
                             source: root.artwork
-                            sourceSize: Qt.size(400, 400)
-                            fallbackSymbol: "my_wave"
-                            fallbackIconSize: 84
+                            placeholderSymbol: "my_wave"
+                            fallbackKey: backend.nowTitle
                             borderWidth: 1
                             borderColor: Appearance.colors.outlineVariant
                         }
+
                         Rectangle {
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
-                            anchors.margins: 12
-                            width: 58; height: 58; radius: 21
+                            anchors.margins: root.compact ? 8 : 12
+                            width: root.compact ? 44 : 58
+                            height: width
+                            radius: root.compact ? 16 : 21
                             color: Appearance.colors.surfaceContainerLowest
-                            PlayHeroButton {
+                            PlayButton {
                                 anchors.centerIn: parent
-                                size: 52
+                                size: root.compact ? 38 : 50
+                                iconSize: root.compact ? 20 : 26
                                 playing: backend.playing && root.inWave
                                 enabled: !root.applying && !backend.listLoading
                                 onClicked: {
@@ -160,73 +196,89 @@ Item {
                         }
                     }
 
-                    TitleText {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        text: root.inWave ? backend.nowTitle : "Ваш следующий любимый трек"
-                        font.pixelSize: 22
-                        maximumLineCount: 2
-                        wrapMode: Text.WordWrap
-                        elide: Text.ElideRight
-                        font.underline: titleHover.hovered && root.inWave && backend.nowHasAlbum
-                        HoverHandler { id: titleHover; cursorShape: root.inWave && backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor }
-                        TapHandler { enabled: root.inWave && backend.nowHasAlbum; onTapped: backend.openNowAlbum() }
-                    }
-                    StyledText {
-                        Layout.fillWidth: true
-                        text: root.inWave ? backend.nowArtists : "Поток, который меняется вместе с вами"
-                        color: Appearance.colors.onSurfaceVariant
-                        elide: Text.ElideRight
-                        font.underline: artistHover.hovered && root.inWave && backend.nowHasArtist
-                        HoverHandler { id: artistHover; cursorShape: root.inWave && backend.nowHasArtist ? Qt.PointingHandCursor : Qt.ArrowCursor }
-                        TapHandler { enabled: root.inWave && backend.nowHasArtist; onTapped: backend.openNowArtist() }
-                    }
-                    Rectangle {
-                        Layout.alignment: Qt.AlignLeft
-                        Layout.preferredWidth: 196
-                        Layout.preferredHeight: 56
-                        radius: 28
-                        color: Appearance.colors.surfaceContainerHigh
-                        border.width: 1
-                        border.color: Appearance.colors.outlineVariant
-                        RowLayout {
-                        anchors.centerIn: parent
-                        spacing: 8
-                        IconButton {
-                            symbol: "thumb_down"
-                            size: 40
-                            iconSize: 19
-                            iconColor: Appearance.colors.onSurfaceVariant
-                            tooltip: "Меньше такого"
-                            enabled: root.inWave
-                            onClicked: backend.dislikeNow()
+                        Layout.alignment: Qt.AlignVCenter
+                        spacing: root.compact ? 8 : 14
+
+                        TitleText {
+                            Layout.fillWidth: true
+                            text: root.inWave ? backend.nowTitle : "Ваш следующий любимый трек"
+                            font.pixelSize: root.compact ? 18 : 22
+                            maximumLineCount: 2
+                            wrapMode: Text.WordWrap
+                            elide: Text.ElideRight
+                            font.underline: titleHover.hovered && root.inWave && backend.nowHasAlbum
+                            HoverHandler {
+                                id: titleHover
+                                cursorShape: root.inWave && backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            }
+                            TapHandler {
+                                enabled: root.inWave && backend.nowHasAlbum
+                                onTapped: backend.openNowAlbum()
+                            }
                         }
-                        IconButton {
-                            symbol: backend.nowLiked && root.inWave ? "favorite" : "favorite_border"
-                            size: 40
-                            iconSize: 22
-                            toggled: backend.nowLiked && root.inWave
-                            heartBurst: true
-                            tooltip: "Мне нравится"
-                            enabled: root.inWave
-                            onClicked: backend.toggleNowLike()
+
+                        ArtistLinks {
+                            Layout.fillWidth: true
+                            links: root.inWave ? backend.nowArtistLinks : []
+                            fallbackText: root.inWave ? backend.nowArtists : "Поток, который меняется вместе с вами"
+                            clickable: root.inWave
+                            fallbackClickable: backend.nowHasArtist
+                            color: Appearance.colors.onSurfaceVariant
+                            font.pixelSize: Appearance.fontSize.normal
+                            wrapMode: Text.WordWrap
                         }
+
                         Rectangle {
-                            Layout.preferredWidth: 1
-                            Layout.preferredHeight: 22
-                            Layout.leftMargin: 2
-                            Layout.rightMargin: 2
-                            color: Appearance.colors.outlineVariant
-                        }
-                        TransportButton {
-                            symbol: "skip_next"
-                            size: 42
-                            iconSize: 26
-                            iconColor: Appearance.colors.primary
-                            effect: TransportButton.NudgeRight
-                            tooltip: "Следующий трек"
-                            enabled: root.inWave
-                            onClicked: backend.next()
-                        }
+                            Layout.alignment: Qt.AlignLeft
+                            Layout.preferredWidth: root.compact ? 176 : 196
+                            Layout.preferredHeight: root.compact ? 48 : 56
+                            radius: Layout.preferredHeight / 2
+                            color: Appearance.colors.surfaceContainerHigh
+                            border.width: 1
+                            border.color: Appearance.colors.outlineVariant
+
+                            RowLayout {
+                                anchors.centerIn: parent
+                                spacing: root.compact ? 4 : 8
+                                IconButton {
+                                    symbol: "thumb_down"
+                                    size: root.compact ? 36 : 40
+                                    iconSize: 19
+                                    tooltip: "Меньше такого"
+                                    enabled: root.inWave
+                                    onClicked: backend.dislikeNow()
+                                }
+                                IconButton {
+                                    symbol: backend.nowLiked && root.inWave ? "favorite" : "favorite_border"
+                                    size: root.compact ? 36 : 40
+                                    iconSize: 22
+                                    toggled: backend.nowLiked && root.inWave
+                                    burst: "hearts"
+                                    tooltip: "Мне нравится"
+                                    enabled: root.inWave
+                                    onClicked: backend.toggleNowLike()
+                                }
+                                Rectangle {
+                                    Layout.preferredWidth: 1
+                                    Layout.preferredHeight: 22
+                                    Layout.leftMargin: 2
+                                    Layout.rightMargin: 2
+                                    color: Appearance.colors.outlineVariant
+                                }
+                                TransportButton {
+                                    symbol: "skip_next"
+                                    size: root.compact ? 38 : 42
+                                    iconSize: 26
+                                    iconColor: Appearance.colors.primary
+                                    effect: TransportButton.NudgeRight
+                                    hoverShape: "pill"
+                                    tooltip: "Следующий трек"
+                                    enabled: root.inWave
+                                    onClicked: backend.next()
+                                }
+                            }
                         }
                     }
                 }
@@ -246,12 +298,12 @@ Item {
                                 Layout.fillWidth: true
                                 text: "Выберите, что хочется услышать сейчас"
                                 color: Appearance.colors.onSurfaceVariant
-                                font.pixelSize: 12
+                                font.pixelSize: Appearance.fontSize.smaller
                                 wrapMode: Text.WordWrap
                             }
                         }
                         IconButton {
-                            symbol: "repeat"
+                            symbol: "refresh"
                             tooltip: "Обновить фильтры"
                             enabled: !root.fetching && !root.applying
                             onClicked: root.reload()
@@ -267,7 +319,7 @@ Item {
                             spacing: 9
                             StyledText {
                                 text: group.modelData.name
-                                font.pixelSize: 12
+                                font.pixelSize: Appearance.fontSize.smaller
                                 font.weight: Font.DemiBold
                                 color: Appearance.colors.onSurfaceVariant
                             }
@@ -301,6 +353,7 @@ Item {
                         color: Appearance.colors.onSurfaceVariant
                         wrapMode: Text.WordWrap
                     }
+
                     StyledText {
                         Layout.fillWidth: true
                         visible: root.errorMessage.length > 0
@@ -308,13 +361,16 @@ Item {
                         color: Appearance.colors.error
                         wrapMode: Text.WordWrap
                     }
+
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.topMargin: 4
                         spacing: 8
-                        StyledButton {
+                        TextButton {
+                            variant: TextButton.Filled
+                            wavy: enabled
+                            symbol: "my_wave"
                             text: root.applying ? "Настраиваем…" : "Поймать волну"
-                            highlighted: true
                             enabled: !root.applying && !root.fetching
                             onClicked: {
                                 root.applying = true;
@@ -329,10 +385,11 @@ Item {
                             onClicked: root.selected = ({})
                         }
                     }
+
                     StyledText {
                         Layout.fillWidth: true
                         text: root.changed ? "Есть изменения · запустим новый поток" : "Лайки и пропуски помогают волне узнать вас"
-                        font.pixelSize: 11
+                        font.pixelSize: Appearance.fontSize.smallest
                         color: Appearance.colors.onSurfaceVariant
                         wrapMode: Text.WordWrap
                     }
@@ -346,7 +403,7 @@ Item {
         anchors.topMargin: 22
         anchors.left: card.left
         text: "ДАЛЕЕ В ПОТОКЕ"
-        font.pixelSize: 11
+        font.pixelSize: Appearance.fontSize.smallest
         font.weight: Font.Bold
         font.letterSpacing: 1.2
         color: Appearance.colors.onSurfaceVariant

@@ -73,11 +73,18 @@ pub struct DeviceCodePayload {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ArtistLinkPayload {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NowPlayingPayload {
     pub has_track: bool,
     pub id: String,
     pub title: String,
     pub artists: String,
+    pub artist_links: Vec<ArtistLinkPayload>,
     pub album: String,
     pub cover_url: String,
     pub has_cover: bool,
@@ -86,6 +93,16 @@ pub struct NowPlayingPayload {
     pub liked: bool,
     pub has_artist: bool,
     pub has_album: bool,
+}
+
+fn artist_links_for(t: &Track) -> Vec<ArtistLinkPayload> {
+    if !t.artist_links.is_empty() {
+        return t.artist_links.iter().map(|(id, name)| ArtistLinkPayload { id: id.clone(), name: name.clone() }).collect();
+    }
+    match &t.artist_id {
+        Some(id) if !t.artists.is_empty() => vec![ArtistLinkPayload { id: id.clone(), name: t.artists.clone() }],
+        _ => Vec::new(),
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -416,7 +433,7 @@ mod queue_tests {
     fn track(id: &str) -> Track {
         Track {
             id: id.into(), title: id.into(), artists: String::new(),
-            album_id: None, album_title: String::new(), artist_id: None,
+            album_id: None, album_title: String::new(), artist_id: None, artist_links: Vec::new(),
             duration_ms: 1000, cover_uri: None, available: true,
         }
     }
@@ -541,16 +558,49 @@ impl YMusicCore {
                 let title = cmd["title"].as_str().filter(|s| !s.is_empty()).unwrap_or("трек");
                 self.start_wave(format!("track:{id}"), format!("Волна: {title}"));
             }
+            "set_speed" => {
+                let speed = cmd["speed"].as_f64().unwrap_or(1.0) as f32;
+                self.audio.set_speed(speed);
+            }
+            "set_sleep_fade" => {
+                let factor = cmd["factor"].as_f64().unwrap_or(1.0) as f32;
+                self.audio.set_sleep_fade(factor);
+            }
+            "pause_playback" => {
+                self.pause_if_playing();
+            }
             "lyrics" => {
-                let id = cmd["id"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-                    .or_else(|| {
-                        let st = self.state.lock().unwrap();
-                        current_track(&st).map(|t| t.id.clone())
+                let (track_id, meta) = {
+                    let st = self.state.lock().unwrap();
+                    let cur = current_track(&st);
+                    let id = cmd["id"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                        .or_else(|| cur.map(|t| t.id.clone()));
+                    let found = id.as_deref().and_then(|target| {
+                        cur.filter(|t| t.id == target)
+                            .or_else(|| st.queue.iter().find(|t| t.id == target))
+                            .or_else(|| st.list.iter().find(|t| t.id == target))
                     });
-                let Some(track_id) = id else { return };
+                    let meta = found.map(|t| crate::api::LyricsQueryMeta {
+                        title: t.title.clone(),
+                        artist: t
+                            .artist_links
+                            .first()
+                            .map(|(_, name)| name.clone())
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| t.artists.clone()),
+                        album: t.album_title.clone(),
+                        duration_secs: if t.duration_ms > 0 {
+                            t.duration_ms as f64 / 1000.0
+                        } else {
+                            st.duration_secs
+                        },
+                    });
+                    (id, meta)
+                };
+                let Some(track_id) = track_id else { return };
                 let Some(api) = self.api() else {
                     self.send_feature("lyrics", serde_json::json!({
                         "trackId": track_id,
@@ -562,7 +612,7 @@ impl YMusicCore {
                 };
                 let this = self.clone();
                 self.rt_handle.spawn(async move {
-                    match api.track_lyrics(&track_id).await {
+                    match api.track_lyrics(&track_id, meta.as_ref()).await {
                         Ok(lyrics) => {
                             let message = if lyrics.lines.is_empty() {
                                 "Текст для этого трека не найден"
@@ -646,7 +696,11 @@ impl YMusicCore {
             this.refresh_rows();
             let showing_downloads = this.state.lock().unwrap().page == 7;
             if showing_downloads { this.clone().load_downloads(); }
-            this.error(format!("{}: {done}/{total}, ошибок: {failed}", if cancelled { "Загрузка остановлена" } else { "Загрузка завершена" }));
+            if !cancelled && failed == 0 {
+                this.notify(format!("Загрузка завершена: {done}/{total}"));
+            } else {
+                this.error(format!("{}: {done}/{total}, ошибок: {failed}", if cancelled { "Загрузка остановлена" } else { "Загрузка завершена" }));
+            }
         });
     }
 
@@ -730,6 +784,10 @@ impl YMusicCore {
         self.discord.set_stopped();
     }
 
+    pub fn set_discord_enabled(&self, enabled: bool) {
+        self.discord.set_enabled(enabled);
+    }
+
     pub fn send_event(&self, event_type: i32, payload: &impl Serialize) {
         if let Ok(json) = serde_json::to_string(payload) {
             self.sink.on_event(event_type, &json);
@@ -759,6 +817,10 @@ impl YMusicCore {
         self.send_event(EVENT_STATUS_MSG, &StatusPayload {
             text: msg.into(),
         });
+    }
+
+    pub fn notify(&self, msg: impl Into<String>) {
+        self.send_feature("toast", serde_json::json!({"message": msg.into()}));
     }
 
     pub fn api(&self) -> Option<Api> {
@@ -917,6 +979,7 @@ impl YMusicCore {
             id: String::new(),
             title: String::new(),
             artists: String::new(),
+            artist_links: Vec::new(),
             album: String::new(),
             cover_url: String::new(),
             has_cover: false,
@@ -948,7 +1011,7 @@ impl YMusicCore {
             let mut st = self.state.lock().unwrap();
             st.view_id += 1;
             st.page = page;
-            st.collection_downloadable = key.is_some_and(|k| k.starts_with("album:") || k.starts_with("playlist:"));
+            st.collection_downloadable = key.is_some_and(|k| k == "likes" || k.starts_with("album:") || k.starts_with("playlist:"));
             let view = st.view_id;
 
             let cached = key.and_then(|k| {
@@ -1120,6 +1183,7 @@ impl YMusicCore {
                 id: t.id.clone(),
                 title: t.title.clone(),
                 artists: t.artists.clone(),
+                artist_links: artist_links_for(t),
                 album: t.album_title.clone(),
                 has_cover: !cover_url.is_empty(),
                 cover_url,
@@ -1221,7 +1285,7 @@ impl YMusicCore {
                     this.refresh_rows();
                     let showing_downloads = this.state.lock().unwrap().page == 7;
                     if showing_downloads { this.clone().load_downloads(); }
-                    this.error("Загрузка удалена с устройства");
+                    this.notify("Загрузка удалена с устройства");
                 }
                 _ => this.error("Не удалось удалить загрузку"),
             }
@@ -1265,7 +1329,7 @@ impl YMusicCore {
                     this.state.lock().unwrap().views.remove(&key);
                     cache::remove_view(&key);
                     this.send_event(EVENT_PLAYLIST_PICKER, &serde_json::json!({"id": id, "stage": "done"}));
-                    this.error(format!("«{}» добавлен в плейлист", track.title));
+                    this.notify(format!("«{}» добавлен в плейлист", track.title));
                 }
                 Err(e) => this.send_event(EVENT_PLAYLIST_PICKER, &serde_json::json!({"id": id, "stage": "error", "message": format!("Не удалось добавить трек: {e}. Обновите список и повторите.")})),
             }
@@ -1719,7 +1783,7 @@ impl YMusicCore {
         }
         self.persist_session();
         self.send_queue();
-        self.error(if next { "Трек будет играть следующим" } else { "Трек добавлен в очередь" });
+        self.notify(if next { "Трек будет играть следующим" } else { "Трек добавлен в очередь" });
     }
 
     pub fn repeat_track(self: Arc<Self>, track: Track) {
@@ -1755,7 +1819,7 @@ impl YMusicCore {
             return;
         }
         let Some(api) = self.api() else { return };
-        self.error(format!("Скачиваем «{}»…", track.title));
+        self.notify(format!("Скачиваем «{}»…", track.title));
         let this = self.clone();
         self.rt_handle.spawn(async move {
             let offline = destination.is_none();
@@ -1775,7 +1839,7 @@ impl YMusicCore {
                     this.refresh_rows();
                     let showing_downloads = this.state.lock().unwrap().page == 7;
                     if showing_downloads { this.clone().load_downloads(); }
-                    this.error(format!("«{}» сохранён", track.title));
+                    this.notify(format!("«{}» сохранён", track.title));
                 }
                 Err(e) => this.error(format!("Не удалось скачать «{}»: {e}", track.title)),
             }
@@ -2002,6 +2066,7 @@ impl YMusicCore {
             id: track.id.clone(),
             title: track.title.clone(),
             artists: track.artists.clone(),
+            artist_links: artist_links_for(&track),
             album: track.album_title.clone(),
             cover_url: cover_url.clone(),
             has_cover,
@@ -2412,6 +2477,27 @@ impl YMusicCore {
         self.send_playback_state(false);
     }
 
+    pub fn spectrum_levels(&self, out: &mut [f32]) -> usize {
+        self.audio.spectrum_levels(out)
+    }
+
+    pub fn pause_if_playing(&self) {
+        let is_playing = {
+            let mut st = self.state.lock().unwrap();
+            if st.playing {
+                st.playing = false;
+                true
+            } else {
+                false
+            }
+        };
+        if is_playing {
+            self.audio.pause();
+            self.send_playback_state(true);
+            self.persist_session();
+        }
+    }
+
     pub fn save_volume(&self, vol: f32) {
         self.rt_handle.spawn_blocking(move || {
             config::update_settings(|s| s.volume = vol);
@@ -2494,6 +2580,7 @@ impl YMusicCore {
             id: track.id.clone(),
             title: track.title.clone(),
             artists: track.artists.clone(),
+            artist_links: artist_links_for(&track),
             album: track.album_title.clone(),
             cover_url: cover_url.clone(),
             has_cover,

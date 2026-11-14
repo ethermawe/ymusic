@@ -9,18 +9,29 @@
 #include <QCryptographicHash>
 #include <QFileInfo>
 #include <QDir>
+#include <algorithm>
+#include <cmath>
 
 YMusicBackend::YMusicBackend(QObject *parent)
     : QObject(parent) {
+    s_instance = this;
+    m_sleepTimer.setInterval(250);
+    connect(&m_sleepTimer, &QTimer::timeout, this, &YMusicBackend::sleepTimerTick);
     m_core = ymusic_core_new(&YMusicBackend::cCallback, this);
     feature({{"action", "history"}});
 }
 
 YMusicBackend::~YMusicBackend() {
+    if (s_instance == this) s_instance = nullptr;
     if (m_core) {
         ymusic_core_free(m_core);
         m_core = nullptr;
     }
+}
+
+int YMusicBackend::spectrumLevels(float *out, int count) const {
+    if (!m_core || !out || count <= 0) return 0;
+    return static_cast<int>(ymusic_core_spectrum_levels(m_core, out, static_cast<uint32_t>(count)));
 }
 
 void YMusicBackend::cCallback(int32_t eventType, const char *jsonData, void *userData) {
@@ -63,10 +74,16 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         break;
     }
     case EVENT_NOW_PLAYING: {
-        m_hasTrack = obj["has_track"].toBool();
-        m_nowId = obj["id"].toString();
+        const QString nextId = obj["id"].toString();
+        const bool nextHasTrack = obj["has_track"].toBool();
+        if (nextId != m_nowId || nextHasTrack != m_hasTrack) {
+            ++m_trackInstanceId;
+        }
+        m_hasTrack = nextHasTrack;
+        m_nowId = nextId;
         m_nowTitle = obj["title"].toString();
         m_nowArtists = obj["artists"].toString();
+        m_nowArtistLinks = obj["artist_links"].toArray().toVariantList();
         m_nowAlbum = obj["album"].toString();
         m_nowCover = obj["cover_url"].toString();
         m_hasCover = obj["has_cover"].toBool();
@@ -271,8 +288,18 @@ void YMusicBackend::openNowArtist() {
     if (m_core) ymusic_core_open_now_artist(m_core);
 }
 
+void YMusicBackend::openArtist(const QString &artistId) {
+    if (m_core && !artistId.isEmpty()) {
+        ymusic_core_open_artist(m_core, artistId.toUtf8().constData());
+    }
+}
+
 void YMusicBackend::openNowAlbum() {
     if (m_core) ymusic_core_open_now_album(m_core);
+}
+
+void YMusicBackend::setDiscordRpcEnabled(bool enabled) {
+    if (m_core) ymusic_core_set_discord_enabled(m_core, enabled);
 }
 
 void YMusicBackend::play(int index) {
@@ -347,4 +374,63 @@ void YMusicBackend::clearStatus() {
 
 void YMusicBackend::feature(const QVariantMap &command) {
     if (m_core) ymusic_core_feature(m_core, QJsonDocument(QJsonObject::fromVariantMap(command)).toJson(QJsonDocument::Compact).constData());
+}
+
+void YMusicBackend::setTempo(qreal speed) {
+    const qreal clamped = std::clamp(speed, 0.5, 2.0);
+    if (!qFuzzyCompare(clamped + 1.0, m_tempo + 1.0)) {
+        m_tempo = clamped;
+        emit tempoChanged();
+    }
+    feature({{"action", "set_speed"}, {"speed", clamped}});
+}
+
+void YMusicBackend::startSleepTimer(int seconds, const QString &fadeMode) {
+    cancelSleepTimer();
+    if (seconds <= 0) return;
+    m_sleepTimerDeadline = QDateTime::currentDateTimeUtc().addSecs(seconds);
+    m_sleepTimerTotalSecs = seconds;
+    m_sleepFade = ymusic::sleepFadeFromString(fadeMode);
+    m_lastSleepFadeGain = 1.0;
+    m_sleepTimer.start();
+    emit sleepTimerChanged();
+}
+
+void YMusicBackend::cancelSleepTimer() {
+    m_sleepTimer.stop();
+    const bool wasRunning = m_sleepTimerDeadline.isValid();
+    if (std::abs(m_lastSleepFadeGain - 1.0) > 1e-4) {
+        m_lastSleepFadeGain = 1.0;
+        feature({{"action", "set_sleep_fade"}, {"gain", 1.0}});
+    }
+    m_sleepTimerDeadline = {};
+    m_sleepTimerTotalSecs = 0;
+    m_sleepFade = ymusic::SleepFade::None;
+    if (wasRunning) emit sleepTimerChanged();
+}
+
+void YMusicBackend::sleepTimerTick() {
+    if (!m_sleepTimerDeadline.isValid()) {
+        m_sleepTimer.stop();
+        return;
+    }
+    const double remaining = QDateTime::currentDateTimeUtc().msecsTo(m_sleepTimerDeadline) / 1000.0;
+    if (remaining > 0.0) {
+        if (m_sleepFade != ymusic::SleepFade::None) {
+            const double gain = ymusic::sleepFadeLevel(m_sleepFade, remaining, m_sleepTimerTotalSecs);
+            if (std::abs(gain - m_lastSleepFadeGain) > 0.005) {
+                m_lastSleepFadeGain = gain;
+                feature({{"action", "set_sleep_fade"}, {"gain", gain}});
+            }
+        }
+        return;
+    }
+    m_sleepTimer.stop();
+    feature({{"action", "pause_playback"}});
+    m_lastSleepFadeGain = 1.0;
+    feature({{"action", "set_sleep_fade"}, {"gain", 1.0}});
+    m_sleepTimerDeadline = {};
+    m_sleepTimerTotalSecs = 0;
+    m_sleepFade = ymusic::SleepFade::None;
+    emit sleepTimerChanged();
 }

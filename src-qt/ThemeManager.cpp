@@ -42,6 +42,7 @@ ThemeManager::ThemeManager(QObject *parent)
 }
 
 void ThemeManager::onFileChanged() {
+    if (m_preset != "auto") return;
     // При атомарной замене файла (rename) watcher теряет его — добавляем заново.
     QString home = QDir::homePath();
     const QStringList paths = {
@@ -276,10 +277,105 @@ bool ThemeManager::tryLoadPresets() {
     return true;
 }
 
+void ThemeManager::setPreset(const QString &preset) {
+    const QString next = preset.isEmpty() ? QStringLiteral("auto") : preset;
+    if (m_preset == next) return;
+    m_preset = next;
+    loadColors();
+}
+
+namespace {
+struct ThemePresetDef {
+    const char *id;
+    const char *name;
+    const char *bg;
+    const char *surface;
+    const char *onSurface;
+    const char *onSurfaceVariant;
+    const char *outline;
+    const char *primary;
+    const char *onPrimary;
+    const char *secondary;
+    const char *tertiary;
+};
+
+constexpr ThemePresetDef kPresets[] = {
+    {"yandex_dark",          "Яндекс",              "#0a0c10", "#12151c", "#f0f2f8", "#9ea3b5", "#4b5166", "#fc3f1d", "#ffffff", "#e59b24", "#36c39f"},
+    {"catppuccin-mocha",     "Catppuccin Mocha",    "#11111b", "#1e1e2e", "#cdd6f4", "#a6adc8", "#585b70", "#cba6f7", "#11111b", "#f5c2e7", "#94e2d5"},
+    {"catppuccin-macchiato", "Catppuccin Macchiato","#181926", "#24273a", "#cad3f5", "#a5adcb", "#5b6078", "#c6a0f6", "#181926", "#f5bde6", "#8bd5ca"},
+    {"catppuccin-frappe",    "Catppuccin Frappé",   "#232634", "#303446", "#c6d0f5", "#a5adce", "#626880", "#ca9ee6", "#232634", "#f4b8e4", "#81c8be"},
+    {"rosepine",             "Rosé Pine",           "#191724", "#1f1d2e", "#e0def4", "#908caa", "#524f67", "#c4a7e7", "#191724", "#ebbcba", "#9ccfd8"},
+    {"rosepine-moon",        "Rosé Pine Moon",      "#232136", "#2a273f", "#e0def4", "#908caa", "#56526e", "#c4a7e7", "#232136", "#ea9a97", "#9ccfd8"},
+    {"gruvbox",              "Gruvbox",             "#1d2021", "#282828", "#ebdbb2", "#a89984", "#665c54", "#fe8019", "#1d2021", "#fabd2f", "#8ec07c"},
+    {"nord",                 "Nord",                "#242933", "#2e3440", "#eceff4", "#d8dee9", "#4c566a", "#88c0d0", "#1b242e", "#81a1c1", "#a3be8c"},
+    {"tokyonight",           "Tokyo Night",         "#16161e", "#1a1b26", "#c0caf5", "#a9b1d6", "#414868", "#7aa2f7", "#16161e", "#bb9af7", "#7dcfff"},
+    {"tokyonight-storm",     "Tokyo Night Storm",   "#1f2335", "#24283b", "#c0caf5", "#a9b1d6", "#414868", "#7aa2f7", "#1f2335", "#bb9af7", "#7dcfff"},
+    {"dracula",              "Dracula",             "#191a21", "#282a36", "#f8f8f2", "#c3c6d7", "#44475a", "#bd93f9", "#191a21", "#ff79c6", "#8be9fd"},
+    {"everforest",           "Everforest",          "#232a2e", "#2d353b", "#d3c6aa", "#9da9a0", "#4f585e", "#a7c080", "#232a2e", "#83c092", "#dbbc7f"},
+    {"kanagawa",             "Kanagawa",            "#16161d", "#1f1f28", "#dcd7ba", "#c8c093", "#54546d", "#7e9cd8", "#16161d", "#957fb8", "#98bb6c"},
+    {"solarized",            "Solarized",           "#00212b", "#002b36", "#93a1a1", "#839496", "#586e75", "#268bd2", "#00212b", "#2aa198", "#b58900"},
+    {"one",                  "One Dark",            "#1b1d23", "#282c34", "#abb2bf", "#9da5b4", "#4b5263", "#61afef", "#1b1d23", "#c678dd", "#98c379"},
+    {"light_clean",          "Светлая",             "#f2f4f8", "#ffffff", "#171923", "#5c6274", "#b4bac8", "#e5391a", "#ffffff", "#d97706", "#0d9488"},
+};
+}
+
+QVariantList ThemeManager::availablePresets() const {
+    QVariantList list;
+    QVariantMap autoItem;
+    autoItem["id"] = QStringLiteral("auto");
+    autoItem["name"] = QStringLiteral("Авто (система)");
+    autoItem["window"] = m_preset == "auto" ? m_background.name() : QStringLiteral("#0a0c10");
+    autoItem["page"] = m_preset == "auto" ? m_surface.name() : QStringLiteral("#12151c");
+    autoItem["text"] = m_preset == "auto" ? m_onSurface.name() : QStringLiteral("#f0f2f8");
+    autoItem["primary"] = m_preset == "auto" ? m_primary.name() : QStringLiteral("#fc3f1d");
+    autoItem["secondary"] = m_preset == "auto" ? m_secondary.name() : QStringLiteral("#e59b24");
+    autoItem["tertiary"] = m_preset == "auto" ? m_tertiary.name() : QStringLiteral("#36c39f");
+    list.append(autoItem);
+
+    for (const auto &p : kPresets) {
+        QVariantMap item;
+        item["id"] = QString::fromUtf8(p.id);
+        item["name"] = QString::fromUtf8(p.name);
+        item["window"] = QString::fromUtf8(p.bg);
+        item["page"] = QString::fromUtf8(p.surface);
+        item["text"] = QString::fromUtf8(p.onSurface);
+        item["primary"] = QString::fromUtf8(p.primary);
+        item["secondary"] = QString::fromUtf8(p.secondary);
+        item["tertiary"] = QString::fromUtf8(p.tertiary);
+        list.append(item);
+    }
+    return list;
+}
+
+bool ThemeManager::applyNamedPreset(const QString &preset) {
+    for (const auto &p : kPresets) {
+        if (preset == QLatin1String(p.id)) {
+            m_background = QColor(p.bg);
+            m_surface = QColor(p.surface);
+            m_onSurface = QColor(p.onSurface);
+            m_onSurfaceVariant = QColor(p.onSurfaceVariant);
+            m_outline = QColor(p.outline);
+            m_primary = QColor(p.primary);
+            m_primaryHover = m_primary.lighter(115);
+            m_onPrimary = QColor(p.onPrimary);
+            m_secondary = QColor(p.secondary);
+            m_tertiary = QColor(p.tertiary);
+            m_error = QColor("#ff5449");
+            deriveSurfaces();
+            return true;
+        }
+    }
+    return false;
+}
+
 void ThemeManager::loadColors() {
     // Не все загрузчики заполняют каждый цвет: начинаем с дефолтов, чтобы не оставалось
     // невалидных или устаревших значений от предыдущей темы.
     setDefaults();
+    if (m_preset != "auto" && applyNamedPreset(m_preset)) {
+        emit themeChanged();
+        return;
+    }
     bool ok = tryLoadQuickshell();
     if (!ok) ok = tryLoadPresets();
     if (!ok) ok = tryLoadNoctalia();

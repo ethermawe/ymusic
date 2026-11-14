@@ -1,85 +1,103 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Layouts
+import QtQuick.Templates as T
 import ymusic.ui
 
-Dialog {
+StyledDialog {
     id: root
+
     property bool busy: false
     property string errorMessage: ""
-    title: "Новый плейлист"
-    modal: true
-    focus: true
-    anchors.centerIn: parent
-    width: Math.min(440, parent ? parent.width - 32 : 440)
-    padding: 24
-    closePolicy: busy ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    onOpened: { name.forceActiveFocus(); errorMessage = ""; }
-    background: Rectangle {
-        radius: Appearance.rounding.large
-        color: Appearance.colors.surfaceContainerHigh
-        border.width: 1
-        border.color: Appearance.colors.outlineVariant
+
+    headline: "Новый плейлист"
+    symbol: "playlist_add"
+    iconShape: "bun"
+    preferredWidth: 440
+    closePolicy: busy ? T.Popup.NoAutoClose : (T.Popup.CloseOnEscape | T.Popup.CloseOnPressOutside)
+
+    onOpened: {
+        name.inputItem.forceActiveFocus();
+        errorMessage = "";
     }
-    header: Label { text: root.title; padding: 24; font.pixelSize: 22; color: Appearance.colors.onSurface }
-    contentItem: ColumnLayout {
-        spacing: 16
-        TextField {
-            id: name
-            Layout.fillWidth: true
-            placeholderText: "Название плейлиста"
-            maximumLength: 100
-            enabled: !root.busy
-            selectByMouse: true
-            color: Appearance.colors.onSurface
-            placeholderTextColor: Appearance.colors.onSurfaceVariant
-            background: Rectangle { color: Appearance.colors.surfaceContainerLowest; radius: 10 }
-        }
-        StyledCheckBox {
-            id: privatePlaylist
+
+    OutlinedTextField {
+        id: name
+        width: parent.width
+        placeholder: "Название плейлиста"
+        enabled: !root.busy
+        onTextEdited: if (text.length > 100) text = text.slice(0, 100)
+        onAccepted: if (!root.busy && text.trim().length > 0 && backend.loggedIn) root.createPlaylist()
+    }
+
+    Item {
+        width: parent.width
+        height: 44
+
+        StyledText {
+            anchors.left: parent.left
+            anchors.right: privatePlaylist.left
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
             text: "Приватный плейлист"
+            font.pixelSize: Appearance.fontSize.small
+        }
+        StyledSwitch {
+            id: privatePlaylist
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
             checked: true
             enabled: !root.busy
-            palette.windowText: Appearance.colors.onSurface
-        }
-        StyledText {
-            Layout.fillWidth: true
-            text: root.busy ? "Создаём плейлист…" : root.errorMessage
-            visible: text.length > 0
-            wrapMode: Text.WordWrap
         }
     }
-    // Intercept the button box: do not close until the server confirms success.
-    footer: RowLayout {
-        spacing: 12
-        Item { Layout.fillWidth: true }
-        StyledButton {
-            Layout.bottomMargin: 20
+
+    StyledText {
+        width: parent.width
+        text: root.busy ? "Создаём плейлист…" : root.errorMessage
+        visible: text.length > 0
+        wrapMode: Text.WordWrap
+        color: root.busy ? Appearance.colors.onSurfaceVariant : Appearance.colors.error
+    }
+
+    function createPlaylist() {
+        root.busy = true;
+        root.errorMessage = "";
+        backend.feature({action: "create_playlist", title: name.text.trim(), private: privatePlaylist.checked});
+    }
+
+    buttons: [
+        TextButton {
             text: "Отмена"
+            variant: TextButton.Text
             enabled: !root.busy
             onClicked: root.close()
-        }
-        StyledButton {
-            Layout.bottomMargin: 20
-            Layout.rightMargin: 24
+        },
+        TextButton {
             text: root.busy ? "Создаём…" : "Создать"
-            highlighted: true
+            variant: TextButton.Filled
+            wavy: enabled
             enabled: !root.busy && name.text.trim().length > 0 && backend.loggedIn
-            onClicked: {
-            root.busy = true;
-            root.errorMessage = "";
-            backend.feature({action: "create_playlist", title: name.text.trim(), private: privatePlaylist.checked});
-            }
+            onClicked: root.createPlaylist()
         }
-    }
+    ]
+
     Connections {
         target: backend
         function onFeatureResult(result) {
             if (result.type !== "create_playlist" || !root.busy) return;
             root.busy = false;
-            if (result.ok) { name.clear(); root.close(); backend.clearStatus(); }
-            else root.errorMessage = result.message;
+            if (result.ok) {
+                name.inputItem.clear();
+                root.accept();
+                backend.clearStatus();
+            } else {
+                root.errorMessage = result.message;
+            }
         }
-        function onAuthChanged() { if (!backend.loggedIn) { root.busy = false; root.close(); } }
+        function onAuthChanged() {
+            if (!backend.loggedIn) {
+                root.busy = false;
+                root.close();
+            }
+        }
     }
 }

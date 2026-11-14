@@ -1,12 +1,15 @@
 #pragma once
 
+#include <QDateTime>
 #include <QObject>
 #include <QString>
 #include <QPointer>
+#include <QTimer>
 #include <QUrl>
 #include <QVariantList>
 #include "TrackModel.h"
 #include "CardModel.h"
+#include "playback/InteractionState.h"
 #include "ymusic_core.h"
 
 class YMusicBackend : public QObject {
@@ -43,6 +46,7 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(QString nowId READ nowId NOTIFY nowPlayingChanged)
     Q_PROPERTY(QString nowTitle READ nowTitle NOTIFY nowPlayingChanged)
     Q_PROPERTY(QString nowArtists READ nowArtists NOTIFY nowPlayingChanged)
+    Q_PROPERTY(QVariantList nowArtistLinks READ nowArtistLinks NOTIFY nowPlayingChanged)
     Q_PROPERTY(QString nowAlbum READ nowAlbum NOTIFY nowPlayingChanged)
     Q_PROPERTY(QString nowCover READ nowCover NOTIFY nowPlayingChanged)
     Q_PROPERTY(bool hasCover READ hasCover NOTIFY nowPlayingChanged)
@@ -63,6 +67,12 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(qreal volume READ volume WRITE setVolume NOTIFY volumeChanged)
     Q_PROPERTY(bool shuffle READ shuffle NOTIFY playbackStateChanged)
     Q_PROPERTY(int repeatMode READ repeatMode NOTIFY playbackStateChanged)
+    Q_PROPERTY(qreal tempo READ tempo WRITE setTempo NOTIFY tempoChanged)
+    Q_PROPERTY(bool sleepTimerRunning READ sleepTimerRunning NOTIFY sleepTimerChanged)
+    Q_PROPERTY(QDateTime sleepTimerDeadline READ sleepTimerDeadline NOTIFY sleepTimerChanged)
+    Q_PROPERTY(int sleepTimerTotalSecs READ sleepTimerTotalSecs NOTIFY sleepTimerChanged)
+    Q_PROPERTY(QString sleepTimerFade READ sleepTimerFade NOTIFY sleepTimerChanged)
+    Q_PROPERTY(quint64 trackInstanceId READ trackInstanceId NOTIFY nowPlayingChanged)
 
     // Models
     Q_PROPERTY(TrackModel* tracks READ tracks CONSTANT)
@@ -78,6 +88,8 @@ class YMusicBackend : public QObject {
 public:
     explicit YMusicBackend(QObject *parent = nullptr);
     ~YMusicBackend() override;
+    static YMusicBackend *instance() { return s_instance; }
+    int spectrumLevels(float *out, int count) const;
 
     bool loggedIn() const { return m_loggedIn; }
     bool authReady() const { return m_authReady; }
@@ -107,6 +119,7 @@ public:
     QString nowId() const { return m_nowId; }
     QString nowTitle() const { return m_nowTitle; }
     QString nowArtists() const { return m_nowArtists; }
+    QVariantList nowArtistLinks() const { return m_nowArtistLinks; }
     QString nowAlbum() const { return m_nowAlbum; }
     QString nowCover() const { return m_nowCover; }
     bool hasCover() const { return m_hasCover; }
@@ -125,6 +138,12 @@ public:
     qreal volume() const { return m_volume; }
     bool shuffle() const { return m_shuffle; }
     int repeatMode() const { return m_repeatMode; }
+    qreal tempo() const { return m_tempo; }
+    bool sleepTimerRunning() const { return m_sleepTimerDeadline.isValid(); }
+    QDateTime sleepTimerDeadline() const { return m_sleepTimerDeadline; }
+    int sleepTimerTotalSecs() const { return m_sleepTimerTotalSecs; }
+    QString sleepTimerFade() const { return ymusic::sleepFadeName(m_sleepFade); }
+    quint64 trackInstanceId() const { return m_trackInstanceId; }
 
     TrackModel* tracks() { return &m_trackModel; }
     TrackModel* queue() { return &m_queueModel; }
@@ -162,7 +181,9 @@ public:
     Q_INVOKABLE void openTrackArtist(int index);
     Q_INVOKABLE void openTrackAlbum(int index);
     Q_INVOKABLE void openNowArtist();
+    Q_INVOKABLE void openArtist(const QString &artistId);
     Q_INVOKABLE void openNowAlbum();
+    Q_INVOKABLE void setDiscordRpcEnabled(bool enabled);
 
     Q_INVOKABLE void play(int index);
     Q_INVOKABLE void trackAction(const QString &id, int action);
@@ -185,6 +206,9 @@ public:
     Q_INVOKABLE void toggleNowLike();
     Q_INVOKABLE void dislikeNow();
     Q_INVOKABLE void clearStatus();
+    Q_INVOKABLE void setTempo(qreal speed);
+    Q_INVOKABLE void startSleepTimer(int seconds, const QString &fadeMode = QStringLiteral("finalSeconds"));
+    Q_INVOKABLE void cancelSleepTimer();
 
 signals:
     void featuresChanged();
@@ -198,11 +222,15 @@ signals:
     void progressChanged();
     void playbackStateChanged();
     void volumeChanged();
+    void tempoChanged();
+    void sleepTimerChanged();
 
 private:
+    void sleepTimerTick();
     void handleEvent(int eventType, const QString &jsonData);
     static void cCallback(int32_t eventType, const char *jsonData, void *userData);
 
+    inline static YMusicBackend *s_instance = nullptr;
     CoreHandle *m_core = nullptr;
     TrackModel m_trackModel;
     TrackModel m_queueModel;
@@ -242,6 +270,7 @@ private:
     QString m_nowId;
     QString m_nowTitle;
     QString m_nowArtists;
+    QVariantList m_nowArtistLinks;
     QString m_nowAlbum;
     QString m_nowCover;
     bool m_hasCover = false;
@@ -260,4 +289,12 @@ private:
     qreal m_volume = 0.7;
     bool m_shuffle = false;
     int m_repeatMode = 0;
+    qreal m_tempo = 1.0;
+    quint64 m_trackInstanceId = 0;
+
+    QTimer m_sleepTimer;
+    QDateTime m_sleepTimerDeadline;
+    int m_sleepTimerTotalSecs = 0;
+    ymusic::SleepFade m_sleepFade = ymusic::SleepFade::None;
+    double m_lastSleepFadeGain = 1.0;
 };

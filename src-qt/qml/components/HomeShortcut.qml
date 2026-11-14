@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import ymusic.ui
@@ -8,53 +9,55 @@ T.AbstractButton {
     property string title
     property string subtitle
     property string symbol
-    property color badgeColor: Appearance.colors.primaryContainer
-    property color badgeIconColor: Appearance.colors.onPrimaryContainer
+    property string iconShape: "cookie9"
+    property bool keepsShape: false
 
     implicitHeight: 64
     hoverEnabled: true
     focusPolicy: Qt.TabFocus
-    scale: down ? 0.96 : (hovered ? 1.02 : 1)
+    scale: down ? 0.95 : (hovered ? 1.02 : 1)
 
     Behavior on scale {
+        enabled: !Appearance.performanceMode
         Bounce {}
     }
 
-    background: Rectangle {
-        radius: Appearance.rounding.normal
-        color: root.hovered ? Appearance.colors.surfaceContainerHighest : Appearance.colors.surfaceContainerHigh
-        border.width: 1
-        border.color: root.hovered ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(1, 1, 1, 0.04)
+    background: WavyClip {
+        radius: 16
+        wavy: root.hovered
+        depth: 2.5
+        wavelength: 18
 
-        Behavior on color {
-            ElementMoveFastColor {}
+        Rectangle {
+            anchors.fill: parent
+            radius: 16
+            color: root.hovered ? Appearance.colors.surfaceContainerHighest : Appearance.colors.surfaceContainerHigh
+
+            Behavior on color {
+                ElementMoveFastColor {}
+            }
         }
     }
 
     contentItem: Item {
-        // Icon badge
-        Rectangle {
+        ShapeIcon {
             id: badge
             anchors.left: parent.left
-            anchors.leftMargin: 12
+            anchors.leftMargin: 10
             anchors.verticalCenter: parent.verticalCenter
-            width: 42
-            height: 42
-            radius: Appearance.rounding.small
-            color: root.badgeColor
-
-            MaterialSymbol {
-                anchors.centerIn: parent
-                text: root.symbol
-                iconSize: 22
-                color: root.badgeIconColor
-            }
+            size: 44
+            iconSize: 21
+            shape: root.iconShape
+            keepsShape: root.keepsShape
+            symbol: root.symbol
+            color: Appearance.colors.primaryContainer
+            iconColor: Appearance.colors.onPrimaryContainer
+            hovered: root.hovered
         }
 
-        // Text details
         Column {
             anchors.left: badge.right
-            anchors.leftMargin: 14
+            anchors.leftMargin: 12
             anchors.right: chevron.left
             anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
@@ -67,30 +70,28 @@ T.AbstractButton {
                 font.pixelSize: Appearance.fontSize.small
                 font.weight: Font.DemiBold
             }
-
             StyledText {
                 width: parent.width
                 text: root.subtitle
                 elide: Text.ElideRight
                 font.pixelSize: Appearance.fontSize.smaller
                 color: Appearance.colors.onSurfaceVariant
+                visible: text.length > 0
             }
         }
 
-        // Chevron
         MaterialSymbol {
             id: chevron
             anchors.right: parent.right
-            anchors.rightMargin: 14
+            anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
             text: "chevron_right"
-            iconSize: 20
-            color: Appearance.colors.onSurfaceVariant
-            opacity: root.hovered ? 1.0 : 0.6
-
-            Behavior on opacity {
-                NumberAnimation { duration: 140 }
-            }
+            iconSize: 18
+            color: Appearance.colors.outline
         }
+    }
+
+    HoverHandler {
+        cursorShape: Qt.PointingHandCursor
     }
 }

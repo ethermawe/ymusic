@@ -4,6 +4,7 @@
 #include <QColor>
 #include <QFileSystemWatcher>
 #include <QTimer>
+#include <QVariantList>
 
 class ThemeManager : public QObject {
     Q_OBJECT
@@ -31,6 +32,7 @@ class ThemeManager : public QObject {
     Q_PROPERTY(QColor tertiary READ tertiary NOTIFY themeChanged)
     Q_PROPERTY(QColor error READ error NOTIFY themeChanged)
     Q_PROPERTY(bool isDark READ isDark NOTIFY themeChanged)
+    Q_PROPERTY(QString preset READ preset WRITE setPreset NOTIFY themeChanged)
 
 public:
     explicit ThemeManager(QObject *parent = nullptr);
@@ -60,7 +62,10 @@ public:
     QColor tertiary() const { return m_tertiary; }
     QColor error() const { return m_error; }
     bool isDark() const { return m_isDark; }
+    QString preset() const { return m_preset; }
 
+    void setPreset(const QString &preset);
+    Q_INVOKABLE QVariantList availablePresets() const;
     Q_INVOKABLE void reload();
 
 signals:
@@ -75,8 +80,11 @@ private:
     bool tryLoadWal();
     bool tryLoadPresets();
     bool tryLoadNoctalia();
+    bool applyNamedPreset(const QString &preset);
     void setDefaults();
     void deriveSurfaces();
+
+    QString m_preset = "auto";
 
     QFileSystemWatcher m_watcher;
     QTimer m_debounceTimer;

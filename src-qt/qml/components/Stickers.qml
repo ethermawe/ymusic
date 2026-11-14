@@ -1,58 +1,79 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import ymusic.ui
 
 Item {
     id: root
 
-    implicitWidth: 600
-    implicitHeight: 400
-    clip: true
+    property string key: "ymusic"
+    property int count: 4
+    property real minimumSize: 70
+    property real maximumSize: 200
+    property MaterialScheme scheme: Appearance.colors
+    property real strength: 1
+    readonly property real alpha: (scheme.dark ? 0.32 : 0.5) * strength
+    property real clipRadius: -1
 
-    // Sticker 1: Top Right soft flower
-    MaterialShape {
-        x: root.width - 120
-        y: -40
-        width: 180
-        height: 180
-        shape: "flower"
-        color: Appearance.colors.primary
-        opacity: 0.07
-        spinAngle: 15
+    readonly property list<string> shapes: ["heart", "ghostish", "bun", "flower", "sunny", "cookie9", "clover4",
+                                            "softBoom", "puffy", "pixelCircle", "softBurst", "clamShell", "arch",
+                                            "fan", "gem", "cookie6", "clover8", "verySunny", "puffyDiamond", "burst"]
+
+    function seedOf(text: string): int {
+        let hash = 2166136261
+        for (let index = 0; index < text.length; ++index) {
+            hash ^= text.charCodeAt(index)
+            hash = Math.imul(hash, 16777619)
+        }
+        return hash >>> 0
     }
 
-    // Sticker 2: Left Middle clover
-    MaterialShape {
-        x: -50
-        y: 140
-        width: 150
-        height: 150
-        shape: "clover4"
-        color: Appearance.colors.secondary
-        opacity: 0.06
-        spinAngle: 45
+    readonly property var layout: {
+        let state = seedOf(key)
+        const next = () => {
+            state = (state + 0x6d2b79f5) >>> 0
+            let t = state
+            t = Math.imul(t ^ (t >>> 15), t | 1)
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+        }
+        const stickers = []
+        for (let index = 0; index < count; ++index) {
+            stickers.push({
+                x: (index + 0.15 + 0.7 * next()) / count,
+                y: -0.15 + 1.25 * next(),
+                size: minimumSize + (maximumSize - minimumSize) * next(),
+                shape: shapes[Math.floor(next() * shapes.length)],
+                tone: Math.floor(next() * 3),
+                angle: next() * 360,
+                pace: (next() < 0.5 ? -1 : 1) * (12 + 26 * next())
+            })
+        }
+        return stickers
     }
 
-    // Sticker 3: Bottom Right cookie
-    MaterialShape {
-        x: root.width - 200
-        y: root.height - 100
-        width: 220
-        height: 220
-        shape: "cookie9"
-        color: Appearance.colors.tertiary
-        opacity: 0.05
-        spinAngle: 30
+    function tone(which: int): color {
+        const base = which === 0 ? scheme.primaryContainer : (which === 1 ? scheme.tertiaryContainer : scheme.secondaryContainer)
+        return Qt.alpha(base, alpha)
     }
 
-    // Sticker 4: Center subtle soft cookie
-    MaterialShape {
-        x: root.width * 0.45
-        y: root.height * 0.35
-        width: 130
-        height: 130
-        shape: "softCookie"
-        color: Appearance.colors.primaryContainer
-        opacity: 0.06
-        spinAngle: 60
+    Repeater {
+        model: appSettings.noShapes ? 0 : root.count
+
+        MaterialShape {
+            id: sticker
+
+            required property int index
+            readonly property var spec: root.layout[index]
+
+            width: spec.size
+            height: spec.size
+            x: spec.x * root.width - width / 2
+            y: spec.y * root.height - height / 2
+            shape: spec.shape
+            color: root.tone(spec.tone)
+            spinAngle: spec.angle
+            spinRate: Appearance.reduceMotion ? 0 : spec.pace
+            parentClipRadius: root.clipRadius
+        }
     }
 }

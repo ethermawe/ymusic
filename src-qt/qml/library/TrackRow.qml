@@ -1,248 +1,353 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Window
-import QtQuick.Layouts
+import QtQuick.Templates as T
 import ymusic.ui
 
-Item {
+T.AbstractButton {
     id: root
 
-    property bool isCurrent: model.isCurrent
-    property bool isPlaying: model.isPlaying
+    required property int index
+    required property var model
+    property bool isCurrent: model?.isCurrent ?? false
+    property bool isPlaying: model?.isPlaying ?? false
     property bool queueView: false
-    readonly property bool isHovered: rowHover.hovered
+    property bool showsNumber: true
+    readonly property bool expanded: hovered || isCurrent
 
-    implicitHeight: 56
+    implicitHeight: 58
     implicitWidth: 600
+    hoverEnabled: true
+    focusPolicy: Qt.TabFocus
+    scale: (expanded ? 1 + Math.min(0.025, 10 / Math.max(width, 1)) : 1) - (down ? 0.012 : 0)
+    z: expanded ? 2 : 1
+
+    Behavior on scale {
+        enabled: !Appearance.performanceMode
+        Bounce {}
+    }
+
+    leftPadding: 14
+    rightPadding: 14
 
     function openTrackMenu() {
         const appWindow = root.Window.window;
-        if (appWindow) {
+        if (appWindow && root.model) {
             const position = root.mapToItem(appWindow.contentItem, root.width - 36, root.height);
-            backend.requestTrackMenu(model.id, model.title, model.available, position.x, position.y);
+            backend.requestTrackMenu(root.model.id, root.model.title, root.model.available, position.x, position.y);
         }
     }
 
-    HoverHandler {
-        id: rowHover
+    onClicked: {
+        if (!root.model) return;
+        if (root.isCurrent) backend.toggle();
+        else if (root.queueView) backend.trackAction(root.model.id, 3);
+        else backend.play(root.index);
     }
 
-    MouseArea {
+    background: Rectangle {
         anchors.fill: parent
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
-        cursorShape: Qt.PointingHandCursor
-        onClicked: (mouse) => {
-            if (mouse.button === Qt.RightButton) {
-                root.openTrackMenu();
-                return;
-            }
-            if (root.isCurrent) backend.toggle();
-            else if (root.queueView) backend.trackAction(model.id, 3);
-            else backend.play(model.index);
-        }
-    }
-
-    Rectangle {
-        id: bg
-        anchors.fill: parent
-        anchors.leftMargin: 4
-        anchors.rightMargin: 4
+        anchors.leftMargin: 6
+        anchors.rightMargin: 6
         radius: Appearance.rounding.small
-        z: -1
-        antialiasing: true
-        color: Appearance.colors.primary
-        opacity: root.isCurrent ? 0.14 : 0
+        color: root.isCurrent ? Qt.alpha(Appearance.colors.primary, 0.07)
+             : root.hovered ? Qt.alpha(Appearance.colors.onSurface, 0.05)
+             : Qt.alpha(Appearance.colors.onSurface, 0)
 
-        border.width: root.isCurrent ? 1 : 0
-        border.color: Qt.rgba(Appearance.colors.primary.r, Appearance.colors.primary.g, Appearance.colors.primary.b, 0.25)
-
-        Behavior on opacity {
-            NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+        Behavior on color {
+            ColorAnimation { duration: Appearance.duration(120) }
         }
     }
 
-    Rectangle {
-        anchors.fill: parent
-        anchors.leftMargin: 4
-        anchors.rightMargin: 4
-        radius: Appearance.rounding.small
-        z: -1
-        antialiasing: true
-        color: root.isCurrent ? Appearance.colors.primary : Appearance.colors.surfaceContainerHigh
-        opacity: root.isHovered ? (root.isCurrent ? 0.08 : 1) : 0
-        Behavior on opacity {
-            NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
-        }
-    }
-
-    RowLayout {
-        anchors.fill: parent
-        anchors.leftMargin: 14
-        anchors.rightMargin: 14
-        spacing: 12
-
-        // Left: Index or Play icon or Equalizer
+    contentItem: Item {
         Item {
-            Layout.preferredWidth: 32
-            Layout.preferredHeight: 32
-            Layout.alignment: Qt.AlignVCenter
+            id: number
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: root.showsNumber ? 24 : 0
+            visible: root.showsNumber
+            height: parent.height
 
-            // Equalizer when playing
-            EqualizerBars {
-                anchors.centerIn: parent
-                active: root.isPlaying && visible
-                opacity: root.isCurrent && root.isPlaying && !root.isHovered ? 1 : 0
-                visible: opacity > 0
-                Behavior on opacity { NumberAnimation { duration: 120 } }
+            Loader {
+                id: cookieHolder
+                property bool showing: false
+                Binding {
+                    target: cookieHolder
+                    property: "showing"
+                    value: (cookieHolder.item as Item)?.visible ?? false
+                    delayed: true
+                }
+                anchors.centerIn: playingMark
+                active: root.isCurrent || showing
+                sourceComponent: MaterialShape {
+                    id: cookie
+                    property bool arrived: false
+                    width: 24
+                    height: 24
+                    Reveal.shown: arrived && root.isCurrent && !root.hovered
+                    shape: "cookie6"
+                    color: Appearance.colors.primaryContainer
+                    spinRate: 30
+                    scale: visible ? 1 + 0.12 * Math.sin(UiState.spin * 7) : 1
+                    Component.onCompleted: Qt.callLater(() => {
+                        if (cookie) cookie.arrived = true;
+                    })
+                }
             }
 
-            // Track index number
-            Text {
-                anchors.centerIn: parent
-                text: String(model.index + 1)
-                color: root.isCurrent ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
-                font.pixelSize: Appearance.fontSize.smaller
-                font.weight: Font.Medium
-                opacity: (!root.isCurrent || !root.isPlaying) && !root.isHovered ? 1 : 0
-                visible: opacity > 0
-                Behavior on opacity { NumberAnimation { duration: 120 } }
-            }
-
-            // Play / Pause icon on hover
             MaterialSymbol {
-                anchors.centerIn: parent
-                text: root.isPlaying ? "pause" : "play_arrow"
-                iconSize: 20
-                color: Appearance.colors.onSurface
-                opacity: root.isHovered ? 1 : 0
-                visible: opacity > 0
-                Behavior on opacity { NumberAnimation { duration: 120 } }
+                id: playingMark
+                anchors.right: parent.right
+                anchors.rightMargin: -3
+                anchors.verticalCenter: parent.verticalCenter
+                Reveal.shown: root.hovered || root.isCurrent
+                text: root.hovered ? (root.isPlaying ? "pause" : "play_arrow") : "volume_up"
+                iconSize: 16
+                fill: 1
+                color: root.hovered ? Appearance.colors.onSurface : Appearance.colors.onPrimaryContainer
+            }
+
+            StyledText {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                Reveal.shown: !root.hovered && !root.isCurrent
+                text: root.index + 1
+                tabularNumbers: true
+                font.pixelSize: Appearance.fontSize.smaller
+                color: Appearance.colors.onSurfaceVariant
             }
         }
 
-        // Thumbnail cover with true rounded corners
-        RoundedImage {
-            Layout.preferredWidth: 40
-            Layout.preferredHeight: 40
-            Layout.alignment: Qt.AlignVCenter
-            radius: Appearance.rounding.verySmall
-            source: model.hasCover ? model.coverUrl : ""
-            fallbackSymbol: "music_note"
-            fallbackIconSize: 18
-            sourceSize.width: 80
-            sourceSize.height: 80
+        Item {
+            id: artwork
+            anchors.left: number.right
+            anchors.leftMargin: root.showsNumber ? 12 : 0
+            anchors.verticalCenter: parent.verticalCenter
+            width: 44
+            height: 44
+            opacity: (root.model?.available ?? true) ? 1 : 0.38
+
+            ArtworkImage {
+                anchors.fill: parent
+                radius: 6
+                source: (root.model?.hasCover ?? false) ? (root.model?.coverUrl ?? "") : ""
+                placeholderSymbol: "music_note"
+                fallbackKey: root.model?.title ?? ""
+            }
+
+            Loader {
+                id: meterHolder
+                property bool showing: false
+                Binding {
+                    target: meterHolder
+                    property: "showing"
+                    value: (meterHolder.item as Item)?.visible ?? false
+                    delayed: true
+                }
+                anchors.fill: parent
+                active: (root.isCurrent && appSettings.visualizersEnabled) || showing
+                sourceComponent: Rectangle {
+                    id: shade
+                    property bool arrived: false
+                    Reveal.shown: arrived && root.isCurrent && appSettings.visualizersEnabled
+                    radius: 6
+                    color: Qt.rgba(0, 0, 0, 0.34)
+                    Component.onCompleted: Qt.callLater(() => {
+                        if (shade) shade.arrived = true;
+                    })
+
+                    CompactMeter {
+                        anchors.centerIn: parent
+                        width: 26
+                        height: 22
+                        active: root.isPlaying
+                    }
+                }
+            }
         }
 
-        // Title and Artists
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.alignment: Qt.AlignVCenter
+        Column {
+            anchors.left: artwork.right
+            anchors.leftMargin: 12
+            anchors.right: albumText.visible ? albumText.left : actions.left
+            anchors.rightMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
             spacing: 2
+            opacity: (root.model?.available ?? true) ? 1 : 0.38
 
-            Text {
-                text: model.title
-                color: root.isCurrent ? Appearance.colors.primary : Appearance.colors.onSurface
-                font.pixelSize: Appearance.fontSize.small
-                font.weight: Font.Medium
+            StyledText {
+                width: parent.width
+                text: root.model?.title ?? ""
                 elide: Text.ElideRight
-                Layout.fillWidth: true
-                font.underline: titleHover.hovered && model.hasAlbum
+                font.pixelSize: Appearance.fontSize.small
+                font.weight: root.isCurrent ? Font.DemiBold : Font.Normal
+                color: root.isCurrent ? Appearance.colors.primary : Appearance.colors.onSurface
+                font.underline: titleHover.hovered && (root.model?.hasAlbum ?? false)
+
                 HoverHandler {
                     id: titleHover
-                    cursorShape: model.hasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    cursorShape: (root.model?.hasAlbum ?? false) ? Qt.PointingHandCursor : Qt.ArrowCursor
                 }
                 MouseArea {
                     anchors.fill: parent
-                    enabled: model.hasAlbum
+                    enabled: root.model?.hasAlbum ?? false
                     onClicked: {
-                        if (root.queueView) backend.trackAction(model.id, 6);
-                        else backend.openTrackAlbum(model.index);
+                        if (!root.model) return;
+                        if (root.queueView) backend.trackAction(root.model.id, 6);
+                        else backend.openTrackAlbum(root.index);
                     }
                 }
             }
 
-            Text {
-                text: model.artists
-                color: Appearance.colors.onSurfaceVariant
-                font.pixelSize: Appearance.fontSize.smaller
+            StyledText {
+                width: parent.width
+                text: root.model?.artists ?? ""
                 elide: Text.ElideRight
-                Layout.fillWidth: true
-                font.underline: artistHover.hovered && model.hasArtist
-                HoverHandler { id: artistHover; cursorShape: model.hasArtist ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                font.pixelSize: Appearance.fontSize.smaller
+                color: Appearance.colors.onSurfaceVariant
+                font.underline: artistHover.hovered && (root.model?.hasArtist ?? false)
+
+                HoverHandler {
+                    id: artistHover
+                    cursorShape: (root.model?.hasArtist ?? false) ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
                 MouseArea {
                     anchors.fill: parent
-                    enabled: model.hasArtist
+                    enabled: root.model?.hasArtist ?? false
                     onClicked: {
-                        if (root.queueView) backend.trackAction(model.id, 5);
-                        else backend.openTrackArtist(model.index);
+                        if (!root.model) return;
+                        if (root.queueView) backend.trackAction(root.model.id, 5);
+                        else backend.openTrackArtist(root.index);
                     }
                 }
             }
         }
 
-        // Album name (hidden on narrow widths)
-        Text {
-            text: model.album
-            color: Appearance.colors.onSurfaceVariant
-            font.pixelSize: Appearance.fontSize.smaller
+        StyledText {
+            id: albumText
+            anchors.right: actions.left
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            width: visible ? Math.min(160, Math.max(90, root.width * 0.2)) : 0
+            visible: root.width > 580 && !root.queueView && (root.model?.album ?? "").length > 0
+            text: root.model?.album ?? ""
             elide: Text.ElideRight
-            Layout.preferredWidth: 160
-            Layout.alignment: Qt.AlignVCenter
-            visible: parent.width > 500
-        }
-
-        // Like button
-        Row {
-            visible: root.queueView
-            IconButton { symbol: "expand_more"; rotation: 180; size: 28; enabled: model.index > 0; onClicked: backend.feature({action: "queue", operation: "up", index: model.index, id: model.id}) }
-            IconButton { symbol: "expand_more"; size: 28; enabled: model.index < backend.queue.count - 1; onClicked: backend.feature({action: "queue", operation: "down", index: model.index, id: model.id}) }
-            IconButton { symbol: "close"; size: 28; enabled: !root.isCurrent; onClicked: backend.feature({action: "queue", operation: "remove", index: model.index, id: model.id}) }
-        }
-
-        MaterialSymbol {
-            Layout.alignment: Qt.AlignVCenter
-            text: "download_done"
-            iconSize: 16
-            color: Appearance.colors.primary
-            visible: model.downloaded
-        }
-
-        IconButton {
-            Layout.alignment: Qt.AlignVCenter
-            symbol: model.liked ? "favorite" : "favorite_border"
-            size: 32
-            iconSize: 18
-            iconColor: model.liked ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
-            activeIconColor: Appearance.colors.primary
-            toggled: model.liked
-            heartBurst: true
-            opacity: (model.liked || root.isHovered) ? 1.0 : 0.0
-            enabled: model.liked || root.isHovered
-            Behavior on opacity { NumberAnimation { duration: 120 } }
-            onClicked: {
-                if (root.queueView) backend.trackAction(model.id, 4);
-                else backend.toggleLike(model.index);
-            }
-        }
-
-        // Duration
-        Text {
-            text: model.duration
-            color: Appearance.colors.onSurfaceVariant
             font.pixelSize: Appearance.fontSize.smaller
-            font.family: "monospace"
-            Layout.preferredWidth: 44
-            Layout.alignment: Qt.AlignVCenter
-            horizontalAlignment: Text.AlignRight
+            color: Appearance.colors.onSurfaceVariant
         }
 
-        IconButton {
-            symbol: "more_horiz"
-            size: 32
-            iconSize: 20
-            tooltip: "Действия с треком"
-            onClicked: root.openTrackMenu()
+        StyledText {
+            id: duration
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: 44
+            horizontalAlignment: Text.AlignRight
+            text: root.model?.duration ?? ""
+            tabularNumbers: true
+            font.pixelSize: Appearance.fontSize.smaller
+            color: Appearance.colors.onSurfaceVariant
+        }
+
+        Row {
+            id: actions
+            anchors.right: duration.left
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            layoutDirection: Qt.RightToLeft
+            spacing: 2
+
+            move: Transition {
+                enabled: !Appearance.performanceMode
+                NumberAnimation { properties: "x"; duration: 240; easing.type: Easing.OutBack; easing.overshoot: 0.8 }
+            }
+
+            IconButton {
+                anchors.verticalCenter: parent.verticalCenter
+                symbol: "more_horiz"
+                size: 28
+                iconSize: 18
+                tooltip: "Действия с треком"
+                onClicked: root.openTrackMenu()
+            }
+
+            IconButton {
+                id: likeButton
+                anchors.verticalCenter: parent.verticalCenter
+                symbol: (root.model?.liked ?? false) ? "favorite" : "favorite_border"
+                toggled: root.model?.liked ?? false
+                size: 28
+                iconSize: 18
+                iconColor: (root.model?.liked ?? false) ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
+                opacity: ((root.model?.liked ?? false) || root.hovered) ? 1.0 : 0.0
+                enabled: (root.model?.liked ?? false) || root.hovered
+                tooltip: (root.model?.liked ?? false) ? "Убрать из Мне нравится" : "Добавить в Мне нравится"
+
+                onClicked: {
+                    if (!root.model) return;
+                    if (!root.model.liked) {
+                        UiState.burst(likeButton, "hearts");
+                        if (!Appearance.performanceMode) likePop.restart();
+                    }
+                    if (root.queueView) backend.trackAction(root.model.id, 4);
+                    else backend.toggleLike(root.index);
+                }
+
+                MaterialShape {
+                    id: likeBurst
+                    anchors.centerIn: parent
+                    width: 40
+                    height: 40
+                    z: -2
+                    opacity: 0
+                    shape: "sunny"
+                    color: Appearance.colors.primaryContainer
+                }
+
+                ParallelAnimation {
+                    id: likePop
+                    NumberAnimation { target: likeBurst; property: "scale"; from: 0.3; to: 1.15; duration: 420; easing.type: Easing.OutBack; easing.overshoot: 2 }
+                    NumberAnimation { target: likeBurst; property: "spinAngle"; from: -40; to: 40; duration: 520; easing.type: Easing.OutCubic }
+                    SequentialAnimation {
+                        NumberAnimation { target: likeBurst; property: "opacity"; from: 0; to: 1; duration: 90 }
+                        PauseAnimation { duration: 200 }
+                        NumberAnimation { target: likeBurst; property: "opacity"; to: 0; duration: 260; easing.type: Easing.InCubic }
+                    }
+                }
+            }
+
+            MaterialSymbol {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "download_done"
+                iconSize: 16
+                color: Appearance.colors.primary
+                visible: root.model?.downloaded ?? false
+            }
+
+            Row {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.queueView
+                spacing: 0
+                IconButton {
+                    symbol: "expand_more"; rotation: 180; size: 26; iconSize: 16
+                    enabled: root.index > 0
+                    onClicked: if (root.model) backend.feature({action: "queue", operation: "up", index: root.index, id: root.model.id})
+                }
+                IconButton {
+                    symbol: "expand_more"; size: 26; iconSize: 16
+                    enabled: root.index < backend.queue.count - 1
+                    onClicked: if (root.model) backend.feature({action: "queue", operation: "down", index: root.index, id: root.model.id})
+                }
+                IconButton {
+                    symbol: "close"; size: 26; iconSize: 16
+                    enabled: !root.isCurrent
+                    onClicked: if (root.model) backend.feature({action: "queue", operation: "remove", index: root.index, id: root.model.id})
+                }
+            }
         }
     }
 
-
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        onTapped: root.openTrackMenu()
+    }
 }

@@ -1,37 +1,45 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Window
-import QtQuick.Layouts
+import QtQuick.Effects
 import ymusic.ui
 
 Item {
     id: root
 
+    property MaterialScheme scheme: Appearance.colors
     signal immersiveRequested()
 
-    implicitHeight: 72
-    implicitWidth: 800
+    readonly property bool twoRow: width < 560
+    readonly property bool compact: width < 680
+    readonly property bool tiny: width < 420
+    readonly property real buttonSize: tiny ? 28 : (compact ? 30 : 32)
+    readonly property real innerGap: tiny ? 6 : (compact ? 10 : 14)
+    readonly property bool titleFits: twoRow || (nowPlaying.width - artwork.width - 8 >= 48)
+    readonly property bool showsMeter: !compact && appSettings.visualizersEnabled && appSettings.playerBarVisualizer && backend.hasTrack
+    property bool progressExpanded: seek.expanded || seekTwoRow.expanded
 
-    // Elevated surface capsule matching Swiftify
+    implicitHeight: twoRow ? 98 : 66
+    opacity: Window.active ? 1 : 0.88
+
+    Behavior on opacity {
+        NumberAnimation { duration: Appearance.duration(160); easing.type: Easing.OutCubic }
+    }
+
+    SoftShadow {
+        anchors.fill: surface
+        radius: surface.radius
+        blur: 18
+        offset: Qt.vector2d(0, 6)
+        color: Qt.rgba(0, 0, 0, 0.22)
+    }
+
     Rectangle {
         id: surface
         anchors.fill: parent
-        radius: Appearance.rounding.large
-        color: Appearance.colors.surfaceContainerHigh
+        radius: 20
+        color: root.scheme.surfaceContainerHigh
         border.width: 1
-        border.color: Qt.rgba(Appearance.colors.outlineVariant.r,
-                              Appearance.colors.outlineVariant.g,
-                              Appearance.colors.outlineVariant.b, 0.4)
-
-        // Drop shadow / soft ambient blur
-        Rectangle {
-            anchors.centerIn: parent
-            width: parent.width + 4
-            height: parent.height + 6
-            radius: parent.radius
-            z: -1
-            color: "#000000"
-            opacity: 0.28
-        }
+        border.color: Qt.rgba(root.scheme.outlineVariant.r, root.scheme.outlineVariant.g, root.scheme.outlineVariant.b, 0.4)
 
         MouseArea {
             anchors.fill: parent
@@ -39,283 +47,479 @@ Item {
             hoverEnabled: true
             onWheel: (wheel) => {
                 if (wheel.angleDelta.y > 0) {
-                    backend.setVolume(Math.min(1.0, backend.volume + 0.05));
+                    backend.setVolume(Math.min(1.0, backend.volume + 0.05))
                 } else if (wheel.angleDelta.y < 0) {
-                    backend.setVolume(Math.max(0.0, backend.volume - 0.05));
+                    backend.setVolume(Math.max(0.0, backend.volume - 0.05))
                 }
+                wheel.accepted = true
             }
         }
     }
 
-    RowLayout {
-        anchors.fill: parent
-        anchors.leftMargin: 16
-        anchors.rightMargin: 16
-        spacing: 12
+    // Main top bar row
+    Item {
+        id: topRow
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: root.twoRow ? 62 : parent.height
 
-        // Left: Transport buttons
         Row {
-            Layout.alignment: Qt.AlignVCenter
-            spacing: 4
+            id: transport
+            anchors.left: parent.left
+            anchors.leftMargin: root.compact ? 8 : 12
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: root.tiny ? 0 : 4
 
             TransportButton {
+                visible: !root.twoRow
                 anchors.verticalCenter: parent.verticalCenter
-                symbol: "shuffle"
+                scheme: root.scheme
                 effect: TransportButton.Bounce
-                size: 34
-                iconSize: 18
+                symbol: "shuffle"
+                toggledShape: "clover4"
+                size: root.buttonSize
+                iconSize: 19
                 toggled: backend.shuffle
+                fillWhenToggled: false
+                tooltip: backend.shuffle ? qsTr("Выключить перемешивание") : qsTr("Перемешивать")
                 onClicked: backend.toggleShuffle()
             }
 
             TransportButton {
                 anchors.verticalCenter: parent.verticalCenter
-                symbol: "skip_previous"
+                scheme: root.scheme
                 effect: TransportButton.NudgeLeft
-                size: 34
-                iconSize: 22
+                symbol: "skip_previous"
+                hoverShape: "arrow"
+                hoverAngle: -90
+                size: root.buttonSize
+                iconSize: root.tiny ? 20 : 22
+                fillWhenToggled: false
+                alwaysFilled: true
+                enabled: backend.hasTrack
+                tooltip: qsTr("Предыдущий трек")
                 onClicked: backend.prev()
             }
 
-            PlayHeroButton {
+            PlayButton {
                 anchors.verticalCenter: parent.verticalCenter
-                size: 44
+                implicitWidth: root.tiny ? 36 : (root.compact ? 40 : 44)
+                implicitHeight: implicitWidth
+                enabled: backend.hasTrack
                 playing: backend.playing
+                color: root.scheme.primary
+                hoverColor: root.scheme.primaryHover
+                iconColor: root.scheme.onPrimary
                 onClicked: backend.toggle()
             }
 
             TransportButton {
                 anchors.verticalCenter: parent.verticalCenter
-                symbol: "skip_next"
+                scheme: root.scheme
                 effect: TransportButton.NudgeRight
-                size: 34
-                iconSize: 22
+                symbol: "skip_next"
+                hoverShape: "arrow"
+                hoverAngle: 90
+                size: root.buttonSize
+                iconSize: root.tiny ? 20 : 22
+                alwaysFilled: true
+                enabled: backend.hasTrack
+                tooltip: qsTr("Следующий трек")
                 onClicked: backend.next()
             }
 
             TransportButton {
+                visible: !root.twoRow
                 anchors.verticalCenter: parent.verticalCenter
-                symbol: backend.repeatMode === 2 ? "repeat_one" : "repeat"
+                scheme: root.scheme
                 effect: TransportButton.Bounce
-                size: 34
-                iconSize: 18
+                symbol: backend.repeatMode === 2 ? "repeat_one" : "repeat"
+                toggledShape: backend.repeatMode === 2 ? "cookie4" : "cookie6"
+                size: root.buttonSize
+                iconSize: 19
                 toggled: backend.repeatMode !== 0
+                fillWhenToggled: false
+                enabled: backend.hasTrack
+                tooltip: backend.repeatMode === 2 ? qsTr("Повтор: трек") : (backend.repeatMode === 1 ? qsTr("Повтор: всё") : qsTr("Повтор выкл."))
                 onClicked: backend.toggleRepeat()
             }
         }
 
-        // Center: Track Cover + Info + Seek bar
         Item {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            id: nowPlaying
+            anchors.left: transport.right
+            anchors.leftMargin: root.innerGap
+            anchors.right: utilities.left
+            anchors.rightMargin: root.innerGap
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
 
-            RowLayout {
-                anchors.fill: parent
-                spacing: 12
+            Item {
+                id: artwork
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenterOffset: root.twoRow ? 0 : -4
+                width: root.tiny ? 34 : 40
+                height: width
+                z: 2
+                scale: artHover.hovered ? 1.12 : 1
 
-                // Artwork with hover zoom and pop spring
-                Item {
-                    id: artContainer
-                    Layout.preferredWidth: 44
-                    Layout.preferredHeight: 44
-                    Layout.alignment: Qt.AlignVCenter
+                transform: Scale {
+                    id: pop
+                    origin.x: artwork.width / 2
+                    origin.y: artwork.height / 2
+                }
 
-                    scale: artHover.containsMouse ? 1.12 : 1.0
-                    Behavior on scale {
-                        NumberAnimation {
-                            duration: 220
-                            easing.type: Easing.OutBack
-                            easing.overshoot: 1.8
-                        }
+                Connections {
+                    target: backend
+                    function onTrackInstanceIdChanged() {
+                        if (!Appearance.performanceMode) popIn.restart()
                     }
-
-                    transform: Scale {
-                        id: popScale
-                        origin.x: 22
-                        origin.y: 22
-                    }
-
-                    Connections {
-                        target: backend
-                        function onNowIdChanged() {
-                            popAnim.restart();
-                        }
-                    }
-
+                }
+                NumberAnimation {
+                    id: popIn
+                    target: pop
+                    properties: "xScale,yScale"
+                    from: 0.7
+                    to: 1
+                    duration: 560
+                    easing.type: Easing.OutBack
+                    easing.overshoot: 2.4
+                }
+                Behavior on scale {
                     NumberAnimation {
-                        id: popAnim
-                        target: popScale
-                        properties: "xScale,yScale"
-                        from: 0.70
-                        to: 1.0
-                        duration: 420
-                        easing.type: Easing.OutBack
-                        easing.overshoot: 2.2
-                    }
-
-                    RoundedImage {
-                        anchors.fill: parent
-                        radius: Appearance.rounding.small
-                        source: backend.hasCover ? backend.nowCover : ""
-                        fallbackSymbol: "music_note"
-                        fallbackIconSize: 20
-                        sourceSize.width: 100
-                        sourceSize.height: 100
-
-                        // Hover overlay icon indicating expand
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: Appearance.rounding.small
-                            color: Qt.rgba(0, 0, 0, 0.35)
-                            opacity: artHover.containsMouse ? 1.0 : 0.0
-                            Behavior on opacity { NumberAnimation { duration: 140 } }
-
-                            MaterialSymbol {
-                                anchors.centerIn: parent
-                                text: "open_in_full"
-                                iconSize: 18
-                                color: "white"
-                            }
-                        }
-                    }
-
-                    MouseArea {
-                        id: artHover
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.immersiveRequested()
+                        duration: Appearance.motion(artHover.hovered ? 220 : 340)
+                        easing.type: artHover.hovered ? Easing.OutBack : Easing.OutCubic
                     }
                 }
 
-                // Title + Seek slider + Times
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignVCenter
-                    spacing: 3
+                SoftShadow {
+                    anchors.fill: parent
+                    radius: Appearance.sizes.smallArtworkRadius
+                    blur: 7
+                    offset: Qt.vector2d(0, 3)
+                    color: Qt.rgba(0, 0, 0, artHover.hovered ? 0.22 : 0)
+                }
 
-                    // Title + Artists
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
+                ArtworkImage {
+                    anchors.fill: parent
+                    radius: Appearance.sizes.smallArtworkRadius
+                    source: backend.hasCover ? backend.nowCover : ""
+                    crossfade: true
+                    fallbackKey: backend.nowId.length > 0 ? backend.nowId : backend.nowTitle
+                }
 
-                        Text {
-                            text: backend.hasTrack ? backend.nowTitle : "Ничего не воспроизводится"
-                            color: Appearance.colors.onSurface
-                            font.pixelSize: Appearance.fontSize.small
-                            font.weight: Font.DemiBold
-                            elide: Text.ElideRight
-                            Layout.maximumWidth: 280
-                            font.underline: playerTitleHover.hovered && backend.nowHasAlbum
-                            HoverHandler {
-                                id: playerTitleHover
-                                cursorShape: backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Appearance.sizes.smallArtworkRadius
+                    color: Qt.rgba(0, 0, 0, artHover.hovered && backend.hasTrack ? 0.28 : 0)
+
+                    Behavior on color {
+                        ColorAnimation { duration: Appearance.duration(160) }
+                    }
+
+                    MaterialSymbol {
+                        anchors.centerIn: parent
+                        text: "open_in_full"
+                        iconSize: 16
+                        weight: 600
+                        color: "white"
+                        opacity: artHover.hovered && backend.hasTrack ? 1 : 0
+                    }
+                }
+
+                HoverHandler {
+                    id: artHover
+                    cursorShape: backend.hasTrack ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+                TapHandler {
+                    acceptedButtons: Qt.LeftButton
+                    onTapped: if (backend.hasTrack) root.immersiveRequested()
+                }
+            }
+
+            Item {
+                id: info
+                visible: root.titleFits
+                clip: true
+                property real blurAmount: !root.twoRow && seek.expanded ? 1 : 0
+
+                Behavior on blurAmount {
+                    NumberAnimation { duration: Appearance.duration(260); easing.type: Easing.OutCubic }
+                }
+
+                anchors.left: artwork.right
+                anchors.leftMargin: 8
+                anchors.right: root.showsMeter ? meter.left : parent.right
+                anchors.rightMargin: root.showsMeter ? 9 : 0
+                anchors.top: parent.top
+                anchors.topMargin: root.twoRow ? 4 : 7
+                anchors.bottom: root.twoRow ? parent.bottom : seek.top
+                anchors.bottomMargin: root.twoRow ? 4 : 0
+                layer.enabled: blurAmount > 0.001
+                layer.effect: MultiEffect {
+                    blurEnabled: true
+                    blur: info.blurAmount
+                    blurMax: 40
+                    saturation: -0.2 * info.blurAmount
+                }
+
+                Column {
+                    anchors.left: parent.left
+                    anchors.right: more.visible ? more.left : parent.right
+                    anchors.rightMargin: more.visible ? 4 : 0
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 1
+
+                    TitleText {
+                        width: parent.width
+                        text: backend.hasTrack ? backend.nowTitle : qsTr("Ничего не играет")
+                        elide: Text.ElideRight
+                        animateChange: true
+                        changeDistanceX: 6
+                        changeDistanceY: 0
+                        font.pixelSize: Appearance.fontSize.small
+                        color: root.scheme.onSurface
+                        font.underline: titleHover.hovered && backend.nowHasAlbum
+
+                        HoverHandler {
+                            id: titleHover
+                            cursorShape: backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        }
+                        TapHandler {
+                            enabled: backend.nowHasAlbum
+                            onTapped: backend.openNowAlbum()
+                        }
+
+                        ShaderEffect {
+                            id: scan
+
+                            property color color: root.scheme.primary
+                            property real halfWidth: 0.22
+                            property real edge: 0.18
+                            property real position: -halfWidth
+
+                            anchors.top: parent.bottom
+                            anchors.topMargin: 1
+                            width: parent.width
+                            height: 2
+                            opacity: backend.buffering ? 1 : 0
+                            visible: opacity > 0
+                            fragmentShader: "qrc:/shaders/gleam.frag.qsb"
+
+                            Behavior on opacity {
+                                NumberAnimation { duration: Appearance.duration(260); easing.type: Easing.InOutSine }
                             }
-                            TapHandler { enabled: backend.nowHasAlbum; onTapped: backend.openNowAlbum() }
-                        }
 
-                        Text {
-                            text: "•"
-                            color: Appearance.colors.outline
-                            font.pixelSize: Appearance.fontSize.smallest
-                            visible: backend.hasTrack && backend.nowArtists.length > 0
-                        }
-
-                        Text {
-                            text: backend.nowArtists
-                            color: Appearance.colors.onSurfaceVariant
-                            font.pixelSize: Appearance.fontSize.smaller
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
-                            visible: backend.hasTrack
-                            font.underline: playerArtistHover.hovered && backend.nowHasArtist
-                            HoverHandler { id: playerArtistHover; cursorShape: backend.nowHasArtist ? Qt.PointingHandCursor : Qt.ArrowCursor }
-                            TapHandler { enabled: backend.nowHasArtist; onTapped: backend.openNowArtist() }
-                        }
-
-                        // Compact dancing visualizer meter (Swiftify CompactMeter)
-                        EqualizerBars {
-                            Layout.alignment: Qt.AlignVCenter
-                            active: backend.playing
-                            visible: backend.playing && backend.hasTrack
+                            NumberAnimation on position {
+                                running: scan.visible && !Appearance.reduceMotion
+                                from: -scan.halfWidth
+                                to: 1 + scan.halfWidth
+                                duration: 1300
+                                loops: Animation.Infinite
+                            }
                         }
                     }
 
-                    // Seek Slider + Timestamps
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        RollingText {
-                            text: backend.positionText
-                            color: Appearance.colors.onSurfaceVariant
-                            pixelSize: Appearance.fontSize.smallest
-                        }
-
-                        StyledSlider {
-                            Layout.fillWidth: true
-                            value: backend.progress
-                            animatedWave: true
-                            playing: backend.playing
-                            trackHeight: 3
-                            activeTrackHeight: 5
-                            onUserSeek: (fraction) => backend.seek(fraction)
-                        }
-
-                        RollingText {
-                            text: backend.durationText
-                            color: Appearance.colors.onSurfaceVariant
-                            pixelSize: Appearance.fontSize.smallest
-                        }
+                    ArtistLinks {
+                        width: parent.width
+                        links: backend.nowArtistLinks
+                        fallbackText: backend.hasTrack ? backend.nowArtists : qsTr("Выберите трек")
+                        fallbackClickable: backend.hasTrack && backend.nowHasArtist
+                        clickable: backend.hasTrack
+                        color: root.scheme.onSurfaceVariant
+                        font.pixelSize: Appearance.fontSize.smaller
                     }
+                }
+
+                IconButton {
+                    id: more
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    Reveal.shown: backend.hasTrack && !root.compact
+                    scheme: root.scheme
+                    symbol: "more_horiz"
+                    size: 28
+                    iconSize: 18
+                    tooltip: qsTr("Действия с треком")
+                    onClicked: {
+                        const appWindow = root.Window.window
+                        if (!appWindow) return
+                        const pt = more.mapToItem(appWindow.contentItem, 0, 0)
+                        backend.requestTrackMenu(backend.nowId, backend.nowTitle, true, pt.x, pt.y)
+                    }
+                }
+            }
+
+            CompactMeter {
+                id: meter
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: 30
+                height: 34
+                Reveal.shown: root.showsMeter
+                active: backend.playing
+            }
+
+            SeekBar {
+                id: seek
+                visible: !root.twoRow
+
+                property real lift: seek.expanded ? -5 : 0
+                Behavior on lift {
+                    enabled: !Appearance.performanceMode
+                    Bounce {}
+                }
+                transform: Translate { y: seek.lift }
+
+                anchors.left: root.titleFits ? artwork.right : parent.left
+                anchors.leftMargin: root.titleFits ? 8 : 0
+                anchors.right: parent.right
+                anchors.rightMargin: root.showsMeter ? 39 : 0
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 2
+                height: 18
+                scheme: root.scheme
+            }
+
+            Row {
+                visible: !root.twoRow && opacity > 0
+                anchors.left: seek.left
+                anchors.right: seek.right
+                anchors.bottom: seek.top
+                anchors.bottomMargin: -2
+                transform: Translate { y: seek.lift }
+                opacity: seek.expanded ? 1 : 0
+
+                Behavior on opacity {
+                    NumberAnimation { duration: Appearance.duration(160) }
+                }
+
+                StyledText {
+                    width: parent.width / 2
+                    text: Format.playbackTime(seek.displayPositionMs)
+                    tabularNumbers: true
+                    font.pixelSize: Appearance.fontSize.smallest
+                    font.weight: Font.Medium
+                    color: root.scheme.onSurface
+                }
+                StyledText {
+                    width: parent.width / 2
+                    horizontalAlignment: Text.AlignRight
+                    text: "−" + Format.playbackTime(Math.max(seek.durationMs - seek.displayPositionMs, 0))
+                    tabularNumbers: true
+                    font.pixelSize: Appearance.fontSize.smallest
+                    font.weight: Font.Medium
+                    color: root.scheme.onSurface
                 }
             }
         }
 
-        // Right: Utilities (Like, Volume Pill, Immersive)
         Row {
-            Layout.alignment: Qt.AlignVCenter
-            spacing: 6
+            id: utilities
+            anchors.right: parent.right
+            anchors.rightMargin: root.compact ? 8 : 12
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: root.tiny ? 0 : 4
+            z: 3
 
             IconButton {
                 anchors.verticalCenter: parent.verticalCenter
-                symbol: backend.nowLiked ? "favorite" : "favorite_border"
-                size: 34
-                iconSize: 20
-                iconColor: backend.nowLiked ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
-                activeIconColor: Appearance.colors.primary
+                scheme: root.scheme
+                symbol: "favorite"
                 toggled: backend.nowLiked
-                heartBurst: true
+                fillWhenToggled: true
+                burst: backend.nowLiked ? "" : "hearts"
+                size: root.buttonSize
+                iconSize: 20
+                tooltip: backend.nowLiked ? qsTr("Убрать из «Мне нравится»") : qsTr("Добавить в «Мне нравится»")
+                enabled: backend.hasTrack
                 onClicked: backend.toggleNowLike()
             }
 
-            VolumeControl {
-                anchors.verticalCenter: parent.verticalCenter
-            }
-
             IconButton {
-                id: trackActions
+                visible: !root.tiny
                 anchors.verticalCenter: parent.verticalCenter
-                symbol: "more_horiz"
-                size: 34
+                scheme: root.scheme
+                symbol: "lyrics"
+                size: root.buttonSize
                 iconSize: 20
-                enabled: backend.hasTrack
-                tooltip: "Действия с текущим треком"
-                onClicked: {
-                    const appWindow = root.Window.window;
-                    if (!appWindow) return;
-                    const point = trackActions.mapToItem(appWindow.contentItem, 0, 0);
-                    backend.requestTrackMenu(backend.nowId, backend.nowTitle, true, point.x, point.y);
-                }
+                toggled: UiState.showingLyrics
+                tooltip: qsTr("Текст трека")
+                onClicked: UiState.toggleLyricsPanel()
+            }
+
+            IconButton {
+                visible: !root.tiny
+                anchors.verticalCenter: parent.verticalCenter
+                scheme: root.scheme
+                symbol: "queue_music"
+                size: root.buttonSize
+                iconSize: 20
+                toggled: UiState.showingQueue
+                tooltip: qsTr("Очередь")
+                onClicked: UiState.toggleQueuePanel()
+            }
+
+            VolumeControl {
+                visible: !root.twoRow
+                anchors.verticalCenter: parent.verticalCenter
+                scheme: root.scheme
             }
 
             IconButton {
                 anchors.verticalCenter: parent.verticalCenter
+                scheme: root.scheme
                 symbol: "open_in_full"
-                size: 34
+                size: root.buttonSize
                 iconSize: 18
+                tooltip: qsTr("Иммерсивный плеер")
                 onClicked: root.immersiveRequested()
             }
+        }
+    }
+
+    // Two-row seek strip when window is very narrow (< 560px)
+    Item {
+        visible: root.twoRow
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
+        anchors.bottomMargin: 6
+        height: 26
+
+        StyledText {
+            id: posLabel
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            text: Format.playbackTime(seekTwoRow.displayPositionMs)
+            tabularNumbers: true
+            font.pixelSize: Appearance.fontSize.smallest
+            color: root.scheme.onSurfaceVariant
+        }
+
+        SeekBar {
+            id: seekTwoRow
+            anchors.left: posLabel.right
+            anchors.right: durLabel.left
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            height: 20
+            scheme: root.scheme
+        }
+
+        StyledText {
+            id: durLabel
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: Format.playbackTime(seekTwoRow.durationMs)
+            tabularNumbers: true
+            font.pixelSize: Appearance.fontSize.smallest
+            color: root.scheme.onSurfaceVariant
         }
     }
 }

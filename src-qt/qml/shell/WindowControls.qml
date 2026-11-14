@@ -1,0 +1,51 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+import ymusic.ui
+
+// Window minimize, maximize/restore, and close buttons matching Swiftify's shape style
+Row {
+    id: root
+
+    required property Window window
+    property bool compact: false
+    property MaterialScheme scheme: Appearance.colors
+    layoutDirection: appSettings.windowControlsOnRight ? Qt.RightToLeft : Qt.LeftToRight
+
+    spacing: 4
+
+    ToolbarButton {
+        objectName: "closeWindowButton"
+        scheme: root.scheme
+        size: root.compact ? 28 : 36
+        iconSize: root.compact ? 15 : 18
+        shape: "cookie9"
+        shapeHoverColor: root.scheme.errorContainer
+        shapePressedColor: root.scheme.errorContainerActive
+        symbol: "close"
+        tooltip: qsTr("Закрыть окно")
+        onClicked: root.window.close()
+    }
+
+    ToolbarButton {
+        objectName: "maximizeWindowButton"
+        scheme: root.scheme
+        size: root.compact ? 28 : 36
+        iconSize: root.compact ? 14 : 16
+        shape: "cookie6"
+        symbol: root.window.visibility === Window.Maximized ? "close_fullscreen" : "open_in_full"
+        tooltip: root.window.visibility === Window.Maximized ? qsTr("Восстановить") : qsTr("Развернуть")
+        onClicked: root.window.visibility === Window.Maximized ? root.window.showNormal() : root.window.showMaximized()
+    }
+
+    ToolbarButton {
+        objectName: "minimizeWindowButton"
+        scheme: root.scheme
+        size: root.compact ? 28 : 36
+        iconSize: root.compact ? 15 : 18
+        shape: "pill"
+        turnsOnHover: false
+        symbol: "remove"
+        tooltip: qsTr("Свернуть")
+        onClicked: root.window.showMinimized()
+    }
+}

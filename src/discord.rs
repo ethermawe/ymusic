@@ -38,6 +38,7 @@ enum Cmd {
     Track(TrackInfo, Status),
     Status(Status, f64),
     Clear,
+    SetEnabled(bool),
 }
 
 pub struct Discord {
@@ -74,10 +75,15 @@ impl Discord {
     pub fn set_stopped(&self) {
         let _ = self.tx.send(Cmd::Clear);
     }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        let _ = self.tx.send(Cmd::SetEnabled(enabled));
+    }
 }
 
 fn apply_cmd(
     cmd: Cmd,
+    enabled: &mut bool,
     current: &mut Option<TrackInfo>,
     status: &mut Status,
     pos_secs: &mut f64,
@@ -116,6 +122,12 @@ fn apply_cmd(
             *pos_secs = 0.0;
             *dirty = true;
         }
+        Cmd::SetEnabled(v) => {
+            if *enabled != v {
+                *enabled = v;
+                *dirty = true;
+            }
+        }
     }
 }
 
@@ -132,6 +144,7 @@ fn run(rx: mpsc::Receiver<Cmd>) {
         .unwrap_or_else(|| DEFAULT_CLIENT_ID.to_string());
 
     let mut conn: Option<IpcStream> = None;
+    let mut enabled = true;
     let mut current: Option<TrackInfo> = None;
     let mut status = Status::Stopped;
     let mut pos_secs = 0.0f64;
@@ -139,7 +152,7 @@ fn run(rx: mpsc::Receiver<Cmd>) {
     let mut nonce = 0u64;
 
     loop {
-        let timeout = if current.is_some() && conn.is_none() {
+        let timeout = if enabled && current.is_some() && conn.is_none() {
             Duration::from_secs(5)
         } else {
             Duration::from_secs(30)
@@ -150,6 +163,7 @@ fn run(rx: mpsc::Receiver<Cmd>) {
             Ok(first_cmd) => {
                 apply_cmd(
                     first_cmd,
+                    &mut enabled,
                     &mut current,
                     &mut status,
                     &mut pos_secs,
@@ -159,6 +173,7 @@ fn run(rx: mpsc::Receiver<Cmd>) {
                 for cmd in rx.try_iter() {
                     apply_cmd(
                         cmd,
+                        &mut enabled,
                         &mut current,
                         &mut status,
                         &mut pos_secs,
@@ -168,7 +183,7 @@ fn run(rx: mpsc::Receiver<Cmd>) {
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                if current.is_some() && conn.is_none() {
+                if enabled && current.is_some() && conn.is_none() {
                     dirty = true;
                 }
             }
@@ -184,10 +199,13 @@ fn run(rx: mpsc::Receiver<Cmd>) {
             continue;
         }
 
-        if current.is_none() || status == Status::Stopped {
+        if !enabled || current.is_none() || status == Status::Stopped {
             if let Some(stream) = conn.as_mut()
                 && send_activity(stream, None, &mut nonce).is_err()
             {
+                conn = None;
+            }
+            if !enabled {
                 conn = None;
             }
             last_anchor_start_secs = None;
