@@ -8,8 +8,7 @@ Item {
 
     readonly property int activePage: backend.page
     property bool compact: false
-    property bool searchExpanded: false
-    readonly property bool isCompact: compact && !searchExpanded
+    readonly property bool isCompact: compact
     signal settingsRequested()
 
     implicitWidth: isCompact ? 72 : 220
@@ -66,76 +65,6 @@ Item {
             }
         }
 
-        // Quick Search Input Field
-        Rectangle {
-            id: searchBox
-            Layout.fillWidth: true
-            Layout.preferredHeight: 38
-            radius: Appearance.rounding.full
-            color: searchInput.activeFocus ? Qt.alpha(Appearance.colors.surfaceContainerHighest, 0.5)
-                                           : Appearance.colors.surfaceContainerHigh
-            border.width: searchInput.activeFocus ? 2 : 0
-            border.color: Appearance.colors.primary
-
-            Behavior on color { ElementMoveFastColor {} }
-
-            MouseArea {
-                anchors.fill: parent
-                enabled: root.isCompact
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    root.searchExpanded = true
-                    searchInput.forceActiveFocus()
-                }
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: root.isCompact ? 0 : 12
-                anchors.rightMargin: root.isCompact ? 0 : 12
-                spacing: root.isCompact ? 0 : 8
-
-                MaterialSymbol {
-                    Layout.alignment: root.isCompact ? Qt.AlignHCenter | Qt.AlignVCenter : Qt.AlignVCenter
-                    text: "search"
-                    iconSize: 18
-                    color: searchInput.activeFocus ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
-                }
-
-                TextInput {
-                    id: searchInput
-                    Layout.fillWidth: true
-                    visible: !root.isCompact
-                    color: Appearance.colors.onSurface
-                    selectionColor: Appearance.colors.primary
-                    selectedTextColor: Appearance.colors.onPrimary
-                    font.family: Appearance.fontFamily
-                    font.pixelSize: Appearance.fontSize.smaller
-                    selectByMouse: true
-                    clip: true
-
-                    onActiveFocusChanged: {
-                        if (!activeFocus) root.searchExpanded = false
-                    }
-
-                    StyledText {
-                        anchors.fill: parent
-                        text: qsTr("Поиск музыки…")
-                        color: Appearance.colors.onSurfaceVariant
-                        font.pixelSize: Appearance.fontSize.smaller
-                        visible: !searchInput.text && !searchInput.activeFocus
-                    }
-
-                    onAccepted: {
-                        if (text.trim().length > 0) {
-                            backend.search(text.trim())
-                            root.searchExpanded = false
-                        }
-                    }
-                }
-            }
-        }
-
         Flickable {
             id: navigationFlickable
             Layout.fillWidth: true
@@ -143,6 +72,8 @@ Item {
             contentHeight: navColumn.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
+
+            FastWheel { target: navigationFlickable }
 
             Column {
                 id: navColumn
@@ -152,21 +83,21 @@ Item {
                 NavigationItem {
                     width: parent.width
                     compact: root.isCompact
-                    text: qsTr("Главная")
-                    iconShape: "cookie9"
-                    symbol: "home"
-                    selected: root.activePage === 0
-                    onClicked: backend.loadHome()
-                }
-
-                NavigationItem {
-                    width: parent.width
-                    compact: root.isCompact
                     text: qsTr("Моя волна")
                     iconShape: "softBurst"
                     symbol: "waves"
                     selected: root.activePage === 1
                     onClicked: backend.startWave()
+                }
+
+                NavigationItem {
+                    width: parent.width
+                    compact: root.isCompact
+                    text: qsTr("Главная")
+                    iconShape: "cookie9"
+                    symbol: "home"
+                    selected: root.activePage === 0
+                    onClicked: backend.loadHome()
                 }
 
                 SectionLabel {
@@ -217,7 +148,60 @@ Item {
                     iconShape: "bun"
                     symbol: "library_music"
                     selected: root.activePage === 3
+                    trailing: IconButton {
+                        visible: !root.isCompact && backend.pinnedPlaylists.length > 0
+                        symbol: appSettings.pinnedPlaylistsExpanded ? "expand_more" : "chevron_right"
+                        size: 26
+                        iconSize: 18
+                        tooltip: appSettings.pinnedPlaylistsExpanded ? qsTr("Свернуть закреплённые") : qsTr("Развернуть закреплённые")
+                        onClicked: appSettings.pinnedPlaylistsExpanded = !appSettings.pinnedPlaylistsExpanded
+                    }
                     onClicked: backend.loadPlaylists()
+                }
+
+                Repeater {
+                    model: appSettings.pinnedPlaylistsExpanded ? backend.pinnedPlaylists : []
+
+                    NavigationItem {
+                        id: pinnedItem
+                        required property var modelData
+                        width: parent.width
+                        compact: root.isCompact
+                        indent: 10
+                        text: modelData.title ?? ""
+                        fallbackKey: modelData.key ?? text
+                        showArtwork: true
+                        artworkUrl: (modelData.has_cover ?? false) ? (modelData.cover_url ?? "") : ""
+                        symbol: "library_music"
+                        selected: root.activePage === 6 && backend.activePlaylistKey === (modelData.key ?? "")
+                        trailing: IconButton {
+                            symbol: "close"
+                            size: 24
+                            iconSize: 15
+                            opacity: pinnedItem.hovered ? 0.85 : 0
+                            visible: opacity > 0
+                            tooltip: qsTr("Открепить плейлист")
+                            onClicked: backend.feature({
+                                action: "toggle_pin_playlist",
+                                uid: pinnedItem.modelData.uid,
+                                kind: pinnedItem.modelData.kind
+                            })
+                        }
+                        onClicked: backend.feature({
+                            action: "open_playlist",
+                            uid: pinnedItem.modelData.uid,
+                            kind: pinnedItem.modelData.kind,
+                            title: pinnedItem.modelData.title ?? "Плейлист"
+                        })
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: backend.feature({
+                                action: "toggle_pin_playlist",
+                                uid: pinnedItem.modelData.uid,
+                                kind: pinnedItem.modelData.kind
+                            })
+                        }
+                    }
                 }
 
                 NavigationItem {

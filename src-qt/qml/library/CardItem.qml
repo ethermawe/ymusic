@@ -14,6 +14,8 @@ T.AbstractButton {
     property string title: model?.title ?? ""
     property string fallbackKey: title
     property string subtitle: model?.subtitle ?? ""
+    property bool isPlaylist: (model?.kind ?? "") === "playlist"
+    property bool isPinned: model?.pinned ?? false
     property bool circular: isArtist
     property bool current: false
     property string badgeSymbol: "arrow_forward"
@@ -118,6 +120,38 @@ T.AbstractButton {
     }
     TapHandler {
         acceptedButtons: Qt.RightButton
-        onTapped: root.secondaryClicked()
+        onTapped: {
+            if (root.isPlaylist) pinMenu.popup();
+            root.secondaryClicked();
+        }
+    }
+
+    IconButton {
+        visible: root.isPlaylist && (root.hovered || root.isPinned)
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: 8
+        anchors.rightMargin: 8
+        z: 3
+        symbol: "push_pin"
+        toggled: root.isPinned
+        size: 32
+        iconSize: 17
+        colBackground: Qt.rgba(0, 0, 0, 0.58)
+        colBackgroundHover: Qt.rgba(0, 0, 0, 0.78)
+        colBackgroundToggled: Appearance.colors.primaryContainer
+        colBackgroundToggledHover: Appearance.colors.primaryContainer
+        iconColor: root.isPinned ? Appearance.colors.onPrimaryContainer : "white"
+        tooltip: root.isPinned ? qsTr("Открепить плейлист") : qsTr("Закрепить в сайдбаре")
+        onClicked: backend.feature({action: "toggle_pin_playlist", card_index: root.index})
+    }
+
+    StyledMenu {
+        id: pinMenu
+        StyledMenuItem {
+            symbol: "push_pin"
+            text: root.isPinned ? qsTr("Открепить из сайдбара") : qsTr("Закрепить в сайдбаре")
+            onTriggered: backend.feature({action: "toggle_pin_playlist", card_index: root.index})
+        }
     }
 }

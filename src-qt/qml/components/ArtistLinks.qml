@@ -8,7 +8,9 @@ Text {
     property string fallbackText: ""
     property bool clickable: true
     property bool fallbackClickable: false
+    property bool handleDefaultFallback: true
     signal artistActivated()
+    signal fallbackActivated()
 
     function escapeHtml(s) {
         return String(s || "")
@@ -66,8 +68,12 @@ Text {
     TapHandler {
         enabled: root.clickable && (!root.links || root.links.length === 0) && root.fallbackClickable
         onTapped: {
-            backend.openNowArtist();
-            root.artistActivated();
+            if (root.handleDefaultFallback) {
+                backend.openNowArtist();
+                root.artistActivated();
+            } else {
+                root.fallbackActivated();
+            }
         }
     }
 }

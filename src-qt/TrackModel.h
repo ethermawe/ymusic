@@ -5,11 +5,13 @@
 #include <QJsonObject>
 #include <QList>
 #include <QString>
+#include <QVariantList>
 
 struct TrackData {
     QString id;
     QString title;
     QString artists;
+    QVariantList artistLinks;
     QString album;
     QString duration;
     qint64 durationMs = 0;
@@ -44,7 +46,8 @@ public:
         HasAlbumRole,
         IsCurrentRole,
         IsPlayingRole,
-        DownloadedRole
+        DownloadedRole,
+        ArtistLinksRole
     };
 
     explicit TrackModel(QObject *parent = nullptr);

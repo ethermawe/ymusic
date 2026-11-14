@@ -56,6 +56,17 @@ pub struct SavedSession {
     pub current_index: usize,
     pub position_secs: f64,
     pub wave: Option<SavedWaveState>,
+    #[serde(default)]
+    pub unshuffled_queue: Option<Vec<Track>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PinnedPlaylist {
+    pub uid: u64,
+    pub kind: u64,
+    pub title: String,
+    #[serde(default)]
+    pub cover_uri: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -70,6 +81,8 @@ pub struct UserSettings {
     pub repeat_mode: u8,
     #[serde(default)]
     pub shuffle: bool,
+    #[serde(default)]
+    pub pinned_playlists: Vec<PinnedPlaylist>,
 }
 
 fn default_volume() -> f32 {
@@ -84,6 +97,7 @@ impl Default for UserSettings {
             user_avatar_url: None,
             repeat_mode: 0,
             shuffle: false,
+            pinned_playlists: Vec::new(),
         }
     }
 }
@@ -92,14 +106,17 @@ fn settings_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("ymusic").join("settings.json"))
 }
 
-pub fn load_settings() -> UserSettings {
-    let Some(path) = settings_path() else { return UserSettings::default() };
+pub fn load_settings_from(path: &std::path::Path) -> UserSettings {
     let Ok(data) = fs::read_to_string(path) else { return UserSettings::default() };
     serde_json::from_str(&data).unwrap_or_default()
 }
 
-pub fn save_settings(settings: &UserSettings) -> io::Result<()> {
-    let path = settings_path().ok_or_else(|| io::Error::other("нет каталога конфигурации"))?;
+pub fn load_settings() -> UserSettings {
+    let Some(path) = settings_path() else { return UserSettings::default() };
+    load_settings_from(&path)
+}
+
+pub fn save_settings_to(path: &std::path::Path, settings: &UserSettings) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -109,6 +126,11 @@ pub fn save_settings(settings: &UserSettings) -> io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, data)?;
     fs::rename(tmp, path)
+}
+
+pub fn save_settings(settings: &UserSettings) -> io::Result<()> {
+    let path = settings_path().ok_or_else(|| io::Error::other("нет каталога конфигурации"))?;
+    save_settings_to(&path, settings)
 }
 
 /// Атомарное чтение-изменение-запись: параллельные сохранения не затирают друг друга.

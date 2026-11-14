@@ -7,11 +7,13 @@
 #include <QString>
 
 struct CardData {
+    QString key;
     QString title;
     QString subtitle;
     QString kind;
     QString coverUrl;
     bool hasCover = false;
+    bool pinned = false;
 };
 
 class CardModel : public QAbstractListModel {
@@ -20,11 +22,13 @@ class CardModel : public QAbstractListModel {
 
 public:
     enum CardRoles {
-        TitleRole = Qt::UserRole + 1,
+        KeyRole = Qt::UserRole + 1,
+        TitleRole,
         SubtitleRole,
         KindRole,
         CoverUrlRole,
-        HasCoverRole
+        HasCoverRole,
+        PinnedRole
     };
 
     explicit CardModel(QObject *parent = nullptr);

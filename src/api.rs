@@ -937,11 +937,11 @@ fn parse_track(v: &Value) -> Option<Track> {
     let artist_links: Vec<(String, String)> = artists_arr
         .map(|a| {
             a.iter()
-                .filter_map(|x| Some((id_str(&x["id"])?, x["name"].as_str()?.to_string())))
+                .filter_map(|x| Some((id_str(&x["id"]).unwrap_or_default(), x["name"].as_str()?.to_string())))
                 .collect()
         })
         .unwrap_or_default();
-    let artist_id = artist_links.first().map(|(id, _)| id.clone())
+    let artist_id = artist_links.iter().find(|(id, _)| !id.is_empty()).map(|(id, _)| id.clone())
         .or_else(|| artists_arr.and_then(|a| a.first()).and_then(|x| id_str(&x["id"])));
     let artists = artists_arr
         .map(|a| {

@@ -41,11 +41,11 @@ void main()
 {
     vec3 rgb = texture(source, qt_TexCoord0).rgb;
     float luma = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
-    rgb = clamp(mix(vec3(luma), rgb, 1.08), 0.0, 1.0);
+    rgb = clamp(mix(vec3(luma), rgb, 1.16), 0.0, 1.0);
 
     float y = qt_TexCoord0.y;
-    float shade = y < 0.5 ? mix(0.26, 0.0, y * 2.0) : mix(0.0, 0.46, y * 2.0 - 1.0);
-    rgb *= (1.0 - shade) * 0.8;
+    float shade = y < 0.5 ? mix(0.22, 0.0, y * 2.0) : mix(0.0, 0.40, y * 2.0 - 1.0);
+    rgb *= (1.0 - shade) * 0.88;
     rgb += dither(gl_FragCoord.xy) / 255.0;
 
     fragColor = vec4(rgb, 1.0) * qt_Opacity;

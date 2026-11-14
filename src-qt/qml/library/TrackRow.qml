@@ -199,26 +199,19 @@ T.AbstractButton {
                 }
             }
 
-            StyledText {
+            ArtistLinks {
                 width: parent.width
-                text: root.model?.artists ?? ""
-                elide: Text.ElideRight
+                links: root.model?.artistLinks ?? []
+                fallbackText: root.model?.artists ?? ""
+                clickable: true
+                fallbackClickable: root.model?.hasArtist ?? false
+                handleDefaultFallback: false
                 font.pixelSize: Appearance.fontSize.smaller
                 color: Appearance.colors.onSurfaceVariant
-                font.underline: artistHover.hovered && (root.model?.hasArtist ?? false)
-
-                HoverHandler {
-                    id: artistHover
-                    cursorShape: (root.model?.hasArtist ?? false) ? Qt.PointingHandCursor : Qt.ArrowCursor
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    enabled: root.model?.hasArtist ?? false
-                    onClicked: {
-                        if (!root.model) return;
-                        if (root.queueView) backend.trackAction(root.model.id, 5);
-                        else backend.openTrackArtist(root.index);
-                    }
+                onFallbackActivated: {
+                    if (!root.model) return;
+                    if (root.queueView) backend.trackAction(root.model.id, 5);
+                    else backend.openTrackArtist(root.index);
                 }
             }
         }

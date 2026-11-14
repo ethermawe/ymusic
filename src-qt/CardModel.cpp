@@ -14,22 +14,26 @@ QVariant CardModel::data(const QModelIndex &index, int role) const {
 
     const CardData &c = m_cards.at(index.row());
     switch (role) {
+    case KeyRole: return c.key;
     case TitleRole: return c.title;
     case SubtitleRole: return c.subtitle;
     case KindRole: return c.kind;
     case CoverUrlRole: return c.coverUrl;
     case HasCoverRole: return c.hasCover;
+    case PinnedRole: return c.pinned;
     default: return QVariant();
     }
 }
 
 QHash<int, QByteArray> CardModel::roleNames() const {
     QHash<int, QByteArray> roles;
+    roles[KeyRole] = "key";
     roles[TitleRole] = "title";
     roles[SubtitleRole] = "subtitle";
     roles[KindRole] = "kind";
     roles[CoverUrlRole] = "coverUrl";
     roles[HasCoverRole] = "hasCover";
+    roles[PinnedRole] = "pinned";
     return roles;
 }
 
@@ -42,11 +46,13 @@ void CardModel::setCards(const QJsonArray &cardsArray) {
     for (const QJsonValue &val : cardsArray) {
         QJsonObject obj = val.toObject();
         CardData c;
+        c.key = obj["key"].toString();
         c.title = obj["title"].toString();
         c.subtitle = obj["subtitle"].toString();
         c.kind = obj["kind"].toString();
         c.coverUrl = obj["cover_url"].toString();
         c.hasCover = obj["has_cover"].toBool();
+        c.pinned = obj["pinned"].toBool();
         m_cards.append(c);
     }
     endResetModel();

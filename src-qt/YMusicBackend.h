@@ -84,6 +84,9 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(bool collectionDownloadable READ collectionDownloadable NOTIFY featuresChanged)
     Q_PROPERTY(QVariantMap batch READ batch NOTIFY featuresChanged)
     Q_PROPERTY(QVariantMap waveSettings READ waveSettings NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantList pinnedPlaylists READ pinnedPlaylists NOTIFY featuresChanged)
+    Q_PROPERTY(QString activePlaylistKey READ activePlaylistKey NOTIFY featuresChanged)
+    Q_PROPERTY(bool activePlaylistPinned READ activePlaylistPinned NOTIFY featuresChanged)
 
 public:
     explicit YMusicBackend(QObject *parent = nullptr);
@@ -154,6 +157,9 @@ public:
     bool collectionDownloadable() const { return m_collectionDownloadable; }
     QVariantMap batch() const { return m_batch; }
     QVariantMap waveSettings() const { return m_waveSettings; }
+    QVariantList pinnedPlaylists() const { return m_pinnedPlaylists; }
+    QString activePlaylistKey() const { return m_activePlaylistKey; }
+    bool activePlaylistPinned() const { return m_activePlaylistPinned; }
     Q_INVOKABLE void feature(const QVariantMap &command);
 
     // Q_INVOKABLE Actions
@@ -209,6 +215,7 @@ public:
     Q_INVOKABLE void setTempo(qreal speed);
     Q_INVOKABLE void startSleepTimer(int seconds, const QString &fadeMode = QStringLiteral("finalSeconds"));
     Q_INVOKABLE void cancelSleepTimer();
+    Q_INVOKABLE void saveSession();
 
 signals:
     void featuresChanged();
@@ -241,6 +248,9 @@ private:
     bool m_collectionDownloadable = false;
     QVariantMap m_batch;
     QVariantMap m_waveSettings;
+    QVariantList m_pinnedPlaylists;
+    QString m_activePlaylistKey;
+    bool m_activePlaylistPinned = false;
 
     bool m_loggedIn = false;
     bool m_authReady = false;

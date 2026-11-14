@@ -69,6 +69,7 @@ void ymusic_core_toggle_repeat(CoreHandle *handle);
 void ymusic_core_toggle_like(CoreHandle *handle, uintptr_t index);
 void ymusic_core_toggle_now_like(CoreHandle *handle);
 void ymusic_core_dislike_now(CoreHandle *handle);
+void ymusic_core_save_session(CoreHandle *handle);
 uint32_t ymusic_core_spectrum_levels(CoreHandle *handle, float *out, uint32_t capacity);
 
 #ifdef __cplusplus

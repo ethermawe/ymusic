@@ -36,6 +36,7 @@ pub struct TrackItemPayload {
     pub id: String,
     pub title: String,
     pub artists: String,
+    pub artist_links: Vec<ArtistLinkPayload>,
     pub album: String,
     pub duration: String,
     pub duration_ms: u64,
@@ -50,11 +51,13 @@ pub struct TrackItemPayload {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CardItemPayload {
+    pub key: String,
     pub title: String,
     pub subtitle: String,
     pub kind: String,
     pub cover_url: String,
     pub has_cover: bool,
+    pub pinned: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -98,6 +101,17 @@ pub struct NowPlayingPayload {
 fn artist_links_for(t: &Track) -> Vec<ArtistLinkPayload> {
     if !t.artist_links.is_empty() {
         return t.artist_links.iter().map(|(id, name)| ArtistLinkPayload { id: id.clone(), name: name.clone() }).collect();
+    }
+    let parts: Vec<&str> = t.artists.split(", ").map(str::trim).filter(|s| !s.is_empty()).collect();
+    if parts.len() > 1 {
+        return parts
+            .into_iter()
+            .enumerate()
+            .map(|(i, name)| ArtistLinkPayload {
+                id: if i == 0 { t.artist_id.clone().unwrap_or_default() } else { String::new() },
+                name: name.to_string(),
+            })
+            .collect();
     }
     match &t.artist_id {
         Some(id) if !t.artists.is_empty() => vec![ArtistLinkPayload { id: id.clone(), name: t.artists.clone() }],
@@ -218,6 +232,8 @@ pub struct State {
     pub search_query: String,
     pub search_filter: String,
     pub collection_downloadable: bool,
+    pub active_playlist: Option<config::PinnedPlaylist>,
+    pub pinned_playlists: Vec<config::PinnedPlaylist>,
     pub history_generation: Option<u64>,
     pub view_cover_uri: Option<String>,
     pub api: Option<Api>,
@@ -303,14 +319,20 @@ fn playlist_target(p: api::PlaylistCard) -> CardTarget {
     }
 }
 
-fn card_payload(c: &CardTarget) -> CardItemPayload {
+fn is_playlist_pinned(pinned: &[config::PinnedPlaylist], uid: u64, kind: u64) -> bool {
+    pinned.iter().any(|p| p.uid == uid && p.kind == kind)
+}
+
+fn card_payload(c: &CardTarget, pinned: &[config::PinnedPlaylist]) -> CardItemPayload {
     match c {
-        CardTarget::Playlist { title, cover_uri, .. } => CardItemPayload {
+        CardTarget::Playlist { uid, kind, title, cover_uri } => CardItemPayload {
+            key: format!("playlist:{uid}:{kind}"),
             title: title.clone(),
             subtitle: "Плейлист".to_string(),
             kind: "playlist".to_string(),
             cover_url: api::cover_url(cover_uri.as_deref(), 200).unwrap_or_default(),
             has_cover: cover_uri.is_some(),
+            pinned: is_playlist_pinned(pinned, *uid, *kind),
         },
         CardTarget::Album(a) => {
             let mut parts = vec!["Альбом".to_string()];
@@ -324,11 +346,13 @@ fn card_payload(c: &CardTarget) -> CardItemPayload {
                 parts.push(format!("{} тр.", a.track_count));
             }
             CardItemPayload {
+                key: String::new(),
                 title: a.title.clone(),
                 subtitle: parts.join(" • "),
                 kind: "album".to_string(),
                 cover_url: api::cover_url(a.cover_uri.as_deref(), 200).unwrap_or_default(),
                 has_cover: a.cover_uri.is_some(),
+                pinned: false,
             }
         }
         CardTarget::Artist(ar) => {
@@ -344,11 +368,13 @@ fn card_payload(c: &CardTarget) -> CardItemPayload {
                 format!("Исполнитель • {}", ar.genres)
             };
             CardItemPayload {
+                key: String::new(),
                 title: ar.name.clone(),
                 subtitle: sub,
                 kind: "artist".to_string(),
                 cover_url: api::cover_url(ar.cover_uri.as_deref(), 200).unwrap_or_default(),
                 has_cover: ar.cover_uri.is_some(),
+                pinned: false,
             }
         }
     }
@@ -360,6 +386,7 @@ fn track_payload(t: &Track, liked_ids: &HashSet<String>) -> TrackItemPayload {
         id: t.id.clone(),
         title: t.title.clone(),
         artists: t.artists.clone(),
+        artist_links: artist_links_for(t),
         album: t.album_title.clone(),
         duration: fmt_time(t.duration_ms as f64 / 1000.0),
         duration_ms: t.duration_ms,
@@ -475,6 +502,164 @@ mod queue_tests {
         assert_eq!(st.queue.len(), 1);
         assert_eq!(current_track(&st).unwrap().id, "b");
     }
+
+    struct CaptureSink(Arc<Mutex<Vec<(i32, String)>>>);
+    impl EventSink for CaptureSink {
+        fn on_event(&self, event_type: i32, json_data: &str) {
+            self.0.lock().unwrap().push((event_type, json_data.to_string()));
+        }
+    }
+
+    #[test]
+    fn session_save_and_restore_preserves_track_queue_and_position() {
+
+        let mut t2 = track("t2");
+        t2.duration_ms = 180_000;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt_handle = rt.handle().clone();
+        let mpris = Mpris::spawn(&rt_handle, |_| {});
+        let core = Arc::new(YMusicCore {
+            batch_running: AtomicBool::new(false),
+            batch_cancel: AtomicBool::new(false),
+            batch_cancel_tx: tokio::sync::watch::channel(false).0,
+            playlist_creating: AtomicBool::new(false),
+            rt_handle,
+            runtime: Some(rt),
+            http: api::http_client(),
+            state: Arc::new(Mutex::new(State {
+                queue: vec![track("t1"), t2.clone()],
+                unshuffled_queue: Some(vec![t2, track("t1")]),
+                current: Some(1),
+                position_secs: 42.5,
+                duration_secs: 180.0,
+                ..State::default()
+            })),
+            cover_sem: Arc::new(Semaphore::new(4)),
+            audio: Audio::spawn(|_| {}),
+            mpris,
+            discord: Discord::spawn(),
+            sink: Arc::new(CaptureSink(events.clone())),
+        });
+
+        let saved = core.snapshot_session().expect("session snapshot present");
+        let dir = std::env::temp_dir().join(format!("ymusic-session-test-{}", std::process::id()));
+        let settings_file = dir.join("settings.json");
+        let mut settings = config::UserSettings::default();
+        settings.session = Some(saved);
+        config::save_settings_to(&settings_file, &settings).unwrap();
+
+        let reloaded = config::load_settings_from(&settings_file);
+        let restored_session = reloaded.session.expect("reloaded session present");
+        assert_eq!(restored_session.current_index, 1);
+        assert!((restored_session.position_secs - 42.5).abs() < 1e-6);
+
+        let rt2 = tokio::runtime::Runtime::new().unwrap();
+        let rt2_handle = rt2.handle().clone();
+        let mpris2 = Mpris::spawn(&rt2_handle, |_| {});
+        let events2 = Arc::new(Mutex::new(Vec::new()));
+        let core2 = Arc::new(YMusicCore {
+            batch_running: AtomicBool::new(false),
+            batch_cancel: AtomicBool::new(false),
+            batch_cancel_tx: tokio::sync::watch::channel(false).0,
+            playlist_creating: AtomicBool::new(false),
+            rt_handle: rt2_handle,
+            runtime: Some(rt2),
+            http: api::http_client(),
+            state: Arc::new(Mutex::new(State::default())),
+            cover_sem: Arc::new(Semaphore::new(4)),
+            audio: Audio::spawn(|_| {}),
+            mpris: mpris2,
+            discord: Discord::spawn(),
+            sink: Arc::new(CaptureSink(events2.clone())),
+        });
+        // Wrap in async-safe drop wait via rt2 already entered above — drop handles cleanly outside block_on
+        core2.apply_saved_session(restored_session);
+        {
+            let st2 = core2.state.lock().unwrap();
+            assert_eq!(st2.current, Some(1));
+            assert_eq!(st2.queue.len(), 2);
+            assert_eq!(st2.queue[1].id, "t2");
+            assert_eq!(st2.unshuffled_queue.as_ref().unwrap()[0].id, "t2");
+            assert!(!st2.audio_started);
+        }
+        let captured = events2.lock().unwrap();
+        assert!(captured.iter().any(|(t, json)| *t == EVENT_NOW_PLAYING && json.contains("\"t2\"")));
+        assert!(captured.iter().any(|(t, json)| *t == EVENT_PLAYBACK_PROGRESS && json.contains("0:42") || json.contains("42")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn artist_links_for_splits_legacy_multi_artist_string() {
+        let mut legacy = track("t1");
+        legacy.artist_id = Some("10".into());
+        legacy.artists = "Whybaby_ff, NEEDY GIRL OVERDOSE, KOTOKO".into();
+        let links = artist_links_for(&legacy);
+        assert_eq!(links.len(), 3);
+        assert_eq!(links[0].name, "Whybaby_ff");
+        assert_eq!(links[0].id, "10");
+        assert_eq!(links[1].name, "NEEDY GIRL OVERDOSE");
+        assert_eq!(links[1].id, "");
+        assert_eq!(links[2].name, "KOTOKO");
+        assert_eq!(links[2].id, "");
+    }
+
+    #[test]
+    fn track_payload_serializes_individual_artist_links() {
+        let mut t = track("t1");
+        t.artists = "Petite Meller, Marlon Hoffstadt".into();
+        t.artist_id = Some("10".into());
+        t.artist_links = vec![
+            ("10".into(), "Petite Meller".into()),
+            ("20".into(), "Marlon Hoffstadt".into()),
+        ];
+        let payload = serde_json::to_value(track_payload(&t, &HashSet::new())).unwrap();
+        assert_eq!(payload["artist_links"], serde_json::json!([
+            {"id": "10", "name": "Petite Meller"},
+            {"id": "20", "name": "Marlon Hoffstadt"},
+        ]));
+    }
+
+    #[test]
+    fn toggle_pin_playlist_updates_state_and_emits_events() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt_handle = rt.handle().clone();
+        let mpris = Mpris::spawn(&rt_handle, |_| {});
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let core = Arc::new(YMusicCore {
+            batch_running: AtomicBool::new(false),
+            batch_cancel: AtomicBool::new(false),
+            batch_cancel_tx: tokio::sync::watch::channel(false).0,
+            playlist_creating: AtomicBool::new(false),
+            rt_handle,
+            runtime: Some(rt),
+            http: api::http_client(),
+            state: Arc::new(Mutex::new(State {
+                cards: vec![CardTarget::Playlist {
+                    uid: 42,
+                    kind: 7,
+                    title: "Мой плейлист".into(),
+                    cover_uri: None,
+                }],
+                ..State::default()
+            })),
+            cover_sem: Arc::new(Semaphore::new(2)),
+            audio: Audio::spawn(|_| {}),
+            mpris,
+            discord: Discord::spawn(),
+            sink: Arc::new(CaptureSink(events.clone())),
+        });
+
+        core.toggle_pin_playlist(&serde_json::json!({"card_index": 0}));
+        assert_eq!(core.state.lock().unwrap().pinned_playlists.len(), 1);
+        assert!(events.lock().unwrap().iter().any(|(t, j)| *t == EVENT_FEATURE && j.contains("\"pinned_playlists\"") && j.contains("\"playlist:42:7\"")));
+        assert!(events.lock().unwrap().iter().any(|(t, j)| *t == EVENT_CARDS_LOADED && j.contains("\"pinned\":true")));
+
+        events.lock().unwrap().clear();
+        core.toggle_pin_playlist(&serde_json::json!({"uid": 42, "kind": 7}));
+        assert!(core.state.lock().unwrap().pinned_playlists.is_empty());
+        assert!(events.lock().unwrap().iter().any(|(t, j)| *t == EVENT_CARDS_LOADED && j.contains("\"pinned\":false")));
+    }
 }
 
 impl YMusicCore {
@@ -525,6 +710,13 @@ impl YMusicCore {
                 self.play_index(index, true);
             }
             "search" => self.search_with_filter(cmd["query"].as_str().unwrap_or("").trim().into(), cmd["filter"].as_str().unwrap_or("all").into()),
+            "open_playlist" => {
+                let Some(uid) = cmd["uid"].as_u64() else { return };
+                let Some(kind) = cmd["kind"].as_u64() else { return };
+                let title = cmd["title"].as_str().unwrap_or("Плейлист").to_string();
+                self.clone().open_playlist(uid, kind, title);
+            }
+            "toggle_pin_playlist" => self.toggle_pin_playlist(&cmd),
             "create_playlist" => {
                 let Some(api) = self.api() else { self.error("Для создания плейлиста нужен вход"); return };
                 if self.playlist_creating.swap(true, Ordering::SeqCst) { return; }
@@ -754,13 +946,13 @@ impl YMusicCore {
             st.shuffle = settings.shuffle;
             st.last_unmuted_volume = if initial_vol > 0.001 { initial_vol } else { 0.7 };
             st.volume = initial_vol;
+            st.pinned_playlists = settings.pinned_playlists;
         }
 
         core.send_playback_state(false);
-
-        // Downloads remain usable while the network login is being checked.
-        if cache::offline_tracks().is_ok_and(|(tracks, _)| !tracks.is_empty()) {
-            core.clone().load_downloads();
+        core.send_pinned_playlists();
+        if let Some(session) = settings.session {
+            core.apply_saved_session(session);
         }
 
         if let Some(token) = config::load_token() {
@@ -779,7 +971,7 @@ impl YMusicCore {
     }
 
     pub fn shutdown(&self) {
-        self.persist_session();
+        self.persist_session_sync();
         self.audio.stop();
         self.discord.set_stopped();
     }
@@ -928,7 +1120,7 @@ impl YMusicCore {
                     let browsing_downloads = this.state.lock().unwrap().page == 7;
                     if !browsing_downloads { this.clone().load_home(); }
                     this.clone().prefetch_likes();
-                    if !browsing_downloads { this.clone().restore_session(); }
+                    this.clone().restore_session();
                 }
                 Err(e) => {
                     this.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
@@ -938,6 +1130,11 @@ impl YMusicCore {
                         user_avatar: String::new(),
                         user_has_avatar: false,
                     });
+                    if this.state.lock().unwrap().page == 0
+                        && cache::offline_tracks().is_ok_and(|(tracks, _)| !tracks.is_empty())
+                    {
+                        this.clone().load_downloads();
+                    }
                     this.error(format!("Не удалось войти: {e}"));
                 }
             }
@@ -1005,12 +1202,104 @@ impl YMusicCore {
             .unwrap_or_default()
     }
 
+    pub fn send_pinned_playlists(&self) {
+        let playlists: Vec<serde_json::Value> = {
+            let st = self.state.lock().unwrap();
+            st.pinned_playlists
+                .iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "uid": p.uid,
+                        "kind": p.kind,
+                        "key": format!("playlist:{}:{}", p.uid, p.kind),
+                        "title": p.title,
+                        "cover_url": api::cover_url(p.cover_uri.as_deref(), 100).unwrap_or_default(),
+                        "has_cover": p.cover_uri.is_some(),
+                    })
+                })
+                .collect()
+        };
+        self.send_feature("pinned_playlists", serde_json::json!({ "playlists": playlists }));
+    }
+
+    pub fn send_view_feature(&self) {
+        let (downloadable, playlist_key, playlist_pinned) = {
+            let st = self.state.lock().unwrap();
+            let (key, pinned) = match &st.active_playlist {
+                Some(p) => (
+                    format!("playlist:{}:{}", p.uid, p.kind),
+                    is_playlist_pinned(&st.pinned_playlists, p.uid, p.kind),
+                ),
+                None => (String::new(), false),
+            };
+            (st.collection_downloadable, key, pinned)
+        };
+        self.send_feature(
+            "view",
+            serde_json::json!({
+                "downloadable": downloadable,
+                "playlist_key": playlist_key,
+                "playlist_pinned": playlist_pinned,
+            }),
+        );
+    }
+
+    pub fn toggle_pin_playlist(&self, cmd: &serde_json::Value) {
+        let target: Option<config::PinnedPlaylist> = {
+            let st = self.state.lock().unwrap();
+            if let Some(idx) = cmd["card_index"].as_u64() {
+                match st.cards.get(idx as usize) {
+                    Some(CardTarget::Playlist { uid, kind, title, cover_uri }) => Some(config::PinnedPlaylist {
+                        uid: *uid,
+                        kind: *kind,
+                        title: title.clone(),
+                        cover_uri: cover_uri.clone(),
+                    }),
+                    _ => None,
+                }
+            } else if let (Some(uid), Some(kind)) = (cmd["uid"].as_u64(), cmd["kind"].as_u64()) {
+                Some(config::PinnedPlaylist {
+                    uid,
+                    kind,
+                    title: cmd["title"].as_str().unwrap_or("Плейлист").to_string(),
+                    cover_uri: cmd["cover_uri"].as_str().filter(|s| !s.is_empty()).map(str::to_string),
+                })
+            } else {
+                st.active_playlist.clone()
+            }
+        };
+        let Some(target) = target else { return };
+        let (added, updated_pins, cards_payload) = {
+            let mut st = self.state.lock().unwrap();
+            let added = if let Some(pos) = st.pinned_playlists.iter().position(|p| p.uid == target.uid && p.kind == target.kind) {
+                st.pinned_playlists.remove(pos);
+                false
+            } else {
+                st.pinned_playlists.push(target);
+                true
+            };
+            let cards_p: Vec<CardItemPayload> = st.cards.iter().map(|c| card_payload(c, &st.pinned_playlists)).collect();
+            (added, st.pinned_playlists.clone(), cards_p)
+        };
+        config::update_settings(|s| s.pinned_playlists = updated_pins);
+        self.send_pinned_playlists();
+        self.send_view_feature();
+        if !cards_payload.is_empty() {
+            self.send_event(EVENT_CARDS_LOADED, &CardsPayload { cards: cards_payload });
+        }
+        self.notify(if added { "Плейлист закреплён" } else { "Плейлист откреплён" });
+    }
+
     pub fn begin_cached_view(&self, key: Option<&str>, page: i32, title: String, subtitle: String) -> u64 {
         let is_artist = key.is_some_and(|k| k.starts_with("artist:"));
+        let is_playlist = key.is_some_and(|k| k.starts_with("playlist:"));
         let (view, has_cache, eff_title, eff_subtitle, cards_payload, tracks_payload, current_idx, can_wave, artist_info) = {
             let mut st = self.state.lock().unwrap();
             st.view_id += 1;
             st.page = page;
+            if !is_playlist {
+                st.active_playlist = None;
+            }
             st.collection_downloadable = key.is_some_and(|k| k == "likes" || k.starts_with("album:") || k.starts_with("playlist:"));
             let view = st.view_id;
 
@@ -1033,7 +1322,7 @@ impl YMusicCore {
                     .iter()
                     .map(|t| track_payload(t, &st.liked_ids))
                     .collect();
-                let cards_p: Vec<CardItemPayload> = c.cards.iter().map(card_payload).collect();
+                let cards_p: Vec<CardItemPayload> = c.cards.iter().map(|card| card_payload(card, &st.pinned_playlists)).collect();
                 let can_wave = c.viewed_artist_id.is_some();
                 st.cards = c.cards;
                 st.list = c.tracks;
@@ -1073,7 +1362,7 @@ impl YMusicCore {
         self.send_event(EVENT_CARDS_LOADED, &CardsPayload { cards: cards_payload });
         self.send_event(EVENT_TRACKS_LOADED, &TracksPayload { tracks: tracks_payload, current_index: current_idx });
 
-        self.send_feature("view", serde_json::json!({"downloadable": self.state.lock().unwrap().collection_downloadable}));
+        self.send_view_feature();
         view
     }
 
@@ -1118,7 +1407,7 @@ impl YMusicCore {
                 .iter()
                 .map(|t| track_payload(t, &st.liked_ids))
                 .collect();
-            let cards_p: Vec<CardItemPayload> = cards.iter().map(card_payload).collect();
+            let cards_p: Vec<CardItemPayload> = cards.iter().map(|card| card_payload(card, &st.pinned_playlists)).collect();
             st.list = tracks;
             (tracks_p, cards_p, current_list_index(&st), st.page)
         };
@@ -1599,21 +1888,27 @@ impl YMusicCore {
     }
 
     pub fn search(self: Arc<Self>, query: String) {
-        self.search_with_filter(query, "all".into());
+        let filter = self.state.lock().unwrap().search_filter.clone();
+        let filter = if ["all", "track", "album", "artist", "playlist"].contains(&filter.as_str()) {
+            filter
+        } else {
+            "all".into()
+        };
+        self.search_with_filter(query, filter);
     }
 
     pub fn search_with_filter(self: Arc<Self>, query: String, filter: String) {
-        if query.is_empty() {
-            return;
-        }
         if !["all", "track", "album", "artist", "playlist"].contains(&filter.as_str()) { return; }
-        let Some(api) = self.api() else { return };
         {
             let mut st = self.state.lock().unwrap();
             st.search_query = query.clone();
             st.search_filter = filter.clone();
         }
         self.send_feature("search", serde_json::json!({"query": query, "filter": filter}));
+        if query.is_empty() {
+            return;
+        }
+        let Some(api) = self.api() else { return };
         let key = format!("search:{filter}:{}", query.to_lowercase());
         let title = format!("Поиск: {query}");
         let view = self.begin_cached_view(
@@ -1659,11 +1954,22 @@ impl YMusicCore {
     pub fn open_playlist(self: Arc<Self>, owner_uid: u64, kind: u64, title: String) {
         let Some(api) = self.api() else { return };
         let cover = {
-            let st = self.state.lock().unwrap();
-            st.cards.iter().find_map(|card| match card {
+            let mut st = self.state.lock().unwrap();
+            let card_cover = st.cards.iter().find_map(|card| match card {
                 CardTarget::Playlist { uid, kind: card_kind, cover_uri, .. } if *uid == owner_uid && *card_kind == kind => cover_uri.clone(),
                 _ => None,
-            })
+            });
+            let pin_cover = st.pinned_playlists.iter()
+                .find(|p| p.uid == owner_uid && p.kind == kind)
+                .and_then(|p| p.cover_uri.clone());
+            let cover = card_cover.or(pin_cover);
+            st.active_playlist = Some(config::PinnedPlaylist {
+                uid: owner_uid,
+                kind,
+                title: title.clone(),
+                cover_uri: cover.clone(),
+            });
+            cover
         };
         let key = format!("playlist:{owner_uid}:{kind}");
         let view = self.begin_cached_view(Some(&key), 6, title.clone(), "Плейлист".into());
@@ -2007,7 +2313,7 @@ impl YMusicCore {
     }
 
     pub fn play_index_at(self: Arc<Self>, index: usize, manual_skip: bool, start_at: Option<f64>) {
-        let (prev_track, prev_played, track, next_track_id, generation, api, current_idx, liked, wave) = {
+        let (prev_track, prev_played, track, next_track_id, generation, api, current_idx, liked, wave, initial_pos, duration_secs) = {
             let mut st = self.state.lock().unwrap();
             let Some(track) = st.queue.get(index).cloned() else { return };
             let api = st.api.clone();
@@ -2017,13 +2323,16 @@ impl YMusicCore {
                 .iter()
                 .find(|t| t.available)
                 .map(|t| t.id.clone());
+            let duration_secs = track.duration_ms as f64 / 1000.0;
+            let initial_pos = start_at.unwrap_or(0.0).clamp(0.0, duration_secs.max(0.0));
             st.current = Some(index);
             st.generation += 1;
-            st.duration_secs = track.duration_ms as f64 / 1000.0;
-            st.position_secs = 0.0;
+            st.duration_secs = duration_secs;
+            st.position_secs = initial_pos;
+            st.last_saved_sec = 0;
             st.audio_started = true;
             st.history_generation = None;
-            st.resume_at = start_at;
+            st.resume_at = (initial_pos > 0.0).then_some(initial_pos);
             let liked = st.liked_ids.contains(&track.id);
             (
                 prev_track,
@@ -2035,6 +2344,8 @@ impl YMusicCore {
                 current_list_index(&st),
                 liked,
                 st.wave.clone(),
+                initial_pos,
+                duration_secs,
             )
         };
 
@@ -2084,12 +2395,17 @@ impl YMusicCore {
 
         self.set_playing(false, true);
 
+        let initial_progress = if duration_secs > 0.0 {
+            (initial_pos / duration_secs).clamp(0.0, 1.0) as f32
+        } else {
+            0.0
+        };
         self.send_event(EVENT_PLAYBACK_PROGRESS, &PlaybackProgressPayload {
-            position_secs: 0.0,
-            duration_secs: track.duration_ms as f64 / 1000.0,
-            position_text: "0:00".into(),
-            duration_text: fmt_time(track.duration_ms as f64 / 1000.0),
-            progress: 0.0,
+            position_secs: initial_pos,
+            duration_secs,
+            position_text: fmt_time(initial_pos),
+            duration_text: fmt_time(duration_secs),
+            progress: initial_progress,
         });
 
         self.send_event(EVENT_TRACKS_LOADED, &TracksPayload {
@@ -2345,15 +2661,16 @@ impl YMusicCore {
     }
 
     pub fn toggle(self: Arc<Self>) {
-        let (started, current, pos) = {
+        let (started, current, pos, duration_secs) = {
             let st = self.state.lock().unwrap();
-            (st.audio_started, st.current, st.position_secs)
+            (st.audio_started, st.current, st.position_secs, st.duration_secs)
         };
         if started {
             self.audio.toggle();
             self.persist_session();
         } else if let Some(idx) = current {
-            self.play_index_at(idx, false, (pos > 1.0).then_some(pos));
+            let resume_pos = (pos > 0.5 && (duration_secs <= 2.0 || pos < duration_secs - 0.5)).then_some(pos);
+            self.play_index_at(idx, false, resume_pos);
         }
     }
 
@@ -2414,6 +2731,7 @@ impl YMusicCore {
         };
         self.send_playback_state(false);
         self.send_queue();
+        self.persist_session();
         self.rt_handle.spawn_blocking(move || {
             config::update_settings(|s| s.shuffle = shuffle_on);
         });
@@ -2504,33 +2822,38 @@ impl YMusicCore {
         });
     }
 
-    pub fn persist_session(&self) {
-        let (queue, current, pos, wave) = {
-            let st = self.state.lock().unwrap();
-            let Some(idx) = st.current else { return };
-            if st.queue.is_empty() { return };
-            let queue = st.queue.clone();
-            let pos = st.position_secs;
-            let wave = st.wave.as_ref().map(|w| config::SavedWaveState {
-                seed: w.seed.clone(),
-                title: w.title.clone(),
-                session_id: w.session_id.clone(),
-                batch_id: w.batch_id.clone(),
-                tracks: w.tracks.clone(),
-            });
-            (queue, idx, pos, wave)
-        };
-
-        let session = config::SavedSession {
-            queue,
-            current_index: current,
-            position_secs: pos,
+    fn snapshot_session(&self) -> Option<config::SavedSession> {
+        let st = self.state.lock().unwrap();
+        let idx = st.current?;
+        if st.queue.is_empty() {
+            return None;
+        }
+        let wave = st.wave.as_ref().map(|w| config::SavedWaveState {
+            seed: w.seed.clone(),
+            title: w.title.clone(),
+            session_id: w.session_id.clone(),
+            batch_id: w.batch_id.clone(),
+            tracks: w.tracks.clone(),
+        });
+        Some(config::SavedSession {
+            queue: st.queue.clone(),
+            current_index: idx.min(st.queue.len() - 1),
+            position_secs: st.position_secs.max(0.0),
             wave,
-        };
+            unshuffled_queue: st.unshuffled_queue.clone(),
+        })
+    }
 
+    pub fn persist_session(&self) {
+        let Some(session) = self.snapshot_session() else { return };
         self.rt_handle.spawn_blocking(move || {
             config::update_settings(|s| s.session = Some(session));
         });
+    }
+
+    pub fn persist_session_sync(&self) {
+        let Some(session) = self.snapshot_session() else { return };
+        config::update_settings(|s| s.session = Some(session));
     }
 
     pub fn clear_saved_session(&self) {
@@ -2539,23 +2862,30 @@ impl YMusicCore {
         });
     }
 
-    pub fn restore_session(self: Arc<Self>) {
-        let settings = config::load_settings();
-        let Some(session) = settings.session else { return };
+    pub fn apply_saved_session(self: &Arc<Self>, session: config::SavedSession) {
         if session.queue.is_empty() { return };
         let idx = session.current_index.min(session.queue.len() - 1);
         let track = session.queue[idx].clone();
-        let pos_secs = session.position_secs;
         let duration_secs = track.duration_ms as f64 / 1000.0;
+        let pos_secs = if duration_secs > 0.0 {
+            session.position_secs.clamp(0.0, duration_secs)
+        } else {
+            session.position_secs.max(0.0)
+        };
         let progress = if duration_secs > 0.0 { (pos_secs / duration_secs) as f32 } else { 0.0 };
         let pos_text = fmt_time(pos_secs);
         let dur_text = fmt_time(duration_secs);
 
         let liked = {
             let mut st = self.state.lock().unwrap();
-            st.queue = session.queue.clone();
+            if st.current.is_some() || st.audio_started {
+                return;
+            }
+            st.queue = session.queue;
+            st.unshuffled_queue = session.unshuffled_queue;
             st.current = Some(idx);
             st.position_secs = pos_secs;
+            st.last_saved_sec = 0;
             st.duration_secs = duration_secs;
             st.audio_started = false;
             if let Some(w) = session.wave {
@@ -2613,10 +2943,19 @@ impl YMusicCore {
         self.send_queue();
     }
 
+    pub fn restore_session(self: Arc<Self>) {
+        let settings = config::load_settings();
+        let Some(session) = settings.session else { return };
+        self.apply_saved_session(session);
+    }
+
     pub fn on_mpris(self: Arc<Self>, action: MprisAction) {
         match action {
             MprisAction::Play => self.clone().play(),
-            MprisAction::Pause => self.audio.pause(),
+            MprisAction::Pause => {
+                self.audio.pause();
+                self.persist_session();
+            }
             MprisAction::Toggle => self.clone().toggle(),
             MprisAction::Stop => {
                 self.audio.stop();

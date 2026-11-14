@@ -36,7 +36,7 @@ Item {
         anchors.fill: parent
 
         property size itemSize: Qt.size(width, height)
-        property real time: root.flows ? clock.time : 37
+        property real time: root.flows ? (37 + clock.time) : 37
         property vector4d energy: root.flows ? clock.energy : Qt.vector4d(0, 0, 0, 0)
         property real lead: root.flows ? clock.lead : 0
         property color c0: root.shade(0)

@@ -15,7 +15,7 @@ ApplicationWindow {
 
     readonly property bool isHome: backend.page === 0
     readonly property bool isCardsPage: backend.page >= 3 && backend.page <= 5
-    readonly property bool isSearchPage: backend.page === 6
+    readonly property bool isSearchPage: backend.page === 8
     readonly property bool isTrackListPage: backend.page === 1 || backend.page === 2 || backend.page === 7
         || (!isHome && !isCardsPage && !isSearchPage)
 
@@ -74,6 +74,7 @@ ApplicationWindow {
     }
 
     onClosing: (close) => {
+        backend.saveSession();
         if (trayAvailable) {
             close.accepted = false;
             window.hide();

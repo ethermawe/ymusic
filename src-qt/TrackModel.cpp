@@ -17,6 +17,7 @@ QVariant TrackModel::data(const QModelIndex &index, int role) const {
     case IdRole: return t.id;
     case TitleRole: return t.title;
     case ArtistsRole: return t.artists;
+    case ArtistLinksRole: return t.artistLinks;
     case AlbumRole: return t.album;
     case DurationRole: return t.duration;
     case DurationMsRole: return t.durationMs;
@@ -38,6 +39,7 @@ QHash<int, QByteArray> TrackModel::roleNames() const {
     roles[IdRole] = "id";
     roles[TitleRole] = "title";
     roles[ArtistsRole] = "artists";
+    roles[ArtistLinksRole] = "artistLinks";
     roles[AlbumRole] = "album";
     roles[DurationRole] = "duration";
     roles[DurationMsRole] = "durationMs";
@@ -98,6 +100,7 @@ void TrackModel::setTracks(const QJsonArray &tracksArray, int currentIndex) {
         t.id = obj["id"].toString();
         t.title = obj["title"].toString();
         t.artists = obj["artists"].toString();
+        t.artistLinks = obj["artist_links"].toArray().toVariantList();
         t.album = obj["album"].toString();
         t.duration = obj["duration"].toString();
         t.durationMs = obj["duration_ms"].toInteger();

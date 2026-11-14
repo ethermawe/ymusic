@@ -130,5 +130,5 @@ void main()
     float falloff = 1.0 - smoothstep(0.35, 0.95, length(qt_TexCoord0 - 0.5));
 
     vec4 ground = vec4(0.009, 0.009, 0.012, 1.0);
-    fragColor = mix(ground, base, 0.35 + 0.4 * falloff) * qt_Opacity;
+    fragColor = mix(ground, base, 0.50 + 0.38 * falloff) * qt_Opacity;
 }

@@ -132,7 +132,12 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
     case EVENT_FEATURE: {
         const auto type = obj["type"].toString();
         if (type == "history") m_historyModel.setTracks(obj["tracks"].toArray(), -1);
-        else if (type == "view") m_collectionDownloadable = obj["downloadable"].toBool();
+        else if (type == "view") {
+            m_collectionDownloadable = obj["downloadable"].toBool();
+            m_activePlaylistKey = obj["playlist_key"].toString();
+            m_activePlaylistPinned = obj["playlist_pinned"].toBool();
+        }
+        else if (type == "pinned_playlists") m_pinnedPlaylists = obj["playlists"].toArray().toVariantList();
         else if (type == "search") {
             m_searchQuery = obj["query"].toString();
             m_searchFilter = obj["filter"].toString("all");
@@ -370,6 +375,12 @@ void YMusicBackend::dislikeNow() {
 void YMusicBackend::clearStatus() {
     m_statusMessage.clear();
     emit statusChanged();
+}
+
+void YMusicBackend::saveSession() {
+    if (m_core) {
+        ymusic_core_save_session(m_core);
+    }
 }
 
 void YMusicBackend::feature(const QVariantMap &command) {

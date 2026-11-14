@@ -182,7 +182,7 @@ Dialog {
                 maximumFlickVelocity: 5000
                 flickDeceleration: 2400
                 model: root.filtered
-                FastWheel {}
+                FastWheel { target: list }
                 spacing: 6
                 visible: !root.loading
                 delegate: ItemDelegate {

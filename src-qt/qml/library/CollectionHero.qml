@@ -200,6 +200,14 @@ Item {
             }
 
             TextButton {
+                visible: !root.isArtist && backend.page === 6 && backend.activePlaylistKey.length > 0 && backend.loggedIn
+                variant: backend.activePlaylistPinned ? TextButton.Tonal : TextButton.Outlined
+                symbol: "push_pin"
+                text: backend.activePlaylistPinned ? qsTr("Открепить") : qsTr("Закрепить")
+                onClicked: backend.feature({action: "toggle_pin_playlist"})
+            }
+
+            TextButton {
                 visible: root.isArtist && backend.canStartArtistWave && backend.loggedIn
                 variant: TextButton.Filled
                 wavy: true

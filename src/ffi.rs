@@ -425,6 +425,13 @@ pub unsafe extern "C" fn ymusic_core_dislike_now(handle: *mut CoreHandle) {
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_core_save_session(handle: *mut CoreHandle) {
+    if let Some(h) = unsafe { handle.as_ref() } {
+        h.core.persist_session_sync();
+    }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_spectrum_levels(handle: *mut CoreHandle, out: *mut f32, capacity: u32) -> u32 {
     if out.is_null() || capacity == 0 {
         return 0;

@@ -277,6 +277,16 @@ FocusScope {
         shown: root.visible
     }
 
+    Stickers {
+        anchors.fill: parent
+        key: (backend.nowId || "immersive") + "-" + backend.nowAlbum
+        count: 6
+        minimumSize: Math.max(150, Math.round(Math.min(root.width, root.height) * 0.24))
+        maximumSize: Math.max(280, Math.round(Math.min(root.width, root.height) * 0.46))
+        scheme: root.scheme
+        strength: 0.35
+    }
+
     HoverHandler {
         cursorShape: (root.distractionFree && root.controlsHidden) ? Qt.BlankCursor : Qt.ArrowCursor
         onPointChanged: {

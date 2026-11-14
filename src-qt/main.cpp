@@ -21,6 +21,9 @@
 #include <QLockFile>
 #include <QDir>
 #include <QFileInfo>
+#ifndef QT_NO_SESSIONMANAGER
+#include <QSessionManager>
+#endif
 
 #include "YMusicBackend.h"
 #include "TrackModel.h"
@@ -299,6 +302,13 @@ int main(int argc, char *argv[]) {
             }
         }
     });
+
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &backend, &YMusicBackend::saveSession);
+#ifndef QT_NO_SESSIONMANAGER
+    QObject::connect(&app, &QGuiApplication::commitDataRequest, &backend, [&](QSessionManager &) {
+        backend.saveSession();
+    });
+#endif
 
     return app.exec();
 }
