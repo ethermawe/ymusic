@@ -9,13 +9,19 @@ use serde_json::{Value, json};
 const BASE: &str = "https://api.music.yandex.net";
 const OAUTH: &str = "https://oauth.yandex.ru";
 const CLIENT_HEADER: &str = "YandexMusicAndroid/24023621";
+const DESKTOP_CLIENT_HEADER: &str = "YandexMusicDesktopAppWindows/5.95.0";
+const DESKTOP_SIGN_KEY: &[u8] = b"kzqU4XhfCaY6B6JTHODeq5";
 const SIGN_SALT: &str = "XGRlBW9FXlekgbPrRHuSiA";
 
 // Публичные OAuth-креды Android-приложения Яндекс Музыки (как в MarshalX/yandex-music-api).
 const OAUTH_CLIENT_ID: &str = "23cabbbdc6cd418abb4b39c32c41195d";
 const OAUTH_CLIENT_SECRET: &str = "53bc75238f0c4d08a118e51fe9203300";
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub fn normalize_track_id(track_id: &str) -> &str {
+    track_id.split(':').next().unwrap_or(track_id)
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Track {
     pub id: String,
     pub album_id: Option<String>,
@@ -28,7 +34,19 @@ pub struct Track {
     pub duration_ms: u64,
     pub cover_uri: Option<String>,
     pub available: bool,
+    #[serde(default)]
+    pub has_sync_lyrics: bool,
+    #[serde(default)]
+    pub has_text_lyrics: bool,
+    #[serde(default)]
+    pub r128_i: Option<f32>,
+    #[serde(default)]
+    pub r128_tp: Option<f32>,
+    #[serde(default)]
+    pub is_ai: bool,
 }
+
+impl Eq for Track {}
 
 impl Track {
     pub fn cover_url(&self, size: u32) -> Option<String> {
@@ -40,6 +58,20 @@ impl Track {
             Some(a) => format!("{}:{a}", self.id),
             None => self.id.clone(),
         }
+    }
+
+    /// Коэффициент громкости по стандарту EBU R128 (целевой уровень -14 LUFS с защитой от клиппинга по True Peak).
+    pub fn r128_gain(&self) -> f32 {
+        let Some(integrated) = self.r128_i.filter(|v| v.is_finite() && *v < 0.0 && *v > -70.0) else {
+            return 1.0;
+        };
+        let target_lufs = -14.0f32;
+        let mut delta_db = (target_lufs - integrated).clamp(-12.0, 9.0);
+        if let Some(tp) = self.r128_tp.filter(|v| v.is_finite()) {
+            let max_gain_db = (-1.0 - tp).max(-12.0);
+            delta_db = delta_db.min(max_gain_db);
+        }
+        10.0f32.powf(delta_db / 20.0).clamp(0.25, 2.0)
     }
 }
 
@@ -67,6 +99,8 @@ pub struct AlbumCard {
     pub track_count: u64,
     #[serde(default)]
     pub cover_uri: Option<String>,
+    #[serde(default)]
+    pub section: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +119,36 @@ pub struct ArtistPage {
     pub artist: ArtistCard,
     pub popular_tracks: Vec<Track>,
     pub albums: Vec<AlbumCard>,
+    pub similar_artists: Vec<ArtistCard>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LandingHome {
+    pub personal_playlists: Vec<PlaylistCard>,
+    pub new_releases: Vec<AlbumCard>,
+    pub new_playlists: Vec<PlaylistCard>,
+    pub chart_tracks: Vec<Track>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreditItem {
+    pub title: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct StreamInfo {
+    pub url: String,
+    pub codec: String,
+    pub quality: String,
+    pub bitrate: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct RotorTracksBatch {
+    pub batch_id: String,
+    pub tracks: Vec<Track>,
+    pub unknown_session: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -113,6 +177,10 @@ pub struct LyricsLine {
 pub struct TrackLyrics {
     pub synced: bool,
     pub lines: Vec<LyricsLine>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub writers: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub major: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -121,6 +189,8 @@ pub struct LyricsQueryMeta {
     pub artist: String,
     pub album: String,
     pub duration_secs: f64,
+    pub has_sync_lyrics: Option<bool>,
+    pub has_text_lyrics: Option<bool>,
 }
 
 pub struct Account {
@@ -185,7 +255,26 @@ impl Api {
                 Ok(resp) => {
                     let status = resp.status();
                     match resp.text().await {
-                        Ok(text) => return Ok((status, text)),
+                        Ok(text) => {
+                            let code = status.as_u16();
+                            let retryable_status = code == 429
+                                || code == 502
+                                || code == 503
+                                || code == 504
+                                || (code == 403
+                                    && attempt == 0
+                                    && !text.contains("invalid-token")
+                                    && !text.contains("access-denied")
+                                    && !text.contains("unauthorized"));
+                            if !is_last && retryable_status {
+                                tokio::time::sleep(Duration::from_millis(
+                                    150 * (attempt as u64 + 1),
+                                ))
+                                .await;
+                                continue;
+                            }
+                            return Ok((status, text));
+                        }
                         Err(e) if !is_last && is_retryable_reqwest_err(&e) => {
                             tokio::time::sleep(Duration::from_millis(150 * (attempt as u64 + 1)))
                                 .await;
@@ -276,7 +365,11 @@ impl Api {
         }
         if avatar_url.is_none() {
             if let Ok(resp) = self
-                .auth(self.http.get("https://login.yandex.ru/info?format=json"))
+                .auth(
+                    self.http
+                        .get("https://login.yandex.ru/info?format=json")
+                        .timeout(Duration::from_secs(2)),
+                )
                 .send()
                 .await
             {
@@ -376,17 +469,135 @@ impl Api {
     }
 
     pub async fn tracks(&self, ids: &[String]) -> Result<Vec<Track>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut out = Vec::with_capacity(ids.len());
-        for chunk in ids.chunks(250) {
+        let chunks: Vec<&[String]> = ids.chunks(150).collect();
+        for (idx, chunk) in chunks.iter().enumerate() {
+            if idx > 0 {
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
             let joined = chunk.join(",");
             let r = self
                 .post_form("/tracks", &[("track-ids", &joined), ("with-positions", "false")])
                 .await?;
             if let Some(items) = r.as_array() {
-                out.extend(items.iter().filter_map(parse_track));
+                let parsed: Vec<Track> = items.iter().filter_map(parse_track).collect();
+                if parsed.len() == chunk.len() {
+                    out.extend(parsed);
+                } else {
+                    // Восстанавливаем точный порядок запрошенных ID
+                    let mut by_id = std::collections::HashMap::with_capacity(parsed.len());
+                    for t in parsed {
+                        by_id.entry(t.id.clone()).or_insert(t);
+                    }
+                    for req_id in *chunk {
+                        let clean = normalize_track_id(req_id);
+                        if let Some(t) = by_id.get(clean) {
+                            out.push(t.clone());
+                        }
+                    }
+                }
             }
         }
         Ok(out)
+    }
+
+    pub async fn search_suggest(&self, part: &str) -> Result<Vec<String>> {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            return Ok(Vec::new());
+        }
+        let r = self.get("/search/suggest", &[("part", trimmed)]).await?;
+        Ok(r["suggestions"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .take(10)
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    pub async fn landing_home(&self) -> Result<LandingHome> {
+        let r = self
+            .get(
+                "/landing3",
+                &[(
+                    "blocks",
+                    "personalplaylists,new-releases,new-playlists,chart,play_contexts",
+                )],
+            )
+            .await?;
+        let mut home = LandingHome::default();
+        if let Some(blocks) = r["blocks"].as_array() {
+            for block in blocks {
+                let btype = block["type"].as_str().unwrap_or("");
+                let Some(entities) = block["entities"].as_array() else { continue };
+                match btype {
+                    "personal-playlists" => {
+                        for ent in entities {
+                            let p_val = ent["data"].get("data").unwrap_or(&ent["data"]);
+                            if let Some(mut card) = parse_playlist(p_val) {
+                                if let Some(desc) = ent["data"]["description"]
+                                    .as_str()
+                                    .or_else(|| p_val["description"].as_str())
+                                    .filter(|s| !s.is_empty())
+                                {
+                                    card.subtitle = desc.to_string();
+                                }
+                                home.personal_playlists.push(card);
+                            }
+                        }
+                    }
+                    "new-releases" => {
+                        for ent in entities {
+                            let a_val = ent.get("data").unwrap_or(ent);
+                            if let Some(album) = parse_album(a_val) {
+                                home.new_releases.push(album);
+                            }
+                        }
+                    }
+                    "new-playlists" => {
+                        for ent in entities {
+                            let p_val = ent.get("data").unwrap_or(ent);
+                            if let Some(pl) = parse_playlist(p_val) {
+                                home.new_playlists.push(pl);
+                            }
+                        }
+                    }
+                    "chart" => {
+                        for ent in entities {
+                            let t_val = ent["data"].get("track").unwrap_or(&ent["data"]);
+                            if let Some(track) = parse_track(t_val) {
+                                home.chart_tracks.push(track);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(home)
+    }
+
+    pub async fn chart_tracks(&self) -> Result<Vec<Track>> {
+        let r = self.get("/landing3/chart", &[]).await?;
+        if let Some(items) = r["chart"]["tracks"].as_array() {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                let t_val = item.get("track").unwrap_or(item);
+                if let Some(t) = parse_track(t_val) {
+                    out.push(t);
+                }
+            }
+            if !out.is_empty() {
+                return Ok(out);
+            }
+        }
+        Ok(Vec::new())
     }
 
     pub async fn search_all(&self, text: &str) -> Result<SearchResults> {
@@ -457,25 +668,245 @@ impl Api {
         let Some(items) = r["tracks"].as_array() else {
             return Ok(Vec::new());
         };
-        let mut parsed = Vec::with_capacity(items.len());
+        enum Slot {
+            Ready(Track),
+            Missing(String),
+        }
+        let mut slots = Vec::with_capacity(items.len());
         let mut missing_ids = Vec::new();
         for item in items {
             if let Some(t) = item.get("track").and_then(parse_track) {
-                parsed.push(t);
+                slots.push(Slot::Ready(t));
             } else if let Some(t) = parse_track(item) {
-                parsed.push(t);
+                slots.push(Slot::Ready(t));
             } else if let Some(id) = id_str(&item["id"]) {
                 let full = match id_str(&item["albumId"]) {
                     Some(a) => format!("{id}:{a}"),
-                    None => id,
+                    None => id.clone(),
                 };
                 missing_ids.push(full);
+                slots.push(Slot::Missing(id));
             }
         }
+        let mut fetched_map = std::collections::HashMap::new();
         if !missing_ids.is_empty() {
-            parsed.extend(self.tracks(&missing_ids).await?);
+            for t in self.tracks(&missing_ids).await? {
+                fetched_map.entry(t.id.clone()).or_insert(t);
+            }
+        }
+        let mut parsed = Vec::with_capacity(slots.len());
+        for slot in slots {
+            match slot {
+                Slot::Ready(t) => parsed.push(t),
+                Slot::Missing(id) => {
+                    if let Some(t) = fetched_map.get(&id) {
+                        parsed.push(t.clone());
+                    }
+                }
+            }
         }
         Ok(parsed)
+    }
+
+    pub async fn delete_playlist(&self, uid: u64, kind: u64) -> Result<()> {
+        self.post_form(&format!("/users/{uid}/playlists/{kind}/delete"), &[])
+            .await?;
+        Ok(())
+    }
+
+    pub async fn rename_playlist(&self, uid: u64, kind: u64, title: &str) -> Result<PlaylistCard> {
+        let title = title.trim();
+        anyhow::ensure!(
+            !title.is_empty() && title.chars().count() <= 100,
+            "Название должно содержать от 1 до 100 символов"
+        );
+        let r = self
+            .post_form(
+                &format!("/users/{uid}/playlists/{kind}/name"),
+                &[("value", title)],
+            )
+            .await?;
+        parse_playlist(&r).ok_or_else(|| anyhow!("Сервер не вернул обновлённый плейлист"))
+    }
+
+    pub async fn delete_playlist_track(&self, uid: u64, kind: u64, track_id: &str) -> Result<()> {
+        let clean_target = normalize_track_id(track_id);
+        let playlist = self.get(&format!("/users/{uid}/playlists/{kind}"), &[]).await?;
+        anyhow::ensure!(
+            id_str(&playlist["owner"]["uid"]).as_deref() == Some(&uid.to_string()),
+            "плейлист принадлежит другому пользователю"
+        );
+        let revision = playlist["revision"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("сервер не вернул ревизию плейлиста"))?
+            .to_string();
+        let items = playlist["tracks"]
+            .as_array()
+            .ok_or_else(|| anyhow!("плейлист пуст"))?;
+        let idx = items
+            .iter()
+            .position(|item| {
+                id_str(&item["id"]).as_deref() == Some(clean_target)
+                    || id_str(&item["track"]["id"]).as_deref() == Some(clean_target)
+            })
+            .ok_or_else(|| anyhow!("трек не найден в плейлисте"))?;
+        let item_val = &items[idx];
+        let mut track_obj = json!({ "id": clean_target });
+        if let Some(aid) = id_str(&item_val["albumId"])
+            .or_else(|| id_str(&item_val["track"]["albums"][0]["id"]))
+        {
+            track_obj["albumId"] = json!(aid);
+        }
+        let diff = json!([{
+            "op": "delete",
+            "from": idx,
+            "to": idx + 1,
+            "tracks": [track_obj]
+        }])
+        .to_string();
+        self.post_form(
+            &format!("/users/{uid}/playlists/{kind}/change"),
+            &[
+                ("kind", &kind.to_string()),
+                ("revision", &revision),
+                ("diff", &diff),
+            ],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn playlist_recommendations(&self, uid: u64, kind: u64) -> Result<Vec<Track>> {
+        let r = self
+            .get(&format!("/users/{uid}/playlists/{kind}/recommendations"), &[])
+            .await?;
+        Ok(r["tracks"]
+            .as_array()
+            .map(|arr| arr.iter().filter_map(parse_track).collect())
+            .unwrap_or_default())
+    }
+
+    pub async fn like_playlist(&self, uid: u64, owner_uid: u64, kind: u64) -> Result<()> {
+        let pid = format!("{owner_uid}:{kind}");
+        self.post_form(
+            &format!("/users/{uid}/likes/playlists/add-multiple"),
+            &[("playlist-ids", &pid)],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn unlike_playlist(&self, uid: u64, owner_uid: u64, kind: u64) -> Result<()> {
+        let pid = format!("{owner_uid}:{kind}");
+        self.post_form(
+            &format!("/users/{uid}/likes/playlists/remove"),
+            &[("playlist-ids", &pid)],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn like_album(&self, uid: u64, album_id: &str) -> Result<()> {
+        self.post_form(
+            &format!("/users/{uid}/likes/albums/add-multiple"),
+            &[("album-ids", album_id)],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn unlike_album(&self, uid: u64, album_id: &str) -> Result<()> {
+        self.post_form(
+            &format!("/users/{uid}/likes/albums/remove"),
+            &[("album-ids", album_id)],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn like_artist(&self, uid: u64, artist_id: &str) -> Result<()> {
+        self.post_form(
+            &format!("/users/{uid}/likes/artists/add-multiple"),
+            &[("artist-ids", artist_id)],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn unlike_artist(&self, uid: u64, artist_id: &str) -> Result<()> {
+        self.post_form(
+            &format!("/users/{uid}/likes/artists/remove"),
+            &[("artist-ids", artist_id)],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn similar_tracks(&self, track_id: &str) -> Result<Vec<Track>> {
+        let clean = normalize_track_id(track_id);
+        let r = self.get(&format!("/tracks/{clean}/similar"), &[]).await?;
+        Ok(r["similarTracks"]
+            .as_array()
+            .map(|arr| arr.iter().filter_map(parse_track).collect())
+            .unwrap_or_default())
+    }
+
+    pub async fn track_credits(&self, track_id: &str) -> Result<Vec<CreditItem>> {
+        let clean = normalize_track_id(track_id);
+        let r = self.get(&format!("/tracks/{clean}/credits"), &[]).await?;
+        Ok(r["credits"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        let title = item["title"].as_str()?.trim();
+                        let value = item["value"].as_str()?.trim();
+                        if title.is_empty() || value.is_empty() {
+                            None
+                        } else {
+                            Some(CreditItem {
+                                title: title.to_string(),
+                                value: value.to_string(),
+                            })
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    pub async fn play_audio(
+        &self,
+        uid: u64,
+        track: &Track,
+        from_cache: bool,
+        total_played_seconds: f64,
+        end_position_seconds: f64,
+    ) {
+        let now_iso = format_iso8601_utc(SystemTime::now());
+        let track_len_secs = (track.duration_ms / 1000).to_string();
+        let played_str = format!("{:.1}", total_played_seconds.max(0.0));
+        let end_str = format!("{:.1}", end_position_seconds.max(0.0));
+        let uid_str = uid.to_string();
+        let cache_str = if from_cache { "True" } else { "False" };
+        let album_id = track.album_id.as_deref().unwrap_or("");
+        let play_id = format!("ymusic-{}-{}", uid, random_device_id());
+        let mut form = vec![
+            ("track-id", track.id.as_str()),
+            ("from-cache", cache_str),
+            ("from", "ymusic-desktop"),
+            ("play-id", play_id.as_str()),
+            ("uid", uid_str.as_str()),
+            ("timestamp", now_iso.as_str()),
+            ("client-now", now_iso.as_str()),
+            ("track-length-seconds", track_len_secs.as_str()),
+            ("total-played-seconds", played_str.as_str()),
+            ("end-position-seconds", end_str.as_str()),
+        ];
+        if !album_id.is_empty() {
+            form.push(("album-id", album_id));
+        }
+        let _ = self.post_form("/play-audio", &form).await;
     }
 
     pub async fn own_playlists(&self, uid: u64) -> Result<Vec<PlaylistCard>> {
@@ -593,10 +1024,15 @@ impl Api {
             );
         }
         albums.sort_by(|a, b| b.year.unwrap_or(0).cmp(&a.year.unwrap_or(0)));
+        let similar_artists: Vec<ArtistCard> = r["similarArtists"]
+            .as_array()
+            .map(|arr| arr.iter().filter_map(parse_artist).take(12).collect())
+            .unwrap_or_default();
         Ok(ArtistPage {
             artist,
             popular_tracks,
             albums,
+            similar_artists,
         })
     }
 
@@ -629,14 +1065,19 @@ impl Api {
         &self,
         session_id: &str,
         queue: &[String],
-    ) -> Result<(String, Vec<Track>)> {
+    ) -> Result<RotorTracksBatch> {
         let body = json!({ "queue": queue });
         let r = self
             .post_json(&format!("/rotor/session/{session_id}/tracks"), &body)
             .await?;
+        let unknown_session = r["unknownSession"].as_bool().unwrap_or(false);
         let batch_id = r["batchId"].as_str().unwrap_or_default().to_string();
         let tracks = parse_rotor_sequence(&r["sequence"]);
-        Ok((batch_id, tracks))
+        Ok(RotorTracksBatch {
+            batch_id,
+            tracks,
+            unknown_session,
+        })
     }
 
     pub async fn rotor_feedback(
@@ -662,9 +1103,87 @@ impl Api {
         }
     }
 
-    /// Получает прямую подписанную ссылку на MP3 (лучший битрейт, 320 kbps).
+    /// Получает прямую подписанную ссылку и метаданные потока через `/get-file-info` (с поддержкой Lossless FLAC, AAC, MP3)
+    /// и автоматическим резервным переходом на `/tracks/{id}/download-info`.
+    pub async fn track_stream_info(&self, track_id: &str, preferred_quality: &str) -> Result<StreamInfo> {
+        let clean_id = normalize_track_id(track_id);
+        let quality = match preferred_quality {
+            "lossless" | "hq" | "nq" => preferred_quality,
+            _ => "hq",
+        };
+        let codecs: &[&str] = match quality {
+            "lossless" => &["flac", "flac-mp4", "aac-mp4", "mp3"],
+            "nq" => &["aac-mp4", "mp3"],
+            _ => &["mp3", "aac-mp4"],
+        };
+        let transport = "raw";
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let sign = build_file_info_sign(ts, clean_id, quality, codecs, transport);
+        let ts_str = ts.to_string();
+        let codecs_csv = codecs.join(",");
+
+        let rb = self
+            .http
+            .get(format!("{BASE}/get-file-info"))
+            .header("Authorization", format!("OAuth {}", self.token))
+            .header("X-Yandex-Music-Client", DESKTOP_CLIENT_HEADER)
+            .header("Accept-Language", "ru")
+            .query(&[
+                ("ts", ts_str.as_str()),
+                ("trackId", clean_id),
+                ("quality", quality),
+                ("codecs", codecs_csv.as_str()),
+                ("transports", transport),
+                ("sign", sign.as_str()),
+            ]);
+
+        if let Ok(r) = Self::result(rb).await {
+            let di = &r["downloadInfo"];
+            let resp_transport = di["transport"].as_str().unwrap_or("raw");
+            if resp_transport == "raw" {
+                let url = di["url"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        di["urls"]
+                            .as_array()
+                            .and_then(|a| a.first())
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                    });
+                if let Some(url) = url {
+                    let codec = di["codec"].as_str().unwrap_or("mp3").to_string();
+                    let actual_quality = di["quality"].as_str().unwrap_or(quality).to_string();
+                    let bitrate = di["bitrate"].as_u64().unwrap_or(320);
+                    return Ok(StreamInfo {
+                        url: url.to_string(),
+                        codec,
+                        quality: actual_quality,
+                        bitrate,
+                    });
+                }
+            }
+        }
+
+        let (url, bitrate) = self.track_direct_url_legacy(clean_id).await?;
+        Ok(StreamInfo {
+            url,
+            codec: "mp3".to_string(),
+            quality: "hq".to_string(),
+            bitrate,
+        })
+    }
+
+    /// Получает прямую подписанную ссылку на аудиопоток (по умолчанию HQ).
     pub async fn track_direct_url(&self, track_id: &str) -> Result<String> {
-        let r = self.get(&format!("/tracks/{track_id}/download-info"), &[]).await?;
+        Ok(self.track_stream_info(track_id, "hq").await?.url)
+    }
+
+    async fn track_direct_url_legacy(&self, clean_id: &str) -> Result<(String, u64)> {
+        let r = self.get(&format!("/tracks/{clean_id}/download-info"), &[]).await?;
         let infos = r.as_array().ok_or_else(|| anyhow!("нет вариантов загрузки"))?;
         let bitrate = |i: &&Value| i["bitrateInKbps"].as_u64().unwrap_or(0);
         let mp3 = || infos.iter().filter(|i| i["codec"] == "mp3");
@@ -676,6 +1195,7 @@ impl Api {
         let info_url = best["downloadInfoUrl"]
             .as_str()
             .ok_or_else(|| anyhow!("нет downloadInfoUrl"))?;
+        let br = best["bitrateInKbps"].as_u64().unwrap_or(320);
 
         let (status, xml) = Self::send_with_retry(self.auth(self.http.get(info_url))).await?;
         if !status.is_success() {
@@ -686,67 +1206,69 @@ impl Api {
         let ts = xml_tag(&xml, "ts")?;
         let s = xml_tag(&xml, "s")?;
         let sign = md5::compute(format!("{SIGN_SALT}{}{s}", path.get(1..).unwrap_or("")));
-        Ok(format!("https://{host}/get-mp3/{sign:x}/{ts}{path}"))
+        Ok((format!("https://{host}/get-mp3/{sign:x}/{ts}{path}"), br))
     }
 
-    /// Загружает синхронизированный (LRC) текст с Яндекса или LRCLIB, либо обычный текст.
+    /// Загружает синхронизированный (LRC) текст с Яндекса или LRCLIB, либо обычный текст (`format=TEXT`).
     pub async fn track_lyrics(
         &self,
         track_id: &str,
         meta: Option<&LyricsQueryMeta>,
     ) -> Result<TrackLyrics> {
         const LYRICS_SIGN_KEY: &[u8] = b"p93jhgh689SBReK6ghtw62";
+        let clean_id = normalize_track_id(track_id);
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
             .to_string();
-        let msg = format!("{track_id}{ts}");
+        let msg = format!("{clean_id}{ts}");
         let sign = base64_encode(&hmac_sha256(LYRICS_SIGN_KEY, msg.as_bytes()));
 
-        match self
-            .get(
-                &format!("/tracks/{track_id}/lyrics"),
-                &[("format", "LRC"), ("timeStamp", &ts), ("sign", &sign)],
-            )
-            .await
-        {
-            Ok(r) => {
-                if let Some(url) = r["downloadUrl"].as_str().filter(|s| !s.is_empty()) {
-                    match Self::send_with_retry(self.http.get(url)).await {
-                        Ok((status, lrc_text)) if status.is_success() => {
-                            let lines = parse_lrc(&lrc_text);
-                            if !lines.is_empty() {
-                                return Ok(TrackLyrics {
-                                    synced: true,
-                                    lines,
-                                });
+        let mut writers = String::new();
+        let mut major = String::new();
+
+        let try_sync = meta.and_then(|m| m.has_sync_lyrics).unwrap_or(true);
+        if try_sync {
+            match self
+                .get(
+                    &format!("/tracks/{clean_id}/lyrics"),
+                    &[("format", "LRC"), ("timeStamp", &ts), ("sign", &sign)],
+                )
+                .await
+            {
+                Ok(r) => {
+                    extract_lyrics_credits(&r, &mut writers, &mut major);
+                    if let Some(url) = r["downloadUrl"].as_str().filter(|s| !s.is_empty()) {
+                        if let Ok((status, lrc_text)) = Self::send_with_retry(self.http.get(url)).await {
+                            if status.is_success() {
+                                let lines = parse_lrc(&lrc_text);
+                                if !lines.is_empty() {
+                                    return Ok(TrackLyrics {
+                                        synced: true,
+                                        lines,
+                                        writers,
+                                        major,
+                                    });
+                                }
                             }
-                            eprintln!(
-                                "[lyrics] yandex track {track_id}: downloadUrl returned {} bytes without LRC tags",
-                                lrc_text.len()
-                            );
-                        }
-                        Ok((status, _)) => {
-                            eprintln!("[lyrics] yandex track {track_id}: downloadUrl HTTP {status}");
-                        }
-                        Err(e) => {
-                            eprintln!("[lyrics] yandex track {track_id}: downloadUrl failed: {e}");
                         }
                     }
-                } else {
-                    eprintln!("[lyrics] yandex track {track_id}: no downloadUrl in /lyrics response");
                 }
-            }
-            Err(e) => {
-                eprintln!("[lyrics] yandex track {track_id}: /lyrics failed: {e}");
+                Err(e) => {
+                    eprintln!("[lyrics] yandex track {clean_id}: /lyrics LRC failed: {e}");
+                }
             }
         }
 
         let mut lrclib_plain: Option<String> = None;
         if let Some(m) = meta.filter(|m| !m.title.trim().is_empty() && !m.artist.trim().is_empty()) {
             match self.lrclib_lyrics(m).await {
-                Ok(Some(found)) if found.synced => return Ok(found),
+                Ok(Some(mut found)) if found.synced => {
+                    found.writers = writers;
+                    found.major = major;
+                    return Ok(found);
+                }
                 Ok(Some(found)) => {
                     let joined = found
                         .lines
@@ -765,14 +1287,31 @@ impl Api {
             }
         }
 
-        if let Ok(sup) = self.get(&format!("/tracks/{track_id}/supplement"), &[]).await {
-            if let Some(full) = sup["lyrics"]["fullLyrics"].as_str() {
-                let lines = plain_lyrics_lines(full);
-                if lines.iter().any(|l| !l.text.is_empty()) {
-                    return Ok(TrackLyrics {
-                        synced: false,
-                        lines,
-                    });
+        // Запрашиваем обычный текст через актуальный эндпоинт `/tracks/{id}/lyrics?format=TEXT`
+        let try_text = meta.and_then(|m| m.has_text_lyrics).unwrap_or(true);
+        if try_text {
+            if let Ok(r) = self
+                .get(
+                    &format!("/tracks/{clean_id}/lyrics"),
+                    &[("format", "TEXT"), ("timeStamp", &ts), ("sign", &sign)],
+                )
+                .await
+            {
+                extract_lyrics_credits(&r, &mut writers, &mut major);
+                if let Some(url) = r["downloadUrl"].as_str().filter(|s| !s.is_empty()) {
+                    if let Ok((status, plain_text)) = Self::send_with_retry(self.http.get(url)).await {
+                        if status.is_success() {
+                            let lines = plain_lyrics_lines(&plain_text);
+                            if lines.iter().any(|l| !l.text.is_empty()) {
+                                return Ok(TrackLyrics {
+                                    synced: false,
+                                    lines,
+                                    writers,
+                                    major,
+                                });
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -783,13 +1322,31 @@ impl Api {
                 return Ok(TrackLyrics {
                     synced: false,
                     lines,
+                    writers,
+                    major,
                 });
+            }
+        }
+
+        if let Ok(sup) = self.get(&format!("/tracks/{clean_id}/supplement"), &[]).await {
+            if let Some(full) = sup["lyrics"]["fullLyrics"].as_str() {
+                let lines = plain_lyrics_lines(full);
+                if lines.iter().any(|l| !l.text.is_empty()) {
+                    return Ok(TrackLyrics {
+                        synced: false,
+                        lines,
+                        writers,
+                        major,
+                    });
+                }
             }
         }
 
         Ok(TrackLyrics {
             synced: false,
             lines: Vec::new(),
+            writers,
+            major,
         })
     }
 
@@ -954,6 +1511,19 @@ fn parse_track(v: &Value) -> Option<Track> {
     let album = &v["albums"][0];
     let album_id = id_str(&album["id"]);
     let album_title = album["title"].as_str().unwrap_or_default().to_string();
+    let has_sync_lyrics = v["lyricsInfo"]["hasAvailableSyncLyrics"].as_bool().unwrap_or(false);
+    let has_text_lyrics = v["lyricsInfo"]["hasAvailableTextLyrics"]
+        .as_bool()
+        .or_else(|| v["lyricsAvailable"].as_bool())
+        .unwrap_or(has_sync_lyrics);
+    let r128_i = v["r128"]["i"].as_f64().map(|x| x as f32);
+    let r128_tp = v["r128"]["tp"].as_f64().map(|x| x as f32);
+    let is_ai = artist_id
+        .as_deref()
+        .is_some_and(crate::slopless::is_builtin_ai_artist_str)
+        || artist_links
+            .iter()
+            .any(|(aid, _)| crate::slopless::is_builtin_ai_artist_str(aid));
     Some(Track {
         id,
         album_id,
@@ -969,6 +1539,11 @@ fn parse_track(v: &Value) -> Option<Track> {
             .or(v["ogImage"].as_str())
             .map(str::to_string),
         available: v["available"].as_bool().unwrap_or(true),
+        has_sync_lyrics,
+        has_text_lyrics,
+        r128_i,
+        r128_tp,
+        is_ai,
     })
 }
 
@@ -1033,6 +1608,7 @@ fn parse_album(v: &Value) -> Option<AlbumCard> {
         year,
         track_count,
         cover_uri,
+        section: String::new(),
     })
 }
 
@@ -1313,6 +1889,42 @@ fn strip_title_suffix(title: &str) -> String {
     trimmed.to_string()
 }
 
+fn build_file_info_sign(
+    ts: u64,
+    track_id: &str,
+    quality: &str,
+    codecs: &[&str],
+    transport: &str,
+) -> String {
+    let msg = format!("{ts}{track_id}{quality}{}{transport}", codecs.join(""));
+    let mac = hmac_sha256(DESKTOP_SIGN_KEY, msg.as_bytes());
+    let mut b64 = base64_encode(&mac);
+    if b64.ends_with('=') {
+        b64.pop();
+    }
+    b64
+}
+
+fn extract_lyrics_credits(r: &Value, writers: &mut String, major: &mut String) {
+    if writers.is_empty() {
+        if let Some(arr) = r["writers"].as_array() {
+            let joined: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).filter(|s| !s.is_empty()).collect();
+            if !joined.is_empty() {
+                *writers = joined.join(", ");
+            }
+        }
+    }
+    if major.is_empty() {
+        if let Some(m) = r["major"]["prettyName"]
+            .as_str()
+            .or_else(|| r["major"]["name"].as_str())
+            .filter(|s| !s.is_empty())
+        {
+            *major = m.to_string();
+        }
+    }
+}
+
 fn extract_lrclib_entry(v: &Value) -> Option<TrackLyrics> {
     if let Some(synced) = v["syncedLyrics"].as_str().filter(|s| !s.trim().is_empty()) {
         let lines = parse_lrc(synced);
@@ -1320,6 +1932,8 @@ fn extract_lrclib_entry(v: &Value) -> Option<TrackLyrics> {
             return Some(TrackLyrics {
                 synced: true,
                 lines,
+                writers: String::new(),
+                major: String::new(),
             });
         }
     }
@@ -1329,6 +1943,8 @@ fn extract_lrclib_entry(v: &Value) -> Option<TrackLyrics> {
             return Some(TrackLyrics {
                 synced: false,
                 lines,
+                writers: String::new(),
+                major: String::new(),
             });
         }
     }
@@ -1480,5 +2096,43 @@ mod tests {
         let extracted_plain = extract_lrclib_entry(&plain_only).expect("plain should parse");
         assert!(!extracted_plain.synced);
         assert_eq!(extracted_plain.lines.len(), 1);
+    }
+
+    #[test]
+    fn normalizes_composite_track_id_and_builds_file_info_sign() {
+        assert_eq!(normalize_track_id("123456:7890"), "123456");
+        assert_eq!(normalize_track_id("123456"), "123456");
+
+        let sign = build_file_info_sign(
+            1700000000,
+            "123456",
+            "lossless",
+            &["flac", "flac-mp4", "aac-mp4", "mp3"],
+            "raw",
+        );
+        assert_eq!(sign.len(), 43);
+        assert!(!sign.ends_with('='));
+    }
+
+    #[test]
+    fn computes_r128_gain_with_true_peak_headroom() {
+        let mut t = parse_track(&serde_json::json!({
+            "id": "1",
+            "title": "Loud Track",
+            "r128": { "i": -8.0, "tp": 0.2 },
+            "lyricsInfo": { "hasAvailableSyncLyrics": true, "hasAvailableTextLyrics": true }
+        }))
+        .unwrap();
+        assert!(t.has_sync_lyrics);
+        assert!(t.has_text_lyrics);
+        let gain = t.r128_gain();
+        // Loud track (-8 LUFS vs -14 LUFS target => -6 dB => ~0.501)
+        assert!((gain - 0.501).abs() < 0.02, "gain={gain}");
+
+        t.r128_i = Some(-20.0);
+        t.r128_tp = Some(-2.0);
+        // Quiet track (-20 LUFS => +6 dB desired, but capped by TP -2.0 dB to +1.0 dB => ~1.122)
+        let limited = t.r128_gain();
+        assert!((limited - 1.122).abs() < 0.02, "limited={limited}");
     }
 }

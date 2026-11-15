@@ -5,7 +5,7 @@ pkgrel=3
 pkgdesc="Нативный клиент Яндекс Музыки на Rust и Qt Quick"
 arch=('x86_64')
 url="https://github.com/ethermawe/ymusic"
-license=('custom')
+license=('GPL-3.0-or-later')
 depends=('alsa-lib' 'gcc-libs' 'glibc' 'qt6-base' 'qt6-declarative' 'qt6-svg' 'hicolor-icon-theme')
 makedepends=('cmake' 'ninja' 'pkgconf' 'qt6-shadertools')
 if ! command -v cargo >/dev/null 2>&1; then
@@ -40,7 +40,8 @@ build() {
     cmake -S src-qt -B build-qt -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_INSTALL_LIBDIR=lib
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DYMUSIC_VERSION="$pkgver"
     cmake --build build-qt
 }
 

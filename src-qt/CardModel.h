@@ -11,6 +11,7 @@ struct CardData {
     QString title;
     QString subtitle;
     QString kind;
+    QString section;
     QString coverUrl;
     bool hasCover = false;
     bool pinned = false;
@@ -19,6 +20,7 @@ struct CardData {
 class CardModel : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    Q_PROPERTY(int revision READ revision NOTIFY cardsUpdated)
 
 public:
     enum CardRoles {
@@ -26,6 +28,7 @@ public:
         TitleRole,
         SubtitleRole,
         KindRole,
+        SectionRole,
         CoverUrlRole,
         HasCoverRole,
         PinnedRole
@@ -38,11 +41,15 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     int count() const { return m_cards.size(); }
+    int revision() const { return m_revision; }
     void setCards(const QJsonArray &cardsArray);
+    Q_INVOKABLE QVariantList cardsForSection(const QString &section) const;
 
 signals:
     void countChanged();
+    void cardsUpdated();
 
 private:
     QList<CardData> m_cards;
+    int m_revision = 0;
 };

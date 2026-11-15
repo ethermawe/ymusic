@@ -175,27 +175,45 @@ T.AbstractButton {
             spacing: 2
             opacity: (root.model?.available ?? true) ? 1 : 0.38
 
-            StyledText {
+            Item {
                 width: parent.width
-                text: root.model?.title ?? ""
-                elide: Text.ElideRight
-                font.pixelSize: Appearance.fontSize.small
-                font.weight: root.isCurrent ? Font.DemiBold : Font.Normal
-                color: root.isCurrent ? Appearance.colors.primary : Appearance.colors.onSurface
-                font.underline: titleHover.hovered && (root.model?.hasAlbum ?? false)
+                height: Math.max(trackTitleText.implicitHeight, 18)
 
-                HoverHandler {
-                    id: titleHover
-                    cursorShape: (root.model?.hasAlbum ?? false) ? Qt.PointingHandCursor : Qt.ArrowCursor
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    enabled: root.model?.hasAlbum ?? false
-                    onClicked: {
-                        if (!root.model) return;
-                        if (root.queueView) backend.trackAction(root.model.id, 6);
-                        else backend.openTrackAlbum(root.index);
+                readonly property bool showAiBadge: backend.showAiLabels && (root.model?.isAi ?? false)
+
+                StyledText {
+                    id: trackTitleText
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(implicitWidth, Math.max(0, parent.width - (aiBadge.visible ? aiBadge.width + 6 : 0)))
+                    text: root.model?.title ?? ""
+                    elide: Text.ElideRight
+                    font.pixelSize: Appearance.fontSize.small
+                    font.weight: root.isCurrent ? Font.DemiBold : Font.Normal
+                    color: root.isCurrent ? Appearance.colors.primary : Appearance.colors.onSurface
+                    font.underline: titleHover.hovered && (root.model?.hasAlbum ?? false)
+
+                    HoverHandler {
+                        id: titleHover
+                        cursorShape: (root.model?.hasAlbum ?? false) ? Qt.PointingHandCursor : Qt.ArrowCursor
                     }
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: root.model?.hasAlbum ?? false
+                        onClicked: {
+                            if (!root.model) return;
+                            if (root.queueView) backend.trackAction(root.model.id, 6);
+                            else backend.openTrackAlbum(root.index);
+                        }
+                    }
+                }
+
+                AiBadge {
+                    id: aiBadge
+                    visible: parent.showAiBadge
+                    anchors.left: trackTitleText.right
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
                 }
             }
 

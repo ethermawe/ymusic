@@ -81,11 +81,18 @@ Flickable {
             height: Math.ceil(Math.max(1, count) / Math.max(1, Math.floor(width / cellWidth))) * cellHeight
             visible: !backend.listLoading && count > 0
             cellWidth: 194
-            cellHeight: 254
+            cellHeight: 264
             interactive: false
             reuseItems: true
             model: root.visible ? backend.cards : null
-            delegate: CardItem { width: 178; height: 238 }
+            delegate: CardItem {
+                required property int index
+                required property var model
+                cardIndex: index
+                cardData: model
+                width: 178
+                height: 252
+            }
         }
 
         ListView {

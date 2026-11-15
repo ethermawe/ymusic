@@ -8,8 +8,29 @@ ScrollView {
     property bool tokenMode: false
     property bool showToken: false
     property bool codeCopied: false
+    property bool autoOpenOnCode: false
+    readonly property string tokenAuthUrl: "https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d"
     clip: true
     contentWidth: availableWidth
+
+    function switchMode(useToken) {
+        if (root.tokenMode === useToken) return;
+        root.tokenMode = useToken;
+        root.autoOpenOnCode = false;
+        root.codeCopied = false;
+        if (backend.loginBusy) backend.cancelLogin();
+        else backend.clearStatus();
+    }
+
+    function submitClipboardToken() {
+        const clip = backend.clipboardText().trim();
+        if (clip.length === 0) {
+            UiState.showToast("Буфер обмена пуст — сначала скопируйте ссылку или токен.");
+            return;
+        }
+        tokenInput.text = clip;
+        backend.loginToken(clip);
+    }
 
     component ActionButton: Button {
         id: control
@@ -85,17 +106,15 @@ ScrollView {
                     spacing: 8
                     ActionButton {
                         Layout.fillWidth: true
-                        text: "По коду"
+                        text: "Быстрый вход (код)"
                         primary: !root.tokenMode
-                        enabled: !backend.loginBusy
-                        onClicked: { root.tokenMode = false; backend.clearStatus(); }
+                        onClicked: root.switchMode(false)
                     }
                     ActionButton {
                         Layout.fillWidth: true
-                        text: "По токену"
+                        text: "Токен / ссылка"
                         primary: root.tokenMode
-                        enabled: !backend.loginBusy
-                        onClicked: { root.tokenMode = true; backend.clearStatus(); }
+                        onClicked: root.switchMode(true)
                     }
                 }
 
@@ -106,7 +125,7 @@ ScrollView {
 
                     StyledText {
                         Layout.fillWidth: true
-                        text: "1. Получите код\n2. Откройте страницу Яндекса и введите его\n3. Подтвердите доступ — вход завершится автоматически"
+                        text: "1. Нажмите кнопку — код скопируется в буфер и откроется Яндекс\n2. Вставьте код (Ctrl+V) и подтвердите вход\n3. Клиент войдёт автоматически"
                         wrapMode: Text.WordWrap
                         color: Appearance.colors.onSurfaceVariant
                         lineHeight: 1.3
@@ -115,10 +134,14 @@ ScrollView {
                     ActionButton {
                         Layout.fillWidth: true
                         visible: backend.loginCode.length === 0 || !backend.loginBusy
-                        text: backend.loginBusy ? "Получаем код…" : "Получить код входа"
+                        text: backend.loginBusy ? "Получаем код…" : "Войти через браузер"
                         primary: true
                         enabled: !backend.loginBusy
-                        onClicked: { root.codeCopied = false; backend.loginDevice(); }
+                        onClicked: {
+                            root.codeCopied = false;
+                            root.autoOpenOnCode = true;
+                            backend.loginDevice();
+                        }
                     }
 
                     Rectangle {
@@ -148,9 +171,10 @@ ScrollView {
                     RowLayout {
                         Layout.fillWidth: true
                         visible: backend.loginBusy && backend.loginCode.length > 0
+                        spacing: 8
                         ActionButton {
                             Layout.fillWidth: true
-                            text: root.codeCopied ? "Код скопирован" : "Копировать код"
+                            text: root.codeCopied ? "Скопирован" : "Копировать"
                             onClicked: { backend.copyText(backend.loginCode); root.codeCopied = true; }
                         }
                         ActionButton {
@@ -158,14 +182,38 @@ ScrollView {
                             text: "Открыть Яндекс"
                             primary: true
                             enabled: backend.loginUrl.length > 0
-                            onClicked: Qt.openUrlExternally(backend.loginUrl)
+                            onClicked: {
+                                backend.copyText(backend.loginCode);
+                                root.codeCopied = true;
+                                Qt.openUrlExternally(backend.loginUrl);
+                            }
+                        }
+                        ActionButton {
+                            text: "Отмена"
+                            onClicked: {
+                                root.autoOpenOnCode = false;
+                                root.codeCopied = false;
+                                backend.cancelLogin();
+                            }
+                        }
+                    }
+                    ActionButton {
+                        Layout.fillWidth: true
+                        visible: backend.loginBusy && backend.loginCode.length === 0
+                        text: "Отмена"
+                        onClicked: {
+                            root.autoOpenOnCode = false;
+                            backend.cancelLogin();
                         }
                     }
                     StyledText {
                         Layout.fillWidth: true
                         visible: backend.loginBusy && backend.loginCode.length > 0
-                        text: "Ждём подтверждения в браузере…"
+                        text: root.codeCopied
+                              ? "Код уже в буфере (Ctrl+V). Ждём подтверждения в браузере…"
+                              : "Ждём подтверждения в браузере…"
                         horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
                         color: Appearance.colors.onSurfaceVariant
                     }
                 }
@@ -176,15 +224,21 @@ ScrollView {
                     spacing: 12
                     StyledText {
                         Layout.fillWidth: true
-                        text: "Вставьте OAuth-токен Яндекс Музыки. Пароль от аккаунта здесь не нужен."
+                        text: "Откройте страницу Яндекса, подтвердите доступ и скопируйте ссылку из адресной строки (или сам OAuth-токен)."
                         wrapMode: Text.WordWrap
                         color: Appearance.colors.onSurfaceVariant
+                        lineHeight: 1.3
+                    }
+                    ActionButton {
+                        Layout.fillWidth: true
+                        text: "Открыть страницу токена"
+                        onClicked: Qt.openUrlExternally(root.tokenAuthUrl)
                     }
                     TextField {
                         id: tokenInput
                         Layout.fillWidth: true
                         implicitHeight: 48
-                        placeholderText: "OAuth-токен"
+                        placeholderText: "Токен или ссылка (#access_token=...)"
                         echoMode: root.showToken ? TextInput.Normal : TextInput.Password
                         enabled: !backend.loginBusy
                         selectByMouse: true
@@ -202,9 +256,16 @@ ScrollView {
                     }
                     RowLayout {
                         Layout.fillWidth: true
+                        spacing: 8
                         ActionButton {
-                            text: root.showToken ? "Скрыть токен" : "Показать токен"
+                            text: root.showToken ? "Скрыть" : "Показать"
                             onClicked: root.showToken = !root.showToken
+                        }
+                        ActionButton {
+                            Layout.fillWidth: true
+                            text: "Вставить и войти"
+                            enabled: !backend.loginBusy
+                            onClicked: root.submitClipboardToken()
                         }
                         ActionButton {
                             Layout.fillWidth: true
@@ -214,6 +275,12 @@ ScrollView {
                             onClicked: backend.loginToken(tokenInput.text.trim())
                         }
                     }
+                    ActionButton {
+                        Layout.fillWidth: true
+                        visible: backend.loginBusy
+                        text: "Отмена"
+                        onClicked: backend.cancelLogin()
+                    }
                 }
 
                 StyledText {
@@ -222,6 +289,15 @@ ScrollView {
                     text: backend.statusMessage
                     color: Appearance.colors.error
                     wrapMode: Text.WordWrap
+                }
+
+                ActionButton {
+                    Layout.fillWidth: true
+                    text: "Открыть загрузки (офлайн)"
+                    onClicked: {
+                        if (backend.loginBusy) backend.cancelLogin();
+                        backend.loadDownloads();
+                    }
                 }
             }
         }
@@ -234,6 +310,16 @@ ScrollView {
                 tokenInput.clear();
                 root.showToken = false;
                 root.codeCopied = false;
+                root.autoOpenOnCode = false;
+                return;
+            }
+            if (backend.loginBusy && backend.loginCode.length > 0) {
+                backend.copyText(backend.loginCode);
+                root.codeCopied = true;
+                if (root.autoOpenOnCode && backend.loginUrl.length > 0) {
+                    root.autoOpenOnCode = false;
+                    Qt.openUrlExternally(backend.loginUrl);
+                }
             }
         }
     }

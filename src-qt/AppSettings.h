@@ -14,6 +14,7 @@ class AppSettings : public QObject {
     Q_PROPERTY(bool motionEnabled READ motionEnabled WRITE setMotionEnabled NOTIFY changed)
     Q_PROPERTY(bool reduceMotion READ reduceMotion WRITE setReduceMotion NOTIFY reduceMotionChanged)
     Q_PROPERTY(bool performanceMode READ performanceMode WRITE setPerformanceMode NOTIFY performanceModeChanged)
+    Q_PROPERTY(bool fastImmersiveTransition READ fastImmersiveTransition WRITE setFastImmersiveTransition NOTIFY fastImmersiveTransitionChanged)
     Q_PROPERTY(bool noShapes READ noShapes WRITE setNoShapes NOTIFY noShapesChanged)
     Q_PROPERTY(bool iconAntialiasing READ iconAntialiasing WRITE setIconAntialiasing NOTIFY changed)
     Q_PROPERTY(bool coversEnabled READ coversEnabled WRITE setCoversEnabled NOTIFY changed)
@@ -36,7 +37,15 @@ class AppSettings : public QObject {
     Q_PROPERTY(double backdropBlur READ backdropBlur WRITE setBackdropBlur NOTIFY backdropBlurChanged)
     Q_PROPERTY(double backdropReactivity READ backdropReactivity WRITE setBackdropReactivity NOTIFY backdropReactivityChanged)
 
+    Q_PROPERTY(bool waveVisualizer READ waveVisualizer WRITE setWaveVisualizer NOTIFY waveSettingsChanged)
+    Q_PROPERTY(QString waveVisualizerShape READ waveVisualizerShape WRITE setWaveVisualizerShape NOTIFY waveSettingsChanged)
+    Q_PROPERTY(double waveVisualizerSensitivity READ waveVisualizerSensitivity WRITE setWaveVisualizerSensitivity NOTIFY waveSettingsChanged)
+    Q_PROPERTY(bool waveOrbArtwork READ waveOrbArtwork WRITE setWaveOrbArtwork NOTIFY waveSettingsChanged)
+    Q_PROPERTY(bool waveOrbSquiggle READ waveOrbSquiggle WRITE setWaveOrbSquiggle NOTIFY waveSettingsChanged)
+    Q_PROPERTY(double waveReactivity READ waveReactivity WRITE setWaveReactivity NOTIFY waveSettingsChanged)
+
     Q_PROPERTY(double zoom READ zoom WRITE setZoom NOTIFY zoomChanged)
+    Q_PROPERTY(double scrollSpeed READ scrollSpeed WRITE setScrollSpeed NOTIFY scrollSpeedChanged)
     Q_PROPERTY(bool pinnedPlaylistsExpanded READ pinnedPlaylistsExpanded WRITE setPinnedPlaylistsExpanded NOTIFY changed)
     Q_PROPERTY(bool allPlaylistsExpanded READ allPlaylistsExpanded WRITE setAllPlaylistsExpanded NOTIFY changed)
     Q_PROPERTY(QString immersivePlayerPanel READ immersivePlayerPanel WRITE setImmersivePlayerPanel NOTIFY changed)
@@ -46,6 +55,7 @@ class AppSettings : public QObject {
     Q_PROPERTY(bool showWindowControls READ showWindowControls WRITE setShowWindowControls NOTIFY windowControlsChanged)
     Q_PROPERTY(bool windowControlsOnRight READ windowControlsOnRight WRITE setWindowControlsOnRight NOTIFY windowControlsChanged)
     Q_PROPERTY(bool nativeTitleBar READ nativeTitleBar WRITE setNativeTitleBar NOTIFY windowControlsChanged)
+    Q_PROPERTY(bool autoUpdateEnabled READ autoUpdateEnabled WRITE setAutoUpdateEnabled NOTIFY autoUpdateEnabledChanged)
 
 public:
     explicit AppSettings(QObject *parent = nullptr) : QObject(parent), m_store("finrixx", "ymusic") {
@@ -57,6 +67,7 @@ public:
     bool motionEnabled() const { return m_store.value("ui/motionEnabled", true).toBool(); }
     bool reduceMotion() const { return !motionEnabled(); }
     bool performanceMode() const { return m_store.value("ui/performanceMode", false).toBool(); }
+    bool fastImmersiveTransition() const { return m_store.value("ui/fastImmersiveTransition", false).toBool(); }
     bool noShapes() const { return m_store.value("ui/noShapes", false).toBool(); }
     bool iconAntialiasing() const { return m_store.value("ui/iconAntialiasing", true).toBool(); }
     bool coversEnabled() const { return m_store.value("ui/coversEnabled", true).toBool(); }
@@ -82,7 +93,18 @@ public:
     double backdropBlur() const { return std::clamp(m_store.value("ui/backdropBlur", 40.0).toDouble(), 0.0, 100.0); }
     double backdropReactivity() const { return std::clamp(m_store.value("ui/backdropReactivity", 1.0).toDouble(), 0.0, 2.0); }
 
+    bool waveVisualizer() const { return m_store.value("ui/waveVisualizer", true).toBool(); }
+    QString waveVisualizerShape() const {
+        const QString shape = m_store.value("ui/waveVisualizerShape", "bars").toString();
+        return shape == "wave" ? "wave" : "bars";
+    }
+    double waveVisualizerSensitivity() const { return std::clamp(m_store.value("ui/waveVisualizerSensitivity", 1.0).toDouble(), 0.2, 2.5); }
+    bool waveOrbArtwork() const { return m_store.value("ui/waveOrbArtwork", true).toBool(); }
+    bool waveOrbSquiggle() const { return m_store.value("ui/waveOrbSquiggle", true).toBool(); }
+    double waveReactivity() const { return std::clamp(m_store.value("ui/waveReactivity", 1.0).toDouble(), 0.0, 3.0); }
+
     double zoom() const { return std::clamp(m_store.value("ui/zoom", 1.0).toDouble(), 0.75, 1.4); }
+    double scrollSpeed() const { return std::clamp(m_store.value("ui/scrollSpeed", 1.8).toDouble(), 0.5, 6.0); }
     bool pinnedPlaylistsExpanded() const { return m_store.value("ui/pinnedPlaylistsExpanded", true).toBool(); }
     bool allPlaylistsExpanded() const { return m_store.value("ui/allPlaylistsExpanded", true).toBool(); }
     QString immersivePlayerPanel() const { return m_store.value("ui/immersivePlayerPanel", "lyrics").toString(); }
@@ -92,6 +114,7 @@ public:
     bool showWindowControls() const { return m_store.value("ui/showWindowControls", true).toBool(); }
     bool windowControlsOnRight() const { return m_store.value("ui/windowControlsOnRight", false).toBool(); }
     bool nativeTitleBar() const { return m_store.value("ui/nativeTitleBar", false).toBool(); }
+    bool autoUpdateEnabled() const { return m_store.value("app/autoUpdateEnabled", true).toBool(); }
 
     void setMotionEnabled(bool value) {
         if (value != motionEnabled()) {
@@ -104,6 +127,12 @@ public:
         if (value != performanceMode()) {
             save("ui/performanceMode", value);
             emit performanceModeChanged();
+        }
+    }
+    void setFastImmersiveTransition(bool value) {
+        if (value != fastImmersiveTransition()) {
+            save("ui/fastImmersiveTransition", value);
+            emit fastImmersiveTransitionChanged();
         }
     }
     void setNoShapes(bool value) {
@@ -210,11 +239,58 @@ public:
         }
     }
 
+    void setWaveVisualizer(bool value) {
+        if (value != waveVisualizer()) {
+            save("ui/waveVisualizer", value);
+            emit waveSettingsChanged();
+        }
+    }
+    void setWaveVisualizerShape(const QString &value) {
+        const QString normalized = value == "wave" ? "wave" : "bars";
+        if (normalized != waveVisualizerShape()) {
+            save("ui/waveVisualizerShape", normalized);
+            emit waveSettingsChanged();
+        }
+    }
+    void setWaveVisualizerSensitivity(double value) {
+        const double clamped = std::clamp(value, 0.2, 2.5);
+        if (!qFuzzyCompare(clamped, waveVisualizerSensitivity())) {
+            save("ui/waveVisualizerSensitivity", clamped);
+            emit waveSettingsChanged();
+        }
+    }
+    void setWaveOrbArtwork(bool value) {
+        if (value != waveOrbArtwork()) {
+            save("ui/waveOrbArtwork", value);
+            emit waveSettingsChanged();
+        }
+    }
+    void setWaveOrbSquiggle(bool value) {
+        if (value != waveOrbSquiggle()) {
+            save("ui/waveOrbSquiggle", value);
+            emit waveSettingsChanged();
+        }
+    }
+    void setWaveReactivity(double value) {
+        const double clamped = std::clamp(value, 0.0, 3.0);
+        if (!qFuzzyCompare(clamped, waveReactivity())) {
+            save("ui/waveReactivity", clamped);
+            emit waveSettingsChanged();
+        }
+    }
+
     void setZoom(double value) {
         const double clamped = std::clamp(value, 0.75, 1.4);
         if (!qFuzzyCompare(clamped, zoom())) {
             save("ui/zoom", clamped);
             emit zoomChanged();
+        }
+    }
+    void setScrollSpeed(double value) {
+        const double clamped = std::clamp(value, 0.5, 6.0);
+        if (!qFuzzyCompare(clamped, scrollSpeed())) {
+            save("ui/scrollSpeed", clamped);
+            emit scrollSpeedChanged();
         }
     }
     void setPinnedPlaylistsExpanded(bool value) { if (value != pinnedPlaylistsExpanded()) save("ui/pinnedPlaylistsExpanded", value); }
@@ -249,9 +325,15 @@ public:
             emit windowControlsChanged();
         }
     }
+    void setAutoUpdateEnabled(bool value) {
+        if (value != autoUpdateEnabled()) {
+            save("app/autoUpdateEnabled", value);
+            emit autoUpdateEnabledChanged();
+        }
+    }
 
     Q_INVOKABLE bool openOfflineFolder() {
-        QString base = qEnvironmentVariable("XDG_DATA_HOME");
+        QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
         if (base.isEmpty()) base = QDir::homePath() + "/.local/share";
         const QString path = base + "/ymusic/offline";
         return QDir().mkpath(path) && QDesktopServices::openUrl(QUrl::fromLocalFile(path));
@@ -262,6 +344,7 @@ signals:
     void saveFailed();
     void reduceMotionChanged();
     void performanceModeChanged();
+    void fastImmersiveTransitionChanged();
     void noShapesChanged();
     void visualizersEnabledChanged();
     void visualizerTogglesChanged();
@@ -271,10 +354,13 @@ signals:
     void livingBackdropChanged();
     void backdropBlurChanged();
     void backdropReactivityChanged();
+    void waveSettingsChanged();
     void zoomChanged();
+    void scrollSpeedChanged();
     void debuggingEnabledChanged();
     void windowControlsChanged();
     void themeChanged();
+    void autoUpdateEnabledChanged();
 
 private:
     void save(const QString &key, const QVariant &value) {

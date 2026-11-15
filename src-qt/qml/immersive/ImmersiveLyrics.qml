@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Effects
@@ -39,13 +58,14 @@ Item {
 
     Item {
         id: statusHeader
+        z: 2
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.leftMargin: 20
         anchors.rightMargin: 20
-        anchors.topMargin: visible ? 8 : 0
-        height: visible ? 32 : 0
+        anchors.topMargin: 8
+        height: 32
         visible: !UiState.lyricsLoading && root.hasLyrics && list.scrolledAway && UiState.lyricsSynced && UiState.activeLyricIndex >= 0
 
         Rectangle {
@@ -81,7 +101,6 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                     list.manualBrowsing = false
-                    manualCooldown.stop()
                     list.follow(true)
                 }
             }
@@ -92,10 +111,10 @@ Item {
         id: introBar
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: statusHeader.bottom
+        anchors.top: parent.top
         anchors.leftMargin: 20
         anchors.rightMargin: 20
-        anchors.topMargin: 4
+        anchors.topMargin: 8
         height: visible ? 3 : 0
         radius: 1.5
         visible: !UiState.lyricsLoading && root.hasLyrics && UiState.lyricsSynced
@@ -112,22 +131,13 @@ Item {
         }
     }
 
-    Timer {
-        id: manualCooldown
-        interval: 3500
-        onTriggered: {
-            list.manualBrowsing = false
-            list.follow(true)
-        }
-    }
-
     ListView {
         id: list
         objectName: "immersiveLyricsList"
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.top: introBar.visible ? introBar.bottom : statusHeader.bottom
+        anchors.top: introBar.visible ? introBar.bottom : parent.top
         anchors.topMargin: 4
         Reveal.shown: !UiState.lyricsLoading && root.hasLyrics
         model: UiState.lyricsLines
@@ -139,7 +149,14 @@ Item {
         boundsBehavior: Flickable.DragAndOvershootBounds
         cacheBuffer: 1200
         clip: true
-        FastWheel { target: list }
+        FastWheel {
+            id: lyricsWheel
+            target: list
+            onWheelScrolled: {
+                scroll.stop()
+                list.manualBrowsing = true
+            }
+        }
 
         signal stepped(real delta)
 
@@ -165,15 +182,14 @@ Item {
 
         onDraggingChanged: {
             if (dragging) {
+                scroll.stop()
                 manualBrowsing = true
-                manualCooldown.restart()
             }
         }
 
         onContentYChanged: {
-            if (!autoScrolling && !scroll.running && (moving || dragging)) {
+            if (!autoScrolling && !scroll.running && (moving || dragging || lyricsWheel.activeFlick === list)) {
                 manualBrowsing = true
-                manualCooldown.restart()
             }
             updateScrolledAway()
         }
@@ -188,9 +204,14 @@ Item {
         }
 
         function follow(animated: bool) {
+            if (manualBrowsing) {
+                updateScrolledAway();
+                return;
+            }
+            lyricsWheel.stopSmooth();
             const index = UiState.activeLyricIndex;
             if (index < 0) {
-                if (UiState.lyricsSynced && list.count > 0 && !manualBrowsing) {
+                if (UiState.lyricsSynced && list.count > 0) {
                     autoScrolling = true;
                     list.contentY = list.originY - list.topMargin;
                     autoScrolling = false;
@@ -246,8 +267,8 @@ Item {
                 }
             }
             function onLyricsLinesChanged() {
+                lyricsWheel.stopSmooth();
                 list.manualBrowsing = false;
-                manualCooldown.stop();
                 Qt.callLater(list.follow, false);
             }
         }
@@ -421,7 +442,6 @@ Item {
                     line.highlighted = true;
                     flash.restart();
                     list.manualBrowsing = false;
-                    manualCooldown.stop();
                     backend.seek(Math.max(0, Math.min(1, line.timeSecs / backend.durationSecs)));
                 }
             }

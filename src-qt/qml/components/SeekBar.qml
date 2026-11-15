@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import ymusic.ui
@@ -11,7 +30,8 @@ Item {
     property real positionMs: backend.positionSecs * 1000
     property real durationMs: backend.durationSecs * 1000
     property bool playing: backend.playing
-    property bool expanded: hover.hovered || scrub.editing
+    property bool externalHover: false
+    property bool expanded: hover.hovered || externalHover || scrub.editing
     property real restThickness: 4
     property real expandedThickness: 6
     property real positionAnchorMs: positionMs

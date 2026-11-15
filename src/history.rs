@@ -48,6 +48,7 @@ mod tests {
     fn track(id: &str) -> Track { Track {
         id: id.into(), title: id.into(), artists: String::new(), album_id: None,
         album_title: String::new(), artist_id: None, artist_links: Vec::new(), duration_ms: 1000, cover_uri: None, available: true,
+        has_sync_lyrics: false, has_text_lyrics: false, r128_i: None, r128_tp: None, is_ai: false,
     } }
     #[test]
     fn history_is_recent_unique_and_bounded() {

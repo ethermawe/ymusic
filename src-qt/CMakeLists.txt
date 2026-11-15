@@ -2,6 +2,26 @@ cmake_minimum_required(VERSION 3.20)
 project(ymusic_qt LANGUAGES CXX)
 include(GNUInstallDirs)
 
+set(YMUSIC_VERSION "0.2.2" CACHE STRING "Application version")
+string(REGEX REPLACE "^v" "" YMUSIC_VERSION_CLEAN "${YMUSIC_VERSION}")
+string(REGEX MATCHALL "[0-9]+" YMUSIC_VERSION_PARTS "${YMUSIC_VERSION_CLEAN}")
+list(LENGTH YMUSIC_VERSION_PARTS _ymusic_ver_len)
+if(_ymusic_ver_len GREATER 0)
+    list(GET YMUSIC_VERSION_PARTS 0 YMUSIC_VER_MAJOR)
+else()
+    set(YMUSIC_VER_MAJOR 0)
+endif()
+if(_ymusic_ver_len GREATER 1)
+    list(GET YMUSIC_VERSION_PARTS 1 YMUSIC_VER_MINOR)
+else()
+    set(YMUSIC_VER_MINOR 0)
+endif()
+if(_ymusic_ver_len GREATER 2)
+    list(GET YMUSIC_VERSION_PARTS 2 YMUSIC_VER_PATCH)
+else()
+    set(YMUSIC_VER_PATCH 0)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -92,6 +112,8 @@ set(YMUSIC_CPP_SOURCES
     app/Fonts.cpp
     app/Paths.h
     app/Paths.cpp
+    app/UpdateChecker.h
+    app/UpdateChecker.cpp
     app/WindowController.h
     app/WindowController.cpp
     artwork/ArtworkCache.h
@@ -164,6 +186,7 @@ set(QML_FILES
     qml/motion/ShapeBurst.qml
     qml/motion/SidebarSlideEnter.qml
     qml/motion/SidebarSlideExit.qml
+    qml/components/AiBadge.qml
     qml/components/ArtistLinks.qml
     qml/components/ArtworkImage.qml
     qml/components/CornerCaps.qml
@@ -297,6 +320,7 @@ qt_add_shaders(ymusic-qml "ymusic_shaders"
         shaders/spectrum_halo.frag
         shaders/spectrum_halo.vert
         shaders/squiggle_ring.frag
+        shaders/wave_aurora.frag
         shaders/wavy_line.frag
         shaders/wavy_line.vert
         shaders/wavy_pill.frag
@@ -309,7 +333,7 @@ qt_add_resources(ymusic-qml "ymusic_shape_atlas"
     FILES "${YMUSIC_SHAPE_ATLAS}"
 )
 
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg" PROPERTIES
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/scalable/apps/ymusic.svg" PROPERTIES
     QT_RESOURCE_ALIAS "icons/ymusic.svg"
 )
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/256x256/apps/ymusic.png" PROPERTIES
@@ -318,7 +342,7 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/256x25
 qt_add_resources(ymusic-qml "ymusic_icons"
     PREFIX "/"
     FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/scalable/apps/ymusic.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/256x256/apps/ymusic.png"
 )
 
@@ -335,7 +359,18 @@ target_include_directories(ymusic-qml PRIVATE
 
 target_compile_definitions(ymusic-qml PRIVATE
     YMUSIC_BUILD_FONT_DIRECTORY="${YMUSIC_FONT_DIRECTORY}"
+    YMUSIC_APP_VERSION="${YMUSIC_VERSION_CLEAN}"
 )
+
+if(WIN32)
+    set(YMUSIC_WIN_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../icons/ymusic.ico")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/app/ymusic.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/ymusic.rc"
+        @ONLY
+    )
+    target_sources(ymusic-qml PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/ymusic.rc")
+endif()
 
 target_link_directories(ymusic-qml PRIVATE ${RUST_LIB_DIR})
 target_link_libraries(ymusic-qml PRIVATE
@@ -372,6 +407,9 @@ if(WIN32)
     if(YMUSIC_HAS_INTERFACE_FONT)
         install(FILES "${YMUSIC_INTERFACE_FONT}" DESTINATION fonts)
     endif()
+    if(YMUSIC_HAS_INTERFACE_FONT_LICENSE)
+        install(FILES "${YMUSIC_INTERFACE_FONT_LICENSE}" DESTINATION fonts)
+    endif()
 else()
     target_link_libraries(ymusic-qml PRIVATE
         ymusic_core
@@ -397,11 +435,23 @@ else()
     endif()
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../ymusic.desktop" DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor" DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg" DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps RENAME ymusic.svg)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg" DESTINATION ${CMAKE_INSTALL_DATADIR}/pixmaps RENAME ymusic.svg)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/scalable/apps/ymusic.svg" DESTINATION ${CMAKE_INSTALL_DATADIR}/pixmaps RENAME ymusic.svg)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../icons/hicolor/256x256/apps/ymusic.png" DESTINATION ${CMAKE_INSTALL_DATADIR}/pixmaps)
 
     install(CODE "
         file(CREATE_LINK \"ymusic-qml\" \"\$ENV{DESTDIR}${CMAKE_INSTALL_FULL_BINDIR}/ymusic\" SYMBOLIC)
     ")
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(update_checker_test
+        tests/UpdateCheckerTest.cpp
+        app/UpdateChecker.h
+        app/UpdateChecker.cpp
+    )
+    target_include_directories(update_checker_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(update_checker_test PRIVATE Qt6::Core Qt6::Gui Qt6::Network)
+    target_compile_definitions(update_checker_test PRIVATE YMUSIC_APP_VERSION="${YMUSIC_VERSION_CLEAN}")
+    add_test(NAME update_checker_test COMMAND update_checker_test)
 endif()

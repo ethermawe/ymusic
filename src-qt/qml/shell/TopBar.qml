@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Effects
@@ -125,6 +144,16 @@ Item {
         }
     }
 
+    Timer {
+        id: suggestTimer
+        interval: 220
+        onTriggered: {
+            if (search.editing && search.text.trim().length > 0 && backend.loggedIn) {
+                backend.feature({action: "search_suggest", part: search.text.trim()})
+            }
+        }
+    }
+
     SearchField {
         id: search
         x: root.searchRightEdge - width
@@ -135,7 +164,15 @@ Item {
             return editing ? Math.max(140, Math.min(340, root.searchRightEdge - root.searchLeftEdge)) : root.reservedSearchWidth
         }
         placeholder: qsTr("Поиск музыки…")
+        onTextChanged: {
+            if (editing && text.trim().length > 0) {
+                suggestTimer.restart()
+            } else {
+                suggestTimer.stop()
+            }
+        }
         onAccepted: {
+            suggestTimer.stop()
             if (text.trim().length > 0) {
                 backend.search(text.trim())
             }
@@ -143,6 +180,72 @@ Item {
 
         Behavior on width {
             ElementMoveSmall {}
+        }
+    }
+
+    Rectangle {
+        id: suggestionsPopup
+        x: search.x
+        y: search.y + search.height + 6
+        width: search.width
+        height: suggestColumn.implicitHeight + 12
+        z: 30
+        radius: Appearance.rounding.normal
+        color: Appearance.colors.surfaceContainerHigh
+        border.width: 1
+        border.color: Appearance.colors.outlineVariant
+        visible: search.editing && search.text.trim().length > 0 && backend.searchSuggestions.length > 0
+
+        Column {
+            id: suggestColumn
+            x: 6
+            y: 6
+            width: parent.width - 12
+            spacing: 2
+
+            Repeater {
+                model: backend.searchSuggestions
+                delegate: Rectangle {
+                    required property string modelData
+                    width: suggestColumn.width
+                    height: 34
+                    radius: Appearance.rounding.small
+                    color: suggestHover.hovered ? Appearance.colors.surfaceContainerHighest : "transparent"
+
+                    Row {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        spacing: 8
+
+                        MaterialSymbol {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "search"
+                            iconSize: 16
+                            color: Appearance.colors.onSurfaceVariant
+                        }
+                        StyledText {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width - 28
+                            text: modelData
+                            elide: Text.ElideRight
+                            font.pixelSize: Appearance.fontSize.small
+                        }
+                    }
+
+                    HoverHandler {
+                        id: suggestHover
+                        cursorShape: Qt.PointingHandCursor
+                    }
+                    TapHandler {
+                        onTapped: {
+                            search.text = modelData
+                            suggestTimer.stop()
+                            backend.search(modelData)
+                        }
+                    }
+                }
+            }
         }
     }
 

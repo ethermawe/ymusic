@@ -47,6 +47,8 @@ pub struct TrackItemPayload {
     pub has_cover: bool,
     pub has_artist: bool,
     pub has_album: bool,
+    #[serde(default)]
+    pub is_ai: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -55,6 +57,8 @@ pub struct CardItemPayload {
     pub title: String,
     pub subtitle: String,
     pub kind: String,
+    #[serde(default)]
+    pub section: String,
     pub cover_url: String,
     pub has_cover: bool,
     pub pinned: bool,
@@ -96,6 +100,8 @@ pub struct NowPlayingPayload {
     pub liked: bool,
     pub has_artist: bool,
     pub has_album: bool,
+    #[serde(default)]
+    pub is_ai: bool,
 }
 
 fn artist_links_for(t: &Track) -> Vec<ArtistLinkPayload> {
@@ -176,7 +182,11 @@ pub enum CardTarget {
         kind: u64,
         title: String,
         #[serde(default)]
+        subtitle: String,
+        #[serde(default)]
         cover_uri: Option<String>,
+        #[serde(default)]
+        section: String,
     },
     Album(AlbumCard),
     Artist(ArtistCard),
@@ -221,8 +231,15 @@ pub struct WaveState {
     pub session_id: String,
     pub batch_id: String,
     pub tracks: Vec<Track>,
+    pub filters: Vec<String>,
     pub fetching_more: bool,
     pub resume_on_load: bool,
+}
+
+impl WaveState {
+    pub fn cache_key(&self) -> String {
+        format!("wave:{}:{}", self.seed, self.filters.join(","))
+    }
 }
 
 #[derive(Default)]
@@ -233,7 +250,16 @@ pub struct State {
     pub search_filter: String,
     pub collection_downloadable: bool,
     pub active_playlist: Option<config::PinnedPlaylist>,
+    pub active_album_id: Option<String>,
     pub pinned_playlists: Vec<config::PinnedPlaylist>,
+    pub liked_album_ids: HashSet<String>,
+    pub liked_artist_ids: HashSet<String>,
+    pub liked_playlist_keys: HashSet<String>,
+    pub audio_quality: String,
+    pub normalize_volume: bool,
+    pub ai_music_behavior: String,
+    pub ai_strict_tracks: bool,
+    pub show_ai_labels: bool,
     pub history_generation: Option<u64>,
     pub view_cover_uri: Option<String>,
     pub api: Option<Api>,
@@ -249,6 +275,9 @@ pub struct State {
     pub position_secs: f64,
     pub wave: Option<WaveState>,
     pub views: HashMap<String, CachedView>,
+    pub active_view_key: Option<String>,
+    pub fetching_views: HashSet<String>,
+    pub view_fetched_at: HashMap<String, std::time::Instant>,
     pub generation: u64,
     pub view_id: u64,
     pub page: i32,
@@ -271,6 +300,7 @@ pub struct YMusicCore {
     pub batch_cancel: AtomicBool,
     pub batch_cancel_tx: tokio::sync::watch::Sender<bool>,
     pub playlist_creating: AtomicBool,
+    pub login_gen: std::sync::atomic::AtomicU64,
     pub rt_handle: Handle,
     pub runtime: Option<tokio::runtime::Runtime>,
     pub http: reqwest::Client,
@@ -296,26 +326,48 @@ pub fn perceptual(v: f32) -> f32 {
 }
 
 pub fn shuffle_slice<T>(slice: &mut [T]) {
+    if slice.len() < 2 {
+        return;
+    }
     use std::time::SystemTime;
     let mut rng = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(123456789);
+    // Используем алгоритм Саттоло (`j = rng % i`), который гарантирует derangement
+    // (ни один элемент не остаётся на своём исходном месте, порядок всегда меняется).
     for i in (1..slice.len()).rev() {
         rng ^= rng << 13;
         rng ^= rng >> 7;
         rng ^= rng << 17;
-        let j = (rng as usize) % (i + 1);
+        let j = (rng as usize) % i;
         slice.swap(i, j);
     }
 }
 
 fn playlist_target(p: api::PlaylistCard) -> CardTarget {
+    playlist_target_in(p, "")
+}
+
+fn playlist_target_in(p: api::PlaylistCard, section: &str) -> CardTarget {
     CardTarget::Playlist {
         uid: p.uid,
         kind: p.kind,
-        title: format!("{} ({})", p.title, p.subtitle),
+        title: p.title,
+        subtitle: p.subtitle,
         cover_uri: p.cover_uri,
+        section: section.to_string(),
+    }
+}
+
+fn strip_legacy_playlist_title(title: &str) -> &str {
+    if let Some((clean, _)) = title.rsplit_once(" (")
+        && title.ends_with(')')
+        && !clean.trim().is_empty()
+    {
+        clean.trim()
+    } else {
+        title
     }
 }
 
@@ -325,17 +377,18 @@ fn is_playlist_pinned(pinned: &[config::PinnedPlaylist], uid: u64, kind: u64) ->
 
 fn card_payload(c: &CardTarget, pinned: &[config::PinnedPlaylist]) -> CardItemPayload {
     match c {
-        CardTarget::Playlist { uid, kind, title, cover_uri } => CardItemPayload {
+        CardTarget::Playlist { uid, kind, title, subtitle: _, cover_uri, section } => CardItemPayload {
             key: format!("playlist:{uid}:{kind}"),
-            title: title.clone(),
-            subtitle: "Плейлист".to_string(),
+            title: strip_legacy_playlist_title(title).to_string(),
+            subtitle: String::new(),
             kind: "playlist".to_string(),
+            section: section.clone(),
             cover_url: api::cover_url(cover_uri.as_deref(), 200).unwrap_or_default(),
             has_cover: cover_uri.is_some(),
             pinned: is_playlist_pinned(pinned, *uid, *kind),
         },
         CardTarget::Album(a) => {
-            let mut parts = vec!["Альбом".to_string()];
+            let mut parts = Vec::new();
             if !a.artists.is_empty() {
                 parts.push(a.artists.clone());
             }
@@ -350,6 +403,7 @@ fn card_payload(c: &CardTarget, pinned: &[config::PinnedPlaylist]) -> CardItemPa
                 title: a.title.clone(),
                 subtitle: parts.join(" • "),
                 kind: "album".to_string(),
+                section: a.section.clone(),
                 cover_url: api::cover_url(a.cover_uri.as_deref(), 200).unwrap_or_default(),
                 has_cover: a.cover_uri.is_some(),
                 pinned: false,
@@ -362,16 +416,15 @@ fn card_payload(c: &CardTarget, pinned: &[config::PinnedPlaylist]) -> CardItemPa
                 } else {
                     ar.stats.clone()
                 }
-            } else if ar.genres.is_empty() {
-                "Исполнитель".to_string()
             } else {
-                format!("Исполнитель • {}", ar.genres)
+                ar.genres.clone()
             };
             CardItemPayload {
                 key: String::new(),
                 title: ar.name.clone(),
                 subtitle: sub,
                 kind: "artist".to_string(),
+                section: String::new(),
                 cover_url: api::cover_url(ar.cover_uri.as_deref(), 200).unwrap_or_default(),
                 has_cover: ar.cover_uri.is_some(),
                 pinned: false,
@@ -381,7 +434,7 @@ fn card_payload(c: &CardTarget, pinned: &[config::PinnedPlaylist]) -> CardItemPa
 }
 
 fn track_payload(t: &Track, liked_ids: &HashSet<String>) -> TrackItemPayload {
-    let cover_url = t.cover_url(200).unwrap_or_default();
+    let cover_url = cache::resolve_track_cover_url(t, 200);
     TrackItemPayload {
         id: t.id.clone(),
         title: t.title.clone(),
@@ -397,6 +450,7 @@ fn track_payload(t: &Track, liked_ids: &HashSet<String>) -> TrackItemPayload {
         cover_url,
         has_artist: t.artist_id.is_some(),
         has_album: t.album_id.is_some(),
+        is_ai: t.is_ai || crate::slopless::is_track_ai_fast(t),
     }
 }
 
@@ -462,6 +516,7 @@ mod queue_tests {
             id: id.into(), title: id.into(), artists: String::new(),
             album_id: None, album_title: String::new(), artist_id: None, artist_links: Vec::new(),
             duration_ms: 1000, cover_uri: None, available: true,
+            has_sync_lyrics: false, has_text_lyrics: false, r128_i: None, r128_tp: None, is_ai: false,
         }
     }
 
@@ -524,6 +579,7 @@ mod queue_tests {
             batch_cancel: AtomicBool::new(false),
             batch_cancel_tx: tokio::sync::watch::channel(false).0,
             playlist_creating: AtomicBool::new(false),
+            login_gen: std::sync::atomic::AtomicU64::new(0),
             rt_handle,
             runtime: Some(rt),
             http: api::http_client(),
@@ -563,6 +619,7 @@ mod queue_tests {
             batch_cancel: AtomicBool::new(false),
             batch_cancel_tx: tokio::sync::watch::channel(false).0,
             playlist_creating: AtomicBool::new(false),
+            login_gen: std::sync::atomic::AtomicU64::new(0),
             rt_handle: rt2_handle,
             runtime: Some(rt2),
             http: api::http_client(),
@@ -631,6 +688,7 @@ mod queue_tests {
             batch_cancel: AtomicBool::new(false),
             batch_cancel_tx: tokio::sync::watch::channel(false).0,
             playlist_creating: AtomicBool::new(false),
+            login_gen: std::sync::atomic::AtomicU64::new(0),
             rt_handle,
             runtime: Some(rt),
             http: api::http_client(),
@@ -639,7 +697,9 @@ mod queue_tests {
                     uid: 42,
                     kind: 7,
                     title: "Мой плейлист".into(),
+                    subtitle: String::new(),
                     cover_uri: None,
+                    section: String::new(),
                 }],
                 ..State::default()
             })),
@@ -660,6 +720,214 @@ mod queue_tests {
         assert!(core.state.lock().unwrap().pinned_playlists.is_empty());
         assert!(events.lock().unwrap().iter().any(|(t, j)| *t == EVENT_CARDS_LOADED && j.contains("\"pinned\":false")));
     }
+
+    #[test]
+    fn toggle_shuffle_moves_current_to_front_and_reorders_queue() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt_handle = rt.handle().clone();
+        let mpris = Mpris::spawn(&rt_handle, |_| {});
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let core = Arc::new(YMusicCore {
+            batch_running: AtomicBool::new(false),
+            batch_cancel: AtomicBool::new(false),
+            batch_cancel_tx: tokio::sync::watch::channel(false).0,
+            playlist_creating: AtomicBool::new(false),
+            login_gen: std::sync::atomic::AtomicU64::new(0),
+            rt_handle,
+            runtime: Some(rt),
+            http: api::http_client(),
+            state: Arc::new(Mutex::new(State {
+                queue: vec![track("a"), track("b"), track("c"), track("d")],
+                current: Some(2),
+                ..State::default()
+            })),
+            cover_sem: Arc::new(Semaphore::new(2)),
+            audio: Audio::spawn(|_| {}),
+            mpris,
+            discord: Discord::spawn(),
+            sink: Arc::new(CaptureSink(events.clone())),
+        });
+
+        core.clone().toggle_shuffle();
+        {
+            let st = core.state.lock().unwrap();
+            assert!(st.shuffle);
+            assert_eq!(st.current, Some(0));
+            assert_eq!(st.queue[0].id, "c");
+            assert_ne!(
+                st.queue[1..].iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+                vec!["a", "b", "d"]
+            );
+        }
+
+        core.clone().toggle_shuffle();
+        {
+            let st = core.state.lock().unwrap();
+            assert!(!st.shuffle);
+            assert_eq!(st.current, Some(2));
+            assert_eq!(
+                st.queue.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+                vec!["a", "b", "c", "d"]
+            );
+        }
+    }
+
+    #[test]
+    fn should_fetch_view_deduplicates_and_respects_cooldown() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt_handle = rt.handle().clone();
+        let mpris = Mpris::spawn(&rt_handle, |_| {});
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let core = Arc::new(YMusicCore {
+            batch_running: AtomicBool::new(false),
+            batch_cancel: AtomicBool::new(false),
+            batch_cancel_tx: tokio::sync::watch::channel(false).0,
+            playlist_creating: AtomicBool::new(false),
+            login_gen: std::sync::atomic::AtomicU64::new(0),
+            rt_handle,
+            runtime: Some(rt),
+            http: api::http_client(),
+            state: Arc::new(Mutex::new(State::default())),
+            cover_sem: Arc::new(Semaphore::new(2)),
+            audio: Audio::spawn(|_| {}),
+            mpris,
+            discord: Discord::spawn(),
+            sink: Arc::new(CaptureSink(events)),
+        });
+
+        assert!(core.should_fetch_view("likes", Duration::from_secs(25)));
+        assert!(!core.should_fetch_view("likes", Duration::from_secs(25)));
+
+        core.finish_fetching_view("likes", false);
+        assert!(core.should_fetch_view("likes", Duration::from_secs(25)));
+
+        core.state.lock().unwrap().views.insert(
+            "likes".into(),
+            CachedView {
+                cover_uri: None,
+                title: "Мне нравится".into(),
+                subtitle: String::new(),
+                cards: Vec::new(),
+                tracks: vec![track("1")],
+                viewed_artist_id: None,
+                artist_view: None,
+            },
+        );
+        core.finish_fetching_view("likes", true);
+        assert!(!core.should_fetch_view("likes", Duration::from_secs(25)));
+    }
+
+    #[test]
+    fn apply_cached_view_updates_when_returned_to_same_active_key() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt_handle = rt.handle().clone();
+        let mpris = Mpris::spawn(&rt_handle, |_| {});
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let core = Arc::new(YMusicCore {
+            batch_running: AtomicBool::new(false),
+            batch_cancel: AtomicBool::new(false),
+            batch_cancel_tx: tokio::sync::watch::channel(false).0,
+            playlist_creating: AtomicBool::new(false),
+            login_gen: std::sync::atomic::AtomicU64::new(0),
+            rt_handle,
+            runtime: Some(rt),
+            http: api::http_client(),
+            state: Arc::new(Mutex::new(State::default())),
+            cover_sem: Arc::new(Semaphore::new(2)),
+            audio: Audio::spawn(|_| {}),
+            mpris,
+            discord: Discord::spawn(),
+            sink: Arc::new(CaptureSink(events.clone())),
+        });
+
+        let v1 = core.begin_cached_view(Some("likes"), 2, "Мне нравится".into(), String::new());
+        let _v2 = core.begin_cached_view(None, 7, "Загружено".into(), String::new());
+        let _v3 = core.begin_cached_view(Some("likes"), 2, "Мне нравится".into(), String::new());
+        events.lock().unwrap().clear();
+
+        let applied = core.apply_cached_view(
+            v1,
+            Some("likes"),
+            Some("Мне нравится".into()),
+            Some(String::new()),
+            Vec::new(),
+            vec![track("42")],
+            None,
+            None,
+        );
+        assert!(applied);
+        assert_eq!(core.state.lock().unwrap().list.len(), 1);
+        assert!(events.lock().unwrap().iter().any(|(t, j)| *t == EVENT_TRACKS_LOADED && j.contains("\"42\"")));
+    }
+
+    #[test]
+    fn extract_oauth_token_handles_raw_prefix_and_redirect_urls() {
+        assert_eq!(extract_oauth_token("  y0_abc123  "), "y0_abc123");
+        assert_eq!(extract_oauth_token("OAuth y0_abc123"), "y0_abc123");
+        assert_eq!(extract_oauth_token("Bearer \"y0_abc123\""), "y0_abc123");
+        assert_eq!(
+            extract_oauth_token("https://music.yandex.ru/#access_token=y0_url999&token_type=bearer&expires_in=31536000"),
+            "y0_url999"
+        );
+        assert_eq!(
+            extract_oauth_token("https://oauth.yandex.ru/verification_code?access_token=y0_q777#state=1"),
+            "y0_q777"
+        );
+    }
+
+    #[test]
+    fn is_auth_rejected_error_ignores_network_and_generic_errors() {
+        assert!(!is_auth_rejected_error(&anyhow::anyhow!("нет соединения с сервером: dns 127.0.0.1:4030")));
+        assert!(!is_auth_rejected_error(&anyhow::anyhow!("HTTP 403: rate limit")));
+        assert!(!is_auth_rejected_error(&anyhow::anyhow!("HTTP 502: bad gateway")));
+        assert!(is_auth_rejected_error(&anyhow::anyhow!("HTTP 401: unauthorized")));
+        assert!(is_auth_rejected_error(&anyhow::anyhow!("HTTP 401")));
+        assert!(is_auth_rejected_error(&anyhow::anyhow!("токен недействителен")));
+        assert!(is_auth_rejected_error(&anyhow::anyhow!("HTTP 403: invalid-token")));
+    }
+}
+
+fn strip_wrapping(v: &str) -> &str {
+    v.trim().trim_matches(|c| c == '"' || c == '\'').trim()
+}
+
+pub fn extract_oauth_token(raw: &str) -> String {
+    let mut s = strip_wrapping(raw);
+    if let Some((_, rest)) = s.split_once("access_token=") {
+        let token = rest
+            .split(['&', '#', ' ', '\t', '\r', '\n'])
+            .next()
+            .unwrap_or("");
+        let cleaned = strip_wrapping(token);
+        if !cleaned.is_empty() {
+            return cleaned.to_string();
+        }
+    }
+    let lower = s.to_ascii_lowercase();
+    if lower.starts_with("oauth ") {
+        s = strip_wrapping(&s[6..]);
+    } else if lower.starts_with("bearer ") {
+        s = strip_wrapping(&s[7..]);
+    }
+    s.to_string()
+}
+
+fn has_http_status(msg: &str, code: u16) -> bool {
+    let needle = format!("HTTP {code}");
+    msg.match_indices(&needle).any(|(idx, _)| {
+        let after = &msg[idx + needle.len()..];
+        after.is_empty() || after.starts_with(':') || after.starts_with(char::is_whitespace)
+    })
+}
+
+pub fn is_auth_rejected_error(e: &anyhow::Error) -> bool {
+    let msg = format!("{e:#}");
+    has_http_status(&msg, 401)
+        || msg.contains("токен недействителен")
+        || (has_http_status(&msg, 403)
+            && (msg.contains("invalid-token")
+                || msg.contains("unauthorized")
+                || msg.contains("expired")))
 }
 
 impl YMusicCore {
@@ -730,6 +998,12 @@ impl YMusicCore {
                     if this.state.lock().unwrap().uid != uid { return; }
                     match result {
                         Ok(p) => {
+                            {
+                                let mut st = this.state.lock().unwrap();
+                                st.views.remove("playlists");
+                                st.view_fetched_at.remove("playlists");
+                                st.view_fetched_at.remove("home");
+                            }
                             this.send_feature("create_playlist", serde_json::json!({"ok": true, "title": p.title}));
                             let page = this.state.lock().unwrap().page;
                             if page == 3 { this.clone().load_playlists(); }
@@ -755,8 +1029,139 @@ impl YMusicCore {
                 self.audio.set_speed(speed);
             }
             "set_sleep_fade" => {
-                let factor = cmd["factor"].as_f64().unwrap_or(1.0) as f32;
+                let factor = cmd["gain"]
+                    .as_f64()
+                    .or_else(|| cmd["factor"].as_f64())
+                    .unwrap_or(1.0) as f32;
                 self.audio.set_sleep_fade(factor);
+            }
+            "set_audio_quality" => {
+                let q = match cmd["quality"].as_str().unwrap_or("hq") {
+                    "lossless" => "lossless",
+                    "nq" => "nq",
+                    _ => "hq",
+                };
+                self.state.lock().unwrap().audio_quality = q.to_string();
+                let q_owned = q.to_string();
+                config::update_settings(|s| s.audio_quality = q_owned);
+                self.send_view_feature();
+            }
+            "set_normalize_volume" => {
+                let enabled = cmd["enabled"].as_bool().unwrap_or(true);
+                let gain = {
+                    let mut st = self.state.lock().unwrap();
+                    st.normalize_volume = enabled;
+                    if enabled {
+                        current_track(&st).map(Track::r128_gain).unwrap_or(1.0)
+                    } else {
+                        1.0
+                    }
+                };
+                self.audio.set_track_gain(gain);
+                config::update_settings(|s| s.normalize_volume = enabled);
+                self.send_view_feature();
+            }
+            "set_ai_music_behavior" => {
+                let behavior = match cmd["behavior"].as_str().unwrap_or("skip_if_not_liked") {
+                    "dislike" => "dislike",
+                    "dislike_if_not_liked" => "dislike_if_not_liked",
+                    "skip" => "skip",
+                    "skip_if_not_liked" => "skip_if_not_liked",
+                    "nothing" => "nothing",
+                    _ => "skip_if_not_liked",
+                };
+                self.state.lock().unwrap().ai_music_behavior = behavior.to_string();
+                let owned = behavior.to_string();
+                config::update_settings(|s| s.ai_music_behavior = owned);
+                self.send_view_feature();
+            }
+            "set_ai_strict_tracks" => {
+                let strict = cmd["enabled"].as_bool().unwrap_or(false);
+                self.state.lock().unwrap().ai_strict_tracks = strict;
+                config::update_settings(|s| s.ai_strict_tracks = strict);
+                self.send_view_feature();
+            }
+            "set_show_ai_labels" => {
+                let show = cmd["enabled"].as_bool().unwrap_or(true);
+                self.state.lock().unwrap().show_ai_labels = show;
+                config::update_settings(|s| s.show_ai_labels = show);
+                self.send_view_feature();
+                self.refresh_rows();
+            }
+            "search_suggest" => {
+                let part = cmd["part"].as_str().unwrap_or("").trim().to_string();
+                if part.is_empty() {
+                    self.send_feature("search_suggest", serde_json::json!({"part": "", "suggestions": []}));
+                    return;
+                }
+                let Some(api) = self.api() else { return };
+                let this = self.clone();
+                self.rt_handle.spawn(async move {
+                    if let Ok(suggestions) = api.search_suggest(&part).await {
+                        this.send_feature("search_suggest", serde_json::json!({
+                            "part": part,
+                            "suggestions": suggestions,
+                        }));
+                    }
+                });
+            }
+            "open_chart" => {
+                self.open_chart();
+            }
+            "similar_tracks" => {
+                let Some(id) = cmd["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string) else { return };
+                let title = cmd["title"].as_str().filter(|s| !s.is_empty()).unwrap_or("Трек").to_string();
+                self.open_similar_tracks(id, title);
+            }
+            "track_credits" => {
+                let Some(id) = cmd["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string) else { return };
+                let title = cmd["title"].as_str().unwrap_or("").to_string();
+                let Some(api) = self.api() else {
+                    self.error("Для просмотра авторов нужен вход");
+                    return;
+                };
+                let this = self.clone();
+                self.rt_handle.spawn(async move {
+                    match api.track_credits(&id).await {
+                        Ok(credits) => {
+                            this.send_feature("track_credits", serde_json::json!({
+                                "id": id,
+                                "title": title,
+                                "credits": credits,
+                            }));
+                        }
+                        Err(e) => this.error(format!("Авторы трека: {e}")),
+                    }
+                });
+            }
+            "copy_track_link" => {
+                let Some(id) = cmd["id"].as_str().filter(|s| !s.is_empty()) else { return };
+                let album_id = self.find_track(id).and_then(|t| t.album_id).filter(|a| !a.is_empty());
+                let url = match album_id {
+                    Some(album_id) => format!("https://music.yandex.ru/album/{album_id}/track/{id}"),
+                    None => format!("https://music.yandex.ru/track/{id}"),
+                };
+                self.send_feature("copy_track_link", serde_json::json!({
+                    "id": id,
+                    "url": url,
+                }));
+                self.notify("Ссылка на трек скопирована");
+            }
+            "toggle_like_collection" => {
+                self.toggle_like_collection();
+            }
+            "delete_playlist" => {
+                self.delete_active_playlist();
+            }
+            "rename_playlist" => {
+                let title = cmd["title"].as_str().unwrap_or("").trim().to_string();
+                if !title.is_empty() {
+                    self.rename_active_playlist(title);
+                }
+            }
+            "remove_from_playlist" => {
+                let Some(track_id) = cmd["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string) else { return };
+                self.remove_track_from_active_playlist(track_id);
             }
             "pause_playback" => {
                 self.pause_if_playing();
@@ -789,6 +1194,16 @@ impl YMusicCore {
                         } else {
                             st.duration_secs
                         },
+                        has_sync_lyrics: if t.has_sync_lyrics || t.has_text_lyrics {
+                            Some(t.has_sync_lyrics)
+                        } else {
+                            None
+                        },
+                        has_text_lyrics: if t.has_sync_lyrics || t.has_text_lyrics {
+                            Some(t.has_text_lyrics)
+                        } else {
+                            None
+                        },
                     });
                     (id, meta)
                 };
@@ -798,6 +1213,8 @@ impl YMusicCore {
                         "trackId": track_id,
                         "synced": false,
                         "lines": [],
+                        "writers": "",
+                        "major": "",
                         "message": "Для загрузки текста нужен вход в аккаунт"
                     }));
                     return;
@@ -815,6 +1232,8 @@ impl YMusicCore {
                                 "trackId": track_id,
                                 "synced": lyrics.synced,
                                 "lines": lyrics.lines,
+                                "writers": lyrics.writers,
+                                "major": lyrics.major,
                                 "message": message
                             }));
                         }
@@ -823,6 +1242,8 @@ impl YMusicCore {
                                 "trackId": track_id,
                                 "synced": false,
                                 "lines": [],
+                                "writers": "",
+                                "major": "",
                                 "message": format!("Не удалось загрузить текст: {e}")
                             }));
                         }
@@ -870,6 +1291,7 @@ impl YMusicCore {
                         let path = cache::offline_track_path(&track.id).ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?;
                         cache::download_to_file(api.http(), &url, &path).await?;
                     }
+                    cache::download_offline_cover(api.http(), &track).await;
                     let metadata = track.clone();
                     tokio::task::spawn_blocking(move || cache::save_offline_metadata(&metadata)).await??;
                     Ok::<(), anyhow::Error>(())
@@ -916,6 +1338,7 @@ impl YMusicCore {
                 batch_cancel: AtomicBool::new(false),
                 batch_cancel_tx: tokio::sync::watch::channel(false).0,
                 playlist_creating: AtomicBool::new(false),
+                login_gen: std::sync::atomic::AtomicU64::new(0),
                 rt_handle: rt_handle.clone(),
                 runtime: Some(runtime),
                 http: api::http_client(),
@@ -947,16 +1370,65 @@ impl YMusicCore {
             st.last_unmuted_volume = if initial_vol > 0.001 { initial_vol } else { 0.7 };
             st.volume = initial_vol;
             st.pinned_playlists = settings.pinned_playlists;
+            st.audio_quality = if ["lossless", "hq", "nq"].contains(&settings.audio_quality.as_str()) {
+                settings.audio_quality
+            } else {
+                "hq".to_string()
+            };
+            st.normalize_volume = settings.normalize_volume;
+            st.ai_music_behavior = if [
+                "dislike",
+                "dislike_if_not_liked",
+                "skip",
+                "skip_if_not_liked",
+                "nothing",
+            ]
+            .contains(&settings.ai_music_behavior.as_str())
+            {
+                settings.ai_music_behavior
+            } else {
+                "skip_if_not_liked".to_string()
+            };
+            st.ai_strict_tracks = settings.ai_strict_tracks;
+            st.show_ai_labels = settings.show_ai_labels;
         }
 
         core.send_playback_state(false);
         core.send_pinned_playlists();
+        core.send_view_feature();
         if let Some(session) = settings.session {
             core.apply_saved_session(session);
         }
 
         if let Some(token) = config::load_token() {
-            core.clone().login(token);
+            let api = Api::new(core.http.clone(), token.clone());
+            let cached_name = settings
+                .user_name
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "Пользователь".to_string());
+            let cached_avatar = settings.user_avatar_url.unwrap_or_default();
+            let has_avatar = !cached_avatar.is_empty();
+            {
+                let mut st = core.state.lock().unwrap();
+                st.api = Some(api);
+                st.uid = settings.user_uid;
+                if st.liked_ids.is_empty()
+                    && let Some(likes_view) = cache::load_view::<CachedView>("likes")
+                {
+                    st.liked_ids = likes_view.tracks.into_iter().map(|t| t.id).collect();
+                }
+            }
+            core.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
+                logged_in: true,
+                busy: false,
+                user_name: cached_name,
+                user_avatar: cached_avatar,
+                user_has_avatar: has_avatar,
+            });
+            if core.state.lock().unwrap().page != 7 {
+                core.clone().load_home();
+            }
+            core.clone().verify_startup_account(token);
         } else {
             core.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
                 logged_in: false,
@@ -1023,7 +1495,21 @@ impl YMusicCore {
         self.state.lock().unwrap().generation
     }
 
+    pub fn cancel_login(&self) {
+        self.login_gen.fetch_add(1, Ordering::SeqCst);
+        if self.state.lock().unwrap().api.is_none() {
+            self.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
+                logged_in: false,
+                busy: false,
+                user_name: String::new(),
+                user_avatar: String::new(),
+                user_has_avatar: false,
+            });
+        }
+    }
+
     pub fn login_device(self: Arc<Self>) {
+        let my_gen = self.login_gen.fetch_add(1, Ordering::SeqCst) + 1;
         self.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
             logged_in: false,
             busy: true,
@@ -1037,6 +1523,9 @@ impl YMusicCore {
             let code = match api::request_device_code(&this.http).await {
                 Ok(c) => c,
                 Err(e) => {
+                    if this.login_gen.load(Ordering::SeqCst) != my_gen {
+                        return;
+                    }
                     this.error(format!("Вход: {e}"));
                     this.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
                         logged_in: false,
@@ -1049,6 +1538,10 @@ impl YMusicCore {
                 }
             };
 
+            if this.login_gen.load(Ordering::SeqCst) != my_gen {
+                return;
+            }
+
             this.send_event(EVENT_LOGIN_DEVICE_CODE, &DeviceCodePayload {
                 user_code: code.user_code.clone(),
                 verification_url: code.verification_url.clone(),
@@ -1057,6 +1550,9 @@ impl YMusicCore {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(code.expires_in);
             let result = loop {
                 tokio::time::sleep(Duration::from_secs(code.interval.max(1))).await;
+                if this.login_gen.load(Ordering::SeqCst) != my_gen {
+                    return;
+                }
                 if tokio::time::Instant::now() > deadline {
                     break Err(anyhow::anyhow!("время на подтверждение истекло"));
                 }
@@ -1066,6 +1562,10 @@ impl YMusicCore {
                     Err(e) => break Err(e),
                 }
             };
+
+            if this.login_gen.load(Ordering::SeqCst) != my_gen {
+                return;
+            }
 
             match result {
                 Ok(token) => this.login(token),
@@ -1083,10 +1583,100 @@ impl YMusicCore {
         });
     }
 
-    pub fn login(self: Arc<Self>, token: String) {
+    pub fn verify_startup_account(self: Arc<Self>, token: String) {
+        let this = self.clone();
+        self.rt_handle.spawn(async move {
+            let api = Api::new(this.http.clone(), token);
+            match api.account().await {
+                Ok(account) => {
+                    if this.state.lock().unwrap().api.is_none() {
+                        return;
+                    }
+                    let avatar = account.avatar_url.clone().unwrap_or_default();
+                    let has_avatar = !avatar.is_empty();
+                    let name_for_cfg = account.name.clone();
+                    let avatar_for_cfg = account.avatar_url.clone();
+                    let uid_for_cfg = account.uid;
+                    tokio::task::spawn_blocking(move || {
+                        config::update_settings(move |s| {
+                            if s.user_uid != uid_for_cfg
+                                || s.user_name.as_deref() != Some(name_for_cfg.as_str())
+                                || s.user_avatar_url != avatar_for_cfg
+                            {
+                                s.user_uid = uid_for_cfg;
+                                s.user_name = Some(name_for_cfg);
+                                s.user_avatar_url = avatar_for_cfg;
+                            }
+                        });
+                    });
+                    let should_reload_home = {
+                        let mut st = this.state.lock().unwrap();
+                        if st.api.is_none() {
+                            return;
+                        }
+                        let had_zero_uid = st.uid == 0;
+                        st.uid = account.uid;
+                        had_zero_uid && st.page == 0 && st.cards.is_empty()
+                    };
+                    this.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
+                        logged_in: true,
+                        busy: false,
+                        user_name: account.name,
+                        user_avatar: avatar,
+                        user_has_avatar: has_avatar,
+                    });
+                    if should_reload_home {
+                        this.clone().load_home();
+                    }
+                    this.clone().prefetch_likes();
+                }
+                Err(e) => {
+                    if this.state.lock().unwrap().api.is_none() {
+                        return;
+                    }
+                    if is_auth_rejected_error(&e) {
+                        {
+                            let mut st = this.state.lock().unwrap();
+                            st.api = None;
+                            st.uid = 0;
+                        }
+                        this.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
+                            logged_in: false,
+                            busy: false,
+                            user_name: String::new(),
+                            user_avatar: String::new(),
+                            user_has_avatar: false,
+                        });
+                        if this.state.lock().unwrap().page == 0
+                            && cache::offline_tracks().is_ok_and(|(tracks, _)| !tracks.is_empty())
+                        {
+                            this.clone().load_downloads();
+                        }
+                        this.error(format!("Сессия истекла: {e}"));
+                    } else {
+                        let (page, has_cards) = {
+                            let st = this.state.lock().unwrap();
+                            (st.page, !st.cards.is_empty() || !st.list.is_empty())
+                        };
+                        if page == 0
+                            && !has_cards
+                            && cache::offline_tracks().is_ok_and(|(tracks, _)| !tracks.is_empty())
+                        {
+                            this.clone().load_downloads();
+                        }
+                        this.notify("Нет подключения к сети — включён офлайн-режим");
+                    }
+                }
+            }
+        });
+    }
+
+    pub fn login(self: Arc<Self>, raw_token: String) {
+        let token = extract_oauth_token(&raw_token);
         if token.is_empty() {
             return;
         }
+        let my_gen = self.login_gen.fetch_add(1, Ordering::SeqCst) + 1;
         self.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
             logged_in: false,
             busy: true,
@@ -1099,16 +1689,27 @@ impl YMusicCore {
             let api = Api::new(this.http.clone(), token.clone());
             match api.account().await {
                 Ok(account) => {
+                    if this.login_gen.load(Ordering::SeqCst) != my_gen {
+                        return;
+                    }
                     if let Err(e) = config::save_token(&token) {
                         this.error(format!("Не удалось сохранить токен: {e}"));
                     }
+                    let avatar = account.avatar_url.clone().unwrap_or_default();
+                    let has_avatar = !avatar.is_empty();
+                    let name_for_cfg = account.name.clone();
+                    let avatar_for_cfg = account.avatar_url.clone();
+                    let uid_for_cfg = account.uid;
+                    config::update_settings(move |s| {
+                        s.user_uid = uid_for_cfg;
+                        s.user_name = Some(name_for_cfg);
+                        s.user_avatar_url = avatar_for_cfg;
+                    });
                     {
                         let mut st = this.state.lock().unwrap();
                         st.api = Some(api);
                         st.uid = account.uid;
                     }
-                    let avatar = account.avatar_url.clone().unwrap_or_default();
-                    let has_avatar = !avatar.is_empty();
                     this.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
                         logged_in: true,
                         busy: false,
@@ -1120,32 +1721,91 @@ impl YMusicCore {
                     let browsing_downloads = this.state.lock().unwrap().page == 7;
                     if !browsing_downloads { this.clone().load_home(); }
                     this.clone().prefetch_likes();
-                    this.clone().restore_session();
+                    if this.state.lock().unwrap().current.is_none() {
+                        this.clone().restore_session();
+                    }
                 }
                 Err(e) => {
-                    this.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
-                        logged_in: false,
-                        busy: false,
-                        user_name: String::new(),
-                        user_avatar: String::new(),
-                        user_has_avatar: false,
-                    });
-                    if this.state.lock().unwrap().page == 0
-                        && cache::offline_tracks().is_ok_and(|(tracks, _)| !tracks.is_empty())
-                    {
-                        this.clone().load_downloads();
+                    if this.login_gen.load(Ordering::SeqCst) != my_gen {
+                        return;
                     }
-                    this.error(format!("Не удалось войти: {e}"));
+                    let has_saved_token = config::load_token().is_some();
+
+                    if !is_auth_rejected_error(&e) && has_saved_token {
+                        let settings = config::load_settings();
+                        let cached_uid = settings.user_uid;
+                        let cached_name = settings
+                            .user_name
+                            .filter(|s| !s.trim().is_empty())
+                            .unwrap_or_else(|| "Пользователь".to_string());
+                        let cached_avatar = settings.user_avatar_url.unwrap_or_default();
+                        let has_avatar = !cached_avatar.is_empty();
+
+                        {
+                            let mut st = this.state.lock().unwrap();
+                            st.api = Some(api);
+                            st.uid = cached_uid;
+                            if st.liked_ids.is_empty()
+                                && let Some(likes_view) = cache::load_view::<CachedView>("likes")
+                            {
+                                st.liked_ids = likes_view.tracks.into_iter().map(|t| t.id).collect();
+                            }
+                        }
+
+                        this.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
+                            logged_in: true,
+                            busy: false,
+                            user_name: cached_name,
+                            user_avatar: cached_avatar,
+                            user_has_avatar: has_avatar,
+                        });
+
+                        let browsing_downloads = this.state.lock().unwrap().page == 7;
+                        if !browsing_downloads {
+                            if cache::load_view::<CachedView>("home").is_some() {
+                                this.clone().begin_cached_view(
+                                    Some("home"),
+                                    0,
+                                    "Главная".into(),
+                                    "Персональные плейлисты, новинки и ваша коллекция (офлайн)".into(),
+                                );
+                            } else if cache::offline_tracks().is_ok_and(|(tracks, _)| !tracks.is_empty()) {
+                                this.clone().load_downloads();
+                            }
+                        }
+                        this.clone().restore_session();
+                        this.notify("Нет подключения к сети — включён офлайн-режим");
+                    } else {
+                        this.send_event(EVENT_LOGIN_STATUS, &LoginStatusPayload {
+                            logged_in: false,
+                            busy: false,
+                            user_name: String::new(),
+                            user_avatar: String::new(),
+                            user_has_avatar: false,
+                        });
+                        if this.state.lock().unwrap().page == 0
+                            && cache::offline_tracks().is_ok_and(|(tracks, _)| !tracks.is_empty())
+                        {
+                            this.clone().load_downloads();
+                        }
+                        this.error(format!("Не удалось войти: {e}"));
+                    }
                 }
             }
         });
     }
 
     pub fn logout(&self) {
+        self.login_gen.fetch_add(1, Ordering::SeqCst);
         self.batch_cancel.store(true, Ordering::SeqCst);
         self.batch_cancel_tx.send_replace(true);
         config::clear_token();
-        self.clear_saved_session();
+        config::update_settings(|s| {
+            s.user_uid = 0;
+            s.user_name = None;
+            s.user_avatar_url = None;
+            s.session = None;
+        });
         {
             let mut st = self.state.lock().unwrap();
             *st = State {
@@ -1185,6 +1845,7 @@ impl YMusicCore {
             liked: false,
             has_artist: false,
             has_album: false,
+            is_ai: false,
         });
         self.send_event(EVENT_TRACKS_LOADED, &TracksPayload {
             tracks: Vec::new(),
@@ -1223,16 +1884,32 @@ impl YMusicCore {
     }
 
     pub fn send_view_feature(&self) {
-        let (downloadable, playlist_key, playlist_pinned) = {
+        let (downloadable, playlist_key, playlist_pinned, is_own_playlist, collection_kind, collection_liked, audio_quality, normalize_volume, ai_music_behavior, ai_strict_tracks, show_ai_labels) = {
             let st = self.state.lock().unwrap();
-            let (key, pinned) = match &st.active_playlist {
+            let (key, pinned, own) = match &st.active_playlist {
                 Some(p) => (
                     format!("playlist:{}:{}", p.uid, p.kind),
                     is_playlist_pinned(&st.pinned_playlists, p.uid, p.kind),
+                    st.uid != 0 && p.uid == st.uid,
                 ),
-                None => (String::new(), false),
+                None => (String::new(), false, false),
             };
-            (st.collection_downloadable, key, pinned)
+            let (c_kind, c_liked) = if let Some(p) = &st.active_playlist {
+                if st.uid != 0 && p.uid == st.uid {
+                    ("own_playlist", false)
+                } else {
+                    ("playlist", st.liked_playlist_keys.contains(&format!("{}:{}", p.uid, p.kind)))
+                }
+            } else if let Some(aid) = &st.active_album_id {
+                ("album", st.liked_album_ids.contains(aid))
+            } else if let Some((arid, _)) = &st.viewed_artist_id {
+                ("artist", st.liked_artist_ids.contains(arid))
+            } else {
+                ("", false)
+            };
+            let aq = if st.audio_quality.is_empty() { "hq".to_string() } else { st.audio_quality.clone() };
+            let ai_beh = if st.ai_music_behavior.is_empty() { "skip_if_not_liked".to_string() } else { st.ai_music_behavior.clone() };
+            (st.collection_downloadable, key, pinned, own, c_kind.to_string(), c_liked, aq, st.normalize_volume, ai_beh, st.ai_strict_tracks, st.show_ai_labels)
         };
         self.send_feature(
             "view",
@@ -1240,6 +1917,14 @@ impl YMusicCore {
                 "downloadable": downloadable,
                 "playlist_key": playlist_key,
                 "playlist_pinned": playlist_pinned,
+                "is_own_playlist": is_own_playlist,
+                "collection_kind": collection_kind,
+                "collection_liked": collection_liked,
+                "audio_quality": audio_quality,
+                "normalize_volume": normalize_volume,
+                "ai_music_behavior": ai_music_behavior,
+                "ai_strict_tracks": ai_strict_tracks,
+                "show_ai_labels": show_ai_labels,
             }),
         );
     }
@@ -1249,7 +1934,7 @@ impl YMusicCore {
             let st = self.state.lock().unwrap();
             if let Some(idx) = cmd["card_index"].as_u64() {
                 match st.cards.get(idx as usize) {
-                    Some(CardTarget::Playlist { uid, kind, title, cover_uri }) => Some(config::PinnedPlaylist {
+                    Some(CardTarget::Playlist { uid, kind, title, cover_uri, .. }) => Some(config::PinnedPlaylist {
                         uid: *uid,
                         kind: *kind,
                         title: title.clone(),
@@ -1293,14 +1978,19 @@ impl YMusicCore {
     pub fn begin_cached_view(&self, key: Option<&str>, page: i32, title: String, subtitle: String) -> u64 {
         let is_artist = key.is_some_and(|k| k.starts_with("artist:"));
         let is_playlist = key.is_some_and(|k| k.starts_with("playlist:"));
+        let is_album = key.is_some_and(|k| k.starts_with("album:"));
         let (view, has_cache, eff_title, eff_subtitle, cards_payload, tracks_payload, current_idx, can_wave, artist_info) = {
             let mut st = self.state.lock().unwrap();
             st.view_id += 1;
             st.page = page;
+            st.active_view_key = key.map(str::to_string);
             if !is_playlist {
                 st.active_playlist = None;
             }
-            st.collection_downloadable = key.is_some_and(|k| k == "likes" || k.starts_with("album:") || k.starts_with("playlist:"));
+            if !is_album {
+                st.active_album_id = None;
+            }
+            st.collection_downloadable = key.is_some_and(|k| k == "likes" || k == "chart" || k.starts_with("album:") || k.starts_with("playlist:"));
             let view = st.view_id;
 
             let cached = key.and_then(|k| {
@@ -1380,8 +2070,9 @@ impl YMusicCore {
         if let Some(k) = key {
             let mut st = self.state.lock().unwrap();
             let prev = st.views.get(k);
+            let is_active = st.view_id == view || st.active_view_key.as_deref() == Some(k);
             let cached = CachedView {
-                cover_uri: if st.view_id == view { st.view_cover_uri.clone() } else { prev.and_then(|p| p.cover_uri.clone()) },
+                cover_uri: if is_active { st.view_cover_uri.clone() } else { prev.and_then(|p| p.cover_uri.clone()) },
                 title: title.clone().or_else(|| prev.map(|p| p.title.clone())).unwrap_or_default(),
                 subtitle: subtitle.clone().or_else(|| prev.map(|p| p.subtitle.clone())).unwrap_or_default(),
                 cards: cards.clone(),
@@ -1395,9 +2086,12 @@ impl YMusicCore {
         }
 
         let can_wave = viewed_artist_id.is_some();
+        let tracks_for_ai = tracks.clone();
         let (tracks_p, cards_p, current_idx, current_page) = {
             let mut st = self.state.lock().unwrap();
-            if st.view_id != view {
+            let matches_view = st.view_id == view
+                || key.is_some_and(|k| st.active_view_key.as_deref() == Some(k));
+            if !matches_view {
                 return false;
             }
             st.cards = cards.clone();
@@ -1436,14 +2130,142 @@ impl YMusicCore {
         self.send_event(EVENT_CARDS_LOADED, &CardsPayload { cards: cards_p });
         self.send_event(EVENT_TRACKS_LOADED, &TracksPayload { tracks: tracks_p, current_index: current_idx });
 
+        if !tracks_for_ai.is_empty() {
+            self.spawn_ai_verification(tracks_for_ai);
+        }
+
         true
     }
 
+    pub fn spawn_ai_verification(&self, tracks: Vec<Track>) {
+        let http = self.http.clone();
+        let state = self.state.clone();
+        let sink = self.sink.clone();
+        self.rt_handle.spawn(async move {
+            let ai_ids = crate::slopless::check_tracks_batch(&http, &tracks).await;
+            if ai_ids.is_empty() {
+                return;
+            }
+            let mut changed = false;
+            let (tracks_p, queue_p, cur_list_idx, cur_queue_idx, now_payload) = {
+                let mut st = state.lock().unwrap();
+                for t in &mut st.list {
+                    if ai_ids.contains(&t.id) && !t.is_ai {
+                        t.is_ai = true;
+                        changed = true;
+                    }
+                }
+                for t in &mut st.queue {
+                    if ai_ids.contains(&t.id) && !t.is_ai {
+                        t.is_ai = true;
+                        changed = true;
+                    }
+                }
+                for v in st.views.values_mut() {
+                    for t in &mut v.tracks {
+                        if ai_ids.contains(&t.id) && !t.is_ai {
+                            t.is_ai = true;
+                        }
+                    }
+                }
+                if !changed {
+                    return;
+                }
+                let tracks_p: Vec<TrackItemPayload> = st.list.iter().map(|t| track_payload(t, &st.liked_ids)).collect();
+                let queue_p: Vec<TrackItemPayload> = st.queue.iter().map(|t| track_payload(t, &st.liked_ids)).collect();
+                let cur_list_idx = current_list_index(&st);
+                let cur_queue_idx = st.current.map_or(-1, |i| i as i32);
+                let now_payload = current_track(&st).map(|t| {
+                    let cover_url = cache::resolve_track_cover_url(t, 200);
+                    NowPlayingPayload {
+                        has_track: true,
+                        id: t.id.clone(),
+                        title: t.title.clone(),
+                        artists: t.artists.clone(),
+                        artist_links: artist_links_for(t),
+                        album: t.album_title.clone(),
+                        has_cover: !cover_url.is_empty(),
+                        cover_url,
+                        duration_ms: t.duration_ms,
+                        duration_text: fmt_time(t.duration_ms as f64 / 1000.0),
+                        liked: st.liked_ids.contains(&t.id),
+                        has_artist: t.artist_id.is_some(),
+                        has_album: t.album_id.is_some(),
+                        is_ai: t.is_ai || crate::slopless::is_track_ai_fast(t),
+                    }
+                });
+                (tracks_p, queue_p, cur_list_idx, cur_queue_idx, now_payload)
+            };
+            if let Ok(j) = serde_json::to_string(&TracksPayload { tracks: queue_p, current_index: cur_queue_idx }) {
+                sink.on_event(EVENT_QUEUE_LOADED, &j);
+            }
+            if let Ok(j) = serde_json::to_string(&TracksPayload { tracks: tracks_p, current_index: cur_list_idx }) {
+                sink.on_event(EVENT_TRACKS_LOADED, &j);
+            }
+            if let Some(np) = now_payload
+                && let Ok(j) = serde_json::to_string(&np)
+            {
+                sink.on_event(EVENT_NOW_PLAYING, &j);
+            }
+        });
+    }
+
     pub fn view_failed(&self, view: u64, what: &str, e: anyhow::Error) {
-        let is_current = self.state.lock().unwrap().view_id == view;
-        if is_current {
+        let should_report = {
+            let st = self.state.lock().unwrap();
+            st.view_id == view && st.list.is_empty() && st.cards.is_empty()
+        };
+        if should_report {
             self.error(format!("{what}: {e:#}"));
         }
+    }
+
+    pub fn should_fetch_view(&self, key: &str, cooldown: Duration) -> bool {
+        let mut st = self.state.lock().unwrap();
+        if st.fetching_views.contains(key) {
+            return false;
+        }
+        let has_non_empty_cache = st
+            .views
+            .get(key)
+            .is_some_and(|v| !v.tracks.is_empty() || !v.cards.is_empty());
+        if has_non_empty_cache
+            && let Some(ts) = st.view_fetched_at.get(key)
+            && ts.elapsed() < cooldown
+        {
+            return false;
+        }
+        st.fetching_views.insert(key.to_string());
+        true
+    }
+
+    pub fn finish_fetching_view(&self, key: &str, ok: bool) {
+        let mut st = self.state.lock().unwrap();
+        st.fetching_views.remove(key);
+        if ok {
+            st.view_fetched_at.insert(key.to_string(), std::time::Instant::now());
+        }
+    }
+
+    pub async fn ensure_uid(&self, api: &Api) -> anyhow::Result<u64> {
+        let uid = self.state.lock().unwrap().uid;
+        if uid != 0 {
+            return Ok(uid);
+        }
+        let account = api.account().await?;
+        let new_uid = account.uid;
+        let name = account.name.clone();
+        let avatar = account.avatar_url.clone();
+        {
+            let mut st = self.state.lock().unwrap();
+            st.uid = new_uid;
+        }
+        config::update_settings(move |s| {
+            s.user_uid = new_uid;
+            s.user_name = Some(name);
+            s.user_avatar_url = avatar;
+        });
+        Ok(new_uid)
     }
 
     pub fn refresh_rows(&self) {
@@ -1466,7 +2288,7 @@ impl YMusicCore {
 
         let st = self.state.lock().unwrap();
         if let Some(t) = current_track(&st) {
-            let cover_url = t.cover_url(200).unwrap_or_default();
+            let cover_url = cache::resolve_track_cover_url(t, 200);
             self.send_event(EVENT_NOW_PLAYING, &NowPlayingPayload {
                 has_track: true,
                 id: t.id.clone(),
@@ -1481,20 +2303,34 @@ impl YMusicCore {
                 liked: now_liked,
                 has_artist: t.artist_id.is_some(),
                 has_album: t.album_id.is_some(),
+                is_ai: t.is_ai || crate::slopless::is_track_ai_fast(t),
             });
         }
     }
 
     pub fn prefetch_likes(self: Arc<Self>) {
         let Some(api) = self.api() else { return };
-        let uid = self.state.lock().unwrap().uid;
         let this = self.clone();
         self.rt_handle.spawn(async move {
-            if let Ok(entries) = api.liked_track_entries(uid).await {
-                let set: HashSet<String> = entries.into_iter().map(|(id, _)| id).collect();
-                this.state.lock().unwrap().liked_ids = set;
-                this.refresh_rows();
+            let Ok(uid) = this.ensure_uid(&api).await else { return };
+            let (tracks_res, albums_res, artists_res) = tokio::join!(
+                api.liked_track_entries(uid),
+                api.liked_albums(uid),
+                api.liked_artists(uid),
+            );
+            let mut st = this.state.lock().unwrap();
+            if let Ok(entries) = tracks_res {
+                st.liked_ids = entries.into_iter().map(|(id, _)| id).collect();
             }
+            if let Ok(albums) = albums_res {
+                st.liked_album_ids = albums.into_iter().map(|a| a.id).collect();
+            }
+            if let Ok(artists) = artists_res {
+                st.liked_artist_ids = artists.into_iter().map(|a| a.id).collect();
+            }
+            drop(st);
+            this.refresh_rows();
+            this.send_view_feature();
         });
     }
 
@@ -1504,40 +2340,173 @@ impl YMusicCore {
             self.apply_cached_view(view, None, Some("Главная".into()), Some(String::new()), Vec::new(), Vec::new(), None, None);
             return;
         };
-        let uid = self.state.lock().unwrap().uid;
         let view = self.begin_cached_view(
             Some("home"),
             0,
             "Главная".into(),
-            "Ваша музыка и рекомендации".into(),
+            "Персональные плейлисты, новинки и ваша коллекция".into(),
+        );
+        if !self.should_fetch_view("home", Duration::from_secs(30)) {
+            return;
+        }
+        let this = self.clone();
+        self.rt_handle.spawn(async move {
+            let uid = this.ensure_uid(&api).await.unwrap_or(0);
+            let (landing_res, playlists_res, albums_res) = if uid != 0 {
+                let (l, p, a) = tokio::join!(
+                    api.landing_home(),
+                    api.user_playlists(uid),
+                    api.liked_albums(uid),
+                );
+                (l, Some(p), Some(a))
+            } else {
+                (api.landing_home().await, None, None)
+            };
+
+            let mut cards = Vec::new();
+            let mut seen_playlists = HashSet::new();
+            let mut seen_albums = HashSet::new();
+
+            if let Ok(landing) = landing_res {
+                for p in landing.personal_playlists.into_iter().take(6) {
+                    if seen_playlists.insert((p.uid, p.kind)) {
+                        cards.push(playlist_target_in(p, "personal"));
+                    }
+                }
+                for mut a in landing.new_releases.into_iter().take(8) {
+                    if seen_albums.insert(a.id.clone()) {
+                        a.section = "new_releases".to_string();
+                        cards.push(CardTarget::Album(a));
+                    }
+                }
+                for p in landing.new_playlists.into_iter().take(6) {
+                    if seen_playlists.insert((p.uid, p.kind)) {
+                        cards.push(playlist_target_in(p, "new_playlists"));
+                    }
+                }
+            }
+            if let Some(Ok(playlists)) = playlists_res {
+                for p in playlists.into_iter().take(8) {
+                    if seen_playlists.insert((p.uid, p.kind)) {
+                        cards.push(playlist_target_in(p, "user_playlists"));
+                    }
+                }
+            }
+            if let Some(Ok(albums)) = albums_res {
+                for mut a in albums.into_iter().take(8) {
+                    if seen_albums.insert(a.id.clone()) {
+                        a.section = "user_albums".to_string();
+                        cards.push(CardTarget::Album(a));
+                    }
+                }
+            }
+
+            let ok = !cards.is_empty();
+            this.finish_fetching_view("home", ok);
+            if ok {
+                this.apply_cached_view(
+                    view,
+                    Some("home"),
+                    Some("Главная".into()),
+                    Some("Персональные плейлисты, новинки и ваша коллекция".into()),
+                    cards,
+                    Vec::new(),
+                    None,
+                    None,
+                );
+            } else {
+                let is_empty_current = {
+                    let st = this.state.lock().unwrap();
+                    st.view_id == view && st.cards.is_empty() && st.list.is_empty()
+                };
+                if is_empty_current {
+                    this.send_event(EVENT_VIEW_HEADER, &ViewHeaderPayload {
+                        cover_url: String::new(),
+                        page: 0,
+                        title: "Главная".into(),
+                        subtitle: "Нет подключения к сети".into(),
+                        loading: false,
+                        is_artist_view: false,
+                        artist_name: String::new(),
+                        artist_genres: String::new(),
+                        artist_stats: String::new(),
+                        artist_avatar: String::new(),
+                        artist_has_avatar: false,
+                        can_start_artist_wave: false,
+                    });
+                }
+            }
+        });
+    }
+
+    pub fn open_chart(self: Arc<Self>) {
+        let Some(api) = self.api() else { return };
+        let view = self.begin_cached_view(
+            Some("chart"),
+            6,
+            "Чарт Яндекс Музыки".into(),
+            "Популярные треки прямо сейчас".into(),
+        );
+        if !self.should_fetch_view("chart", Duration::from_secs(30)) {
+            return;
+        }
+        let this = self.clone();
+        self.rt_handle.spawn(async move {
+            match api.chart_tracks().await {
+                Ok(tracks) => {
+                    this.finish_fetching_view("chart", true);
+                    let sub = format!("Топ-{} популярных треков", tracks.len());
+                    this.apply_cached_view(
+                        view,
+                        Some("chart"),
+                        Some("Чарт Яндекс Музыки".into()),
+                        Some(sub),
+                        Vec::new(),
+                        tracks,
+                        None,
+                        None,
+                    );
+                }
+                Err(e) => {
+                    this.finish_fetching_view("chart", false);
+                    this.view_failed(view, "Чарт", e);
+                }
+            }
+        });
+    }
+
+    pub fn open_similar_tracks(self: Arc<Self>, track_id: String, title: String) {
+        let Some(api) = self.api() else { return };
+        let key = format!("similar:{track_id}");
+        let header_title = format!("Похожие: {title}");
+        let view = self.begin_cached_view(
+            Some(&key),
+            6,
+            header_title.clone(),
+            "Треки в похожем стиле".into(),
         );
         let this = self.clone();
         self.rt_handle.spawn(async move {
-            let playlists_res = api.user_playlists(uid).await;
-            let albums_res = api.liked_albums(uid).await;
-
-            let mut cards = Vec::new();
-            if let Ok(playlists) = playlists_res {
-                for p in playlists.into_iter().take(6) {
-                    cards.push(playlist_target(p));
+            match api.similar_tracks(&track_id).await {
+                Ok(tracks) => {
+                    let sub = if tracks.is_empty() {
+                        "Похожие треки не найдены".to_string()
+                    } else {
+                        format!("{} похожих треков", tracks.len())
+                    };
+                    this.apply_cached_view(
+                        view,
+                        Some(&key),
+                        Some(header_title),
+                        Some(sub),
+                        Vec::new(),
+                        tracks,
+                        None,
+                        None,
+                    );
                 }
+                Err(e) => this.view_failed(view, "Похожие треки", e),
             }
-            if let Ok(albums) = albums_res {
-                for a in albums.into_iter().take(6) {
-                    cards.push(CardTarget::Album(a));
-                }
-            }
-
-            this.apply_cached_view(
-                view,
-                Some("home"),
-                Some("Главная".into()),
-                Some("Ваша музыка и рекомендации".into()),
-                cards,
-                Vec::new(),
-                None,
-                None,
-            );
         });
     }
 
@@ -1555,8 +2524,22 @@ impl YMusicCore {
                 cache::offline_tracks()
             }).await {
                 Ok(Ok((tracks, bytes))) => {
+                    let missing_covers: Vec<Track> = tracks
+                        .iter()
+                        .filter(|t| t.cover_uri.is_some() && cache::offline_cover_url(&t.id).is_none())
+                        .cloned()
+                        .collect();
                     let subtitle = format!("{} тр. • {:.1} МБ • На этом устройстве", tracks.len(), bytes as f64 / 1048576.0);
                     this.apply_cached_view(view, None, Some("Загружено".into()), Some(subtitle), Vec::new(), tracks, None, None);
+                    if !missing_covers.is_empty() {
+                        let bg_core = this.clone();
+                        this.rt_handle.spawn(async move {
+                            for t in missing_covers {
+                                cache::download_offline_cover(&bg_core.http, &t).await;
+                            }
+                            bg_core.refresh_rows();
+                        });
+                    }
                 }
                 _ => {
                     this.apply_cached_view(view, None, Some("Загружено".into()), Some("Не удалось прочитать загрузки".into()), Vec::new(), Vec::new(), None, None);
@@ -1615,7 +2598,11 @@ impl YMusicCore {
                 Ok(()) => {
                     // Invalidate only this playlist; never replace the page the user navigated to.
                     let key = format!("playlist:{uid}:{kind}");
-                    this.state.lock().unwrap().views.remove(&key);
+                    {
+                        let mut st = this.state.lock().unwrap();
+                        st.views.remove(&key);
+                        st.view_fetched_at.remove(&key);
+                    }
                     cache::remove_view(&key);
                     this.send_event(EVENT_PLAYLIST_PICKER, &serde_json::json!({"id": id, "stage": "done"}));
                     this.notify(format!("«{}» добавлен в плейлист", track.title));
@@ -1627,12 +2614,56 @@ impl YMusicCore {
 
     pub fn load_likes(self: Arc<Self>) {
         let Some(api) = self.api() else { return };
-        let uid = self.state.lock().unwrap().uid;
         let view = self.begin_cached_view(Some("likes"), 2, "Мне нравится".into(), "".into());
+        if !self.should_fetch_view("likes", Duration::from_secs(25)) {
+            return;
+        }
         let this = self.clone();
         self.rt_handle.spawn(async move {
-            match api.liked_tracks(uid).await {
+            let res: anyhow::Result<(HashSet<String>, Vec<Track>)> = async {
+                let uid = this.ensure_uid(&api).await?;
+                let entries = api.liked_track_entries(uid).await?;
+                let liked_set: HashSet<String> = entries.iter().map(|(id, _)| id.clone()).collect();
+
+                let mut known_tracks: HashMap<String, Track> = {
+                    let st = this.state.lock().unwrap();
+                    let mut map = HashMap::new();
+                    if let Some(cached) = st.views.get("likes") {
+                        for t in &cached.tracks {
+                            map.insert(t.id.clone(), t.clone());
+                        }
+                    }
+                    for t in st.list.iter().chain(st.queue.iter()) {
+                        map.entry(t.id.clone()).or_insert_with(|| t.clone());
+                    }
+                    map
+                };
+
+                let missing_composite: Vec<String> = entries
+                    .iter()
+                    .filter(|(id, _)| !known_tracks.contains_key(id))
+                    .map(|(_, full)| full.clone())
+                    .collect();
+
+                if !missing_composite.is_empty() {
+                    let fetched = api.tracks(&missing_composite).await?;
+                    for t in fetched {
+                        known_tracks.insert(t.id.clone(), t);
+                    }
+                }
+
+                let tracks: Vec<Track> = entries
+                    .into_iter()
+                    .filter_map(|(id, _)| known_tracks.get(&id).cloned())
+                    .collect();
+
+                Ok((liked_set, tracks))
+            }
+            .await;
+
+            match res {
                 Ok((liked_set, tracks)) => {
+                    this.finish_fetching_view("likes", true);
                     this.state.lock().unwrap().liked_ids = liked_set;
                     this.apply_cached_view(
                         view,
@@ -1646,7 +2677,10 @@ impl YMusicCore {
                     );
                     this.refresh_rows();
                 }
-                Err(e) => this.view_failed(view, "Не удалось загрузить лайки", e),
+                Err(e) => {
+                    this.finish_fetching_view("likes", false);
+                    this.view_failed(view, "Не удалось загрузить лайки", e);
+                }
             }
         });
     }
@@ -1657,8 +2691,10 @@ impl YMusicCore {
             if let Some(w) = st.wave.as_ref().filter(|w| w.seed == seed && !w.tracks.is_empty()) {
                 let tracks = w.tracks.clone();
                 let w_title = w.title.clone();
+                let cache_key = w.cache_key();
                 st.view_id += 1;
                 st.page = 1;
+                st.active_view_key = Some(cache_key);
                 st.collection_downloadable = false;
                 st.view_cover_uri = None;
                 let view = st.view_id;
@@ -1678,7 +2714,7 @@ impl YMusicCore {
         };
 
         if let Some((_view, w_title, tracks_p, cur)) = existing {
-            self.send_feature("view", serde_json::json!({"downloadable": false}));
+            self.send_view_feature();
             self.send_event(EVENT_VIEW_HEADER, &ViewHeaderPayload {
                 cover_url: self.view_cover_url(),
                 page: 1,
@@ -1768,6 +2804,7 @@ impl YMusicCore {
                     session_id: session.session_id.clone(),
                     batch_id: session.batch_id.clone(),
                     tracks: session.tracks.clone(),
+                    filters: filters.clone(),
                     fetching_more: false,
                     resume_on_load: false,
                 });
@@ -1799,17 +2836,25 @@ impl YMusicCore {
 
     pub fn load_playlists(self: Arc<Self>) {
         let Some(api) = self.api() else { return };
-        let uid = self.state.lock().unwrap().uid;
         let view = self.begin_cached_view(
             Some("playlists"),
             3,
             "Плейлисты".into(),
             "Ваши и понравившиеся плейлисты".into(),
         );
+        if !self.should_fetch_view("playlists", Duration::from_secs(25)) {
+            return;
+        }
         let this = self.clone();
         self.rt_handle.spawn(async move {
-            match api.user_playlists(uid).await {
+            let res: anyhow::Result<Vec<api::PlaylistCard>> = async {
+                let uid = this.ensure_uid(&api).await?;
+                api.user_playlists(uid).await
+            }
+            .await;
+            match res {
                 Ok(list) => {
+                    this.finish_fetching_view("playlists", true);
                     let cards = list.into_iter().map(playlist_target).collect();
                     this.apply_cached_view(
                         view,
@@ -1822,24 +2867,35 @@ impl YMusicCore {
                         None,
                     );
                 }
-                Err(e) => this.view_failed(view, "Плейлисты", e),
+                Err(e) => {
+                    this.finish_fetching_view("playlists", false);
+                    this.view_failed(view, "Плейлисты", e);
+                }
             }
         });
     }
 
     pub fn load_albums(self: Arc<Self>) {
         let Some(api) = self.api() else { return };
-        let uid = self.state.lock().unwrap().uid;
         let view = self.begin_cached_view(
             Some("albums"),
             4,
             "Альбомы".into(),
             "Понравившиеся альбомы".into(),
         );
+        if !self.should_fetch_view("albums", Duration::from_secs(25)) {
+            return;
+        }
         let this = self.clone();
         self.rt_handle.spawn(async move {
-            match api.liked_albums(uid).await {
+            let res: anyhow::Result<Vec<AlbumCard>> = async {
+                let uid = this.ensure_uid(&api).await?;
+                api.liked_albums(uid).await
+            }
+            .await;
+            match res {
                 Ok(list) => {
+                    this.finish_fetching_view("albums", true);
                     let cards = list.into_iter().map(CardTarget::Album).collect();
                     this.apply_cached_view(
                         view,
@@ -1852,24 +2908,35 @@ impl YMusicCore {
                         None,
                     );
                 }
-                Err(e) => this.view_failed(view, "Альбомы", e),
+                Err(e) => {
+                    this.finish_fetching_view("albums", false);
+                    this.view_failed(view, "Альбомы", e);
+                }
             }
         });
     }
 
     pub fn load_artists(self: Arc<Self>) {
         let Some(api) = self.api() else { return };
-        let uid = self.state.lock().unwrap().uid;
         let view = self.begin_cached_view(
             Some("artists"),
             5,
             "Артисты".into(),
             "Любимые исполнители".into(),
         );
+        if !self.should_fetch_view("artists", Duration::from_secs(25)) {
+            return;
+        }
         let this = self.clone();
         self.rt_handle.spawn(async move {
-            match api.liked_artists(uid).await {
+            let res: anyhow::Result<Vec<ArtistCard>> = async {
+                let uid = this.ensure_uid(&api).await?;
+                api.liked_artists(uid).await
+            }
+            .await;
+            match res {
                 Ok(list) => {
+                    this.finish_fetching_view("artists", true);
                     let cards = list.into_iter().map(CardTarget::Artist).collect();
                     this.apply_cached_view(
                         view,
@@ -1882,7 +2949,10 @@ impl YMusicCore {
                         None,
                     );
                 }
-                Err(e) => this.view_failed(view, "Артисты", e),
+                Err(e) => {
+                    this.finish_fetching_view("artists", false);
+                    this.view_failed(view, "Артисты", e);
+                }
             }
         });
     }
@@ -1973,11 +3043,27 @@ impl YMusicCore {
         };
         let key = format!("playlist:{owner_uid}:{kind}");
         let view = self.begin_cached_view(Some(&key), 6, title.clone(), "Плейлист".into());
-        if cover.is_some() { self.state.lock().unwrap().view_cover_uri = cover; }
+        {
+            let mut st = self.state.lock().unwrap();
+            st.active_playlist = Some(config::PinnedPlaylist {
+                uid: owner_uid,
+                kind,
+                title: title.clone(),
+                cover_uri: cover.clone(),
+            });
+            if cover.is_some() {
+                st.view_cover_uri = cover;
+            }
+        }
+        self.send_view_feature();
+        if !self.should_fetch_view(&key, Duration::from_secs(20)) {
+            return;
+        }
         let this = self.clone();
         self.rt_handle.spawn(async move {
             match api.playlist_tracks(owner_uid, kind).await {
                 Ok(tracks) => {
+                    this.finish_fetching_view(&key, true);
                     this.apply_cached_view(
                         view,
                         Some(&key),
@@ -1989,7 +3075,10 @@ impl YMusicCore {
                         None,
                     );
                 }
-                Err(e) => this.view_failed(view, "Плейлист", e),
+                Err(e) => {
+                    this.finish_fetching_view(&key, false);
+                    this.view_failed(view, "Плейлист", e);
+                }
             }
         });
     }
@@ -1998,10 +3087,16 @@ impl YMusicCore {
         let Some(api) = self.api() else { return };
         let key = format!("album:{album_id}");
         let view = self.begin_cached_view(Some(&key), 6, "Альбом…".into(), "".into());
+        self.state.lock().unwrap().active_album_id = Some(album_id.clone());
+        self.send_view_feature();
+        if !self.should_fetch_view(&key, Duration::from_secs(20)) {
+            return;
+        }
         let this = self.clone();
         self.rt_handle.spawn(async move {
             match api.album_with_tracks(&album_id).await {
                 Ok((album, tracks)) => {
+                    this.finish_fetching_view(&key, true);
                     let sub = match album.year {
                         Some(y) if !album.artists.is_empty() => format!("{} • {y}", album.artists),
                         Some(y) => y.to_string(),
@@ -2023,7 +3118,10 @@ impl YMusicCore {
                         None,
                     );
                 }
-                Err(e) => this.view_failed(view, "Альбом", e),
+                Err(e) => {
+                    this.finish_fetching_view(&key, false);
+                    this.view_failed(view, "Альбом", e);
+                }
             }
         });
     }
@@ -2032,17 +3130,22 @@ impl YMusicCore {
         let Some(api) = self.api() else { return };
         let key = format!("artist:{artist_id}");
         let view = self.begin_cached_view(Some(&key), 6, "Артист…".into(), "".into());
+        if !self.should_fetch_view(&key, Duration::from_secs(20)) {
+            return;
+        }
         let this = self.clone();
         self.rt_handle.spawn(async move {
             match api.artist_brief(&artist_id).await {
                 Ok(page) => {
+                    this.finish_fetching_view(&key, true);
                     let name = page.artist.name.clone();
                     let genres = if page.artist.genres.is_empty() {
                         "Популярные треки и дискография".to_string()
                     } else {
                         page.artist.genres.clone()
                     };
-                    let cards = page.albums.into_iter().map(CardTarget::Album).collect();
+                    let mut cards: Vec<CardTarget> = page.albums.into_iter().map(CardTarget::Album).collect();
+                    cards.extend(page.similar_artists.into_iter().map(CardTarget::Artist));
                     let artist_meta = Some((page.artist.id.clone(), name.clone()));
                     let artist_view = Some(ArtistViewInfo {
                         id: page.artist.id.clone(),
@@ -2061,8 +3164,12 @@ impl YMusicCore {
                         artist_meta,
                         artist_view,
                     );
+                    this.send_view_feature();
                 }
-                Err(e) => this.view_failed(view, "Артист", e),
+                Err(e) => {
+                    this.finish_fetching_view(&key, false);
+                    this.view_failed(view, "Артист", e);
+                }
             }
         });
     }
@@ -2124,7 +3231,11 @@ impl YMusicCore {
             self.error("Этот трек недоступен для скачивания");
             return;
         }
-        let Some(api) = self.api() else { return };
+        let (api, audio_quality) = {
+            let st = self.state.lock().unwrap();
+            (st.api.clone(), st.audio_quality.clone())
+        };
+        let Some(api) = api else { return };
         self.notify(format!("Скачиваем «{}»…", track.title));
         let this = self.clone();
         self.rt_handle.spawn(async move {
@@ -2132,9 +3243,10 @@ impl YMusicCore {
             let result: anyhow::Result<()> = async {
                 let path = destination.or_else(|| cache::offline_track_path(&track.id))
                     .ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?;
-                let url = api.track_direct_url(&track.id).await?;
-                cache::download_to_file(api.http(), &url, &path).await?;
+                let info = api.track_stream_info(&track.id, &audio_quality).await?;
+                cache::download_to_file(api.http(), &info.url, &path).await?;
                 if offline {
+                    cache::download_offline_cover(api.http(), &track).await;
                     let metadata = track.clone();
                     tokio::task::spawn_blocking(move || cache::save_offline_metadata(&metadata)).await??;
                 }
@@ -2152,6 +3264,249 @@ impl YMusicCore {
         });
     }
 
+    pub fn toggle_like_collection(self: Arc<Self>) {
+        #[derive(Clone)]
+        enum Target {
+            Album(String),
+            Artist(String),
+            Playlist { owner_uid: u64, kind: u64 },
+        }
+
+        let (api, uid, target, add) = {
+            let mut st = self.state.lock().unwrap();
+            let Some(api) = st.api.clone() else { return };
+            let uid = st.uid;
+            if let Some(ref album_id) = st.active_album_id.clone() {
+                let add = !st.liked_album_ids.contains(album_id);
+                if add {
+                    st.liked_album_ids.insert(album_id.clone());
+                } else {
+                    st.liked_album_ids.remove(album_id);
+                }
+                (api, uid, Target::Album(album_id.clone()), add)
+            } else if let Some((ref artist_id, _)) = st.viewed_artist_id.clone() {
+                let add = !st.liked_artist_ids.contains(artist_id);
+                if add {
+                    st.liked_artist_ids.insert(artist_id.clone());
+                } else {
+                    st.liked_artist_ids.remove(artist_id);
+                }
+                (api, uid, Target::Artist(artist_id.clone()), add)
+            } else if let Some(ref pl) = st.active_playlist.clone() {
+                if pl.uid == uid && uid != 0 {
+                    return;
+                }
+                let key = format!("{}:{}", pl.uid, pl.kind);
+                let add = !st.liked_playlist_keys.contains(&key);
+                if add {
+                    st.liked_playlist_keys.insert(key);
+                } else {
+                    st.liked_playlist_keys.remove(&key);
+                }
+                (api, uid, Target::Playlist { owner_uid: pl.uid, kind: pl.kind }, add)
+            } else {
+                return;
+            }
+        };
+        self.send_view_feature();
+        let this = self.clone();
+        self.rt_handle.spawn(async move {
+            let res = match &target {
+                Target::Album(id) => {
+                    if add { api.like_album(uid, id).await } else { api.unlike_album(uid, id).await }
+                }
+                Target::Artist(id) => {
+                    if add { api.like_artist(uid, id).await } else { api.unlike_artist(uid, id).await }
+                }
+                Target::Playlist { owner_uid, kind } => {
+                    if add {
+                        api.like_playlist(uid, *owner_uid, *kind).await
+                    } else {
+                        api.unlike_playlist(uid, *owner_uid, *kind).await
+                    }
+                }
+            };
+            match res {
+                Ok(()) => {
+                    {
+                        let mut st = this.state.lock().unwrap();
+                        match &target {
+                            Target::Album(_) => {
+                                st.views.remove("albums");
+                                st.view_fetched_at.remove("albums");
+                                st.view_fetched_at.remove("home");
+                            }
+                            Target::Artist(_) => {
+                                st.views.remove("artists");
+                                st.view_fetched_at.remove("artists");
+                            }
+                            Target::Playlist { .. } => {
+                                st.views.remove("playlists");
+                                st.view_fetched_at.remove("playlists");
+                                st.view_fetched_at.remove("home");
+                            }
+                        }
+                    }
+                    this.notify(if add {
+                        "Добавлено в Мою музыку"
+                    } else {
+                        "Удалено из Моей музыки"
+                    });
+                }
+                Err(e) => {
+                    {
+                        let mut st = this.state.lock().unwrap();
+                        match &target {
+                            Target::Album(id) => {
+                                if add { st.liked_album_ids.remove(id); } else { st.liked_album_ids.insert(id.clone()); }
+                            }
+                            Target::Artist(id) => {
+                                if add { st.liked_artist_ids.remove(id); } else { st.liked_artist_ids.insert(id.clone()); }
+                            }
+                            Target::Playlist { owner_uid, kind } => {
+                                let key = format!("{owner_uid}:{kind}");
+                                if add { st.liked_playlist_keys.remove(&key); } else { st.liked_playlist_keys.insert(key); }
+                            }
+                        }
+                    }
+                    this.send_view_feature();
+                    this.error(format!("Не удалось обновить коллекцию: {e:#}"));
+                }
+            }
+        });
+    }
+
+    pub fn delete_active_playlist(self: Arc<Self>) {
+        let (api, uid, pl) = {
+            let st = self.state.lock().unwrap();
+            let Some(api) = st.api.clone() else { return };
+            let Some(pl) = st.active_playlist.clone() else { return };
+            if pl.uid != st.uid || st.uid == 0 {
+                self.error("Можно удалять только собственные плейлисты");
+                return;
+            }
+            (api, st.uid, pl)
+        };
+        let this = self.clone();
+        self.rt_handle.spawn(async move {
+            match api.delete_playlist(uid, pl.kind).await {
+                Ok(()) => {
+                    {
+                        let mut st = this.state.lock().unwrap();
+                        st.active_playlist = None;
+                        st.pinned_playlists.retain(|p| !(p.uid == pl.uid && p.kind == pl.kind));
+                        let key = format!("playlist:{}:{}", pl.uid, pl.kind);
+                        st.views.remove("playlists");
+                        st.view_fetched_at.remove("playlists");
+                        st.view_fetched_at.remove("home");
+                        st.views.remove(&key);
+                        st.view_fetched_at.remove(&key);
+                        let pins = st.pinned_playlists.clone();
+                        config::update_settings(|s| s.pinned_playlists = pins);
+                    }
+                    this.send_pinned_playlists();
+                    this.notify(format!("Плейлист «{}» удалён", pl.title));
+                    this.load_playlists();
+                }
+                Err(e) => this.error(format!("Не удалось удалить плейлист: {e:#}")),
+            }
+        });
+    }
+
+    pub fn rename_active_playlist(self: Arc<Self>, new_title: String) {
+        let new_title = new_title.trim().to_string();
+        if new_title.is_empty() {
+            return;
+        }
+        let (api, uid, pl) = {
+            let st = self.state.lock().unwrap();
+            let Some(api) = st.api.clone() else { return };
+            let Some(pl) = st.active_playlist.clone() else { return };
+            if pl.uid != st.uid || st.uid == 0 {
+                self.error("Можно переименовывать только собственные плейлисты");
+                return;
+            }
+            (api, st.uid, pl)
+        };
+        let this = self.clone();
+        self.rt_handle.spawn(async move {
+            match api.rename_playlist(uid, pl.kind, &new_title).await {
+                Ok(_updated) => {
+                    let key = format!("playlist:{}:{}", pl.uid, pl.kind);
+                    {
+                        let mut st = this.state.lock().unwrap();
+                        if let Some(ref mut active) = st.active_playlist
+                            && active.uid == pl.uid
+                            && active.kind == pl.kind
+                        {
+                            active.title = new_title.clone();
+                        }
+                        for p in &mut st.pinned_playlists {
+                            if p.uid == pl.uid && p.kind == pl.kind {
+                                p.title = new_title.clone();
+                            }
+                        }
+                        if let Some(cached) = st.views.get_mut(&key) {
+                            cached.title = new_title.clone();
+                        }
+                        st.views.remove("playlists");
+                        st.view_fetched_at.remove("playlists");
+                        st.view_fetched_at.remove("home");
+                        let pins = st.pinned_playlists.clone();
+                        config::update_settings(|s| s.pinned_playlists = pins);
+                    }
+                    this.send_pinned_playlists();
+                    this.notify(format!("Плейлист переименован в «{new_title}»"));
+                    this.open_playlist(pl.uid, pl.kind, new_title);
+                }
+                Err(e) => this.error(format!("Не удалось переименовать плейлист: {e:#}")),
+            }
+        });
+    }
+
+    pub fn remove_track_from_active_playlist(self: Arc<Self>, track_id: String) {
+        if track_id.is_empty() {
+            return;
+        }
+        let (api, uid, pl) = {
+            let st = self.state.lock().unwrap();
+            let Some(api) = st.api.clone() else { return };
+            let Some(pl) = st.active_playlist.clone() else { return };
+            if pl.uid != st.uid || st.uid == 0 {
+                self.error("Можно редактировать только собственные плейлисты");
+                return;
+            }
+            (api, st.uid, pl)
+        };
+        let this = self.clone();
+        self.rt_handle.spawn(async move {
+            match api.delete_playlist_track(uid, pl.kind, &track_id).await {
+                Ok(()) => {
+                    let key = format!("playlist:{}:{}", pl.uid, pl.kind);
+                    let mut updated_cache = None;
+                    {
+                        let mut st = this.state.lock().unwrap();
+                        if let Some(pos) = st.list.iter().position(|t| t.id == track_id) {
+                            st.list.remove(pos);
+                        }
+                        if let Some(cached) = st.views.get_mut(&key) {
+                            if let Some(pos) = cached.tracks.iter().position(|t| t.id == track_id) {
+                                cached.tracks.remove(pos);
+                            }
+                            updated_cache = Some(cached.clone());
+                        }
+                    }
+                    if let Some(cached) = updated_cache {
+                        cache::save_view(&key, &cached);
+                    }
+                    this.refresh_rows();
+                    this.notify("Трек удалён из плейлиста");
+                }
+                Err(e) => this.error(format!("Не удалось удалить трек из плейлиста: {e:#}")),
+            }
+        });
+    }
+
     pub fn toggle_now_like(self: Arc<Self>) {
         let track = current_track(&self.state.lock().unwrap()).cloned();
         if let Some(t) = track {
@@ -2161,6 +3516,15 @@ impl YMusicCore {
 
     pub fn update_likes_cache(&self, track: &Track, add: bool) {
         let mut st = self.state.lock().unwrap();
+        if st.page == 2 {
+            if add {
+                if !st.list.iter().any(|t| t.id == track.id) {
+                    st.list.insert(0, track.clone());
+                }
+            } else {
+                st.list.retain(|t| t.id != track.id);
+            }
+        }
         let Some(cached) = st.views.get_mut("likes") else { return };
         if add {
             if !cached.tracks.iter().any(|t| t.id == track.id) {
@@ -2175,7 +3539,7 @@ impl YMusicCore {
     }
 
     pub fn toggle_like_track(self: Arc<Self>, track: Track) {
-        let (api, uid, add, wave) = {
+        let (api, add, wave) = {
             let mut st = self.state.lock().unwrap();
             let Some(api) = st.api.clone() else { return };
             let add = !st.liked_ids.contains(&track.id);
@@ -2184,17 +3548,21 @@ impl YMusicCore {
             } else {
                 st.liked_ids.remove(&track.id);
             }
-            (api, st.uid, add, st.wave.clone())
+            (api, add, st.wave.clone())
         };
         self.update_likes_cache(&track, add);
         self.refresh_rows();
         let this = self.clone();
         self.rt_handle.spawn(async move {
-            let res = if add {
-                api.like_track(uid, &track.id).await
-            } else {
-                api.unlike_track(uid, &track.id).await
-            };
+            let res: anyhow::Result<()> = async {
+                let uid = this.ensure_uid(&api).await?;
+                if add {
+                    api.like_track(uid, &track.id).await
+                } else {
+                    api.unlike_track(uid, &track.id).await
+                }
+            }
+            .await;
             if let Err(e) = res {
                 {
                     let mut st = this.state.lock().unwrap();
@@ -2218,12 +3586,12 @@ impl YMusicCore {
     }
 
     pub fn dislike_now(self: Arc<Self>) {
-        let (api, uid, track, played, wave, was_liked) = {
+        let (api, track, played, wave, was_liked) = {
             let mut st = self.state.lock().unwrap();
             let Some(api) = st.api.clone() else { return };
             let Some(track) = current_track(&st).cloned() else { return };
             let was_liked = st.liked_ids.remove(&track.id);
-            (api, st.uid, track, st.position_secs, st.wave.clone(), was_liked)
+            (api, track, st.position_secs, st.wave.clone(), was_liked)
         };
         if was_liked {
             self.update_likes_cache(&track, false);
@@ -2231,7 +3599,12 @@ impl YMusicCore {
         self.refresh_rows();
         let this = self.clone();
         self.rt_handle.spawn(async move {
-            if let Err(e) = api.dislike_track(uid, &track.id).await {
+            let res: anyhow::Result<()> = async {
+                let uid = this.ensure_uid(&api).await?;
+                api.dislike_track(uid, &track.id).await
+            }
+            .await;
+            if let Err(e) = res {
                 if was_liked {
                     this.state.lock().unwrap().liked_ids.insert(track.id.clone());
                     this.update_likes_cache(&track, true);
@@ -2313,10 +3686,11 @@ impl YMusicCore {
     }
 
     pub fn play_index_at(self: Arc<Self>, index: usize, manual_skip: bool, start_at: Option<f64>) {
-        let (prev_track, prev_played, track, next_track_id, generation, api, current_idx, liked, wave, initial_pos, duration_secs) = {
+        let (prev_track, prev_played, track, next_track_id, generation, api, uid, current_idx, liked, wave, initial_pos, duration_secs, audio_quality, track_gain, ai_behavior, ai_strict, can_auto_skip) = {
             let mut st = self.state.lock().unwrap();
             let Some(track) = st.queue.get(index).cloned() else { return };
             let api = st.api.clone();
+            let uid = st.uid;
             let prev_track = current_track(&st).cloned();
             let prev_played = st.position_secs;
             let next_track_id = st.queue[index + 1..]
@@ -2325,6 +3699,14 @@ impl YMusicCore {
                 .map(|t| t.id.clone());
             let duration_secs = track.duration_ms as f64 / 1000.0;
             let initial_pos = start_at.unwrap_or(0.0).clamp(0.0, duration_secs.max(0.0));
+            let audio_quality = st.audio_quality.clone();
+            let track_gain = if st.normalize_volume { track.r128_gain() } else { 1.0 };
+            let ai_behavior = st.ai_music_behavior.clone();
+            let ai_strict = st.ai_strict_tracks;
+            let can_auto_skip = st.wave.is_some()
+                || st.queue[index + 1..]
+                    .iter()
+                    .any(|t| t.available && !crate::slopless::should_take_action_fast(t, ai_strict));
             st.current = Some(index);
             st.generation += 1;
             st.duration_secs = duration_secs;
@@ -2341,20 +3723,50 @@ impl YMusicCore {
                 next_track_id,
                 st.generation,
                 api,
+                uid,
                 current_list_index(&st),
                 liked,
                 st.wave.clone(),
                 initial_pos,
                 duration_secs,
+                audio_quality,
+                track_gain,
+                ai_behavior,
+                ai_strict,
+                can_auto_skip,
             )
         };
+
+        if start_at.is_none()
+            && can_auto_skip
+            && crate::slopless::should_take_action_fast(&track, ai_strict)
+        {
+            let do_dislike = ai_behavior == "dislike"
+                || (ai_behavior == "dislike_if_not_liked" && !liked);
+            let do_skip = do_dislike
+                || ai_behavior == "skip"
+                || (ai_behavior == "skip_if_not_liked" && !liked);
+            if do_skip {
+                if wave.is_some() {
+                    self.clone().maybe_extend_wave(index);
+                }
+                if do_dislike {
+                    self.notify(format!("ИИ-трек «{}» дизлайкнут и пропущен", track.title));
+                    self.dislike_now();
+                } else {
+                    self.notify(format!("ИИ-трек «{}» пропущен", track.title));
+                    self.step(1, true);
+                }
+                return;
+            }
+        }
 
         self.send_queue();
         self.persist_session();
 
-        if let (Some(w), Some(api_fb)) = (wave, api.clone()) {
+        if let (Some(w), Some(api_fb)) = (wave.clone(), api.clone()) {
             let cur_cid = track.composite_id();
-            let prev_cid = prev_track.filter(|t| t.id != track.id).map(|t| t.composite_id());
+            let prev_cid = prev_track.as_ref().filter(|t| t.id != track.id).map(|t| t.composite_id());
             self.rt_handle.spawn(async move {
                 if let Some(prev_id) = prev_cid {
                     let ev = if manual_skip { "skip" } else { "trackFinished" };
@@ -2367,9 +3779,15 @@ impl YMusicCore {
                     .await;
             });
             self.clone().maybe_extend_wave(index);
+        } else if let (Some(prev), Some(api_scrobble)) = (prev_track.filter(|t| t.id != track.id && prev_played >= 5.0), api.clone()) {
+            self.rt_handle.spawn(async move {
+                api_scrobble
+                    .play_audio(uid, &prev, false, prev_played, prev_played)
+                    .await;
+            });
         }
 
-        let cover_url = track.cover_url(400).unwrap_or_default();
+        let cover_url = cache::resolve_track_cover_url(&track, 400);
         let has_cover = !cover_url.is_empty();
 
         self.send_event(EVENT_NOW_PLAYING, &NowPlayingPayload {
@@ -2386,6 +3804,7 @@ impl YMusicCore {
             liked,
             has_artist: track.artist_id.is_some(),
             has_album: track.album_id.is_some(),
+            is_ai: track.is_ai || crate::slopless::is_track_ai_fast(&track),
         });
 
         let tracks: Vec<TrackItemPayload> = {
@@ -2425,8 +3844,64 @@ impl YMusicCore {
         );
         self.discord.set_track(&track, MprisStatus::Paused);
 
+        {
+            let this_ai = self.clone();
+            let track_ai = track.clone();
+            self.rt_handle.spawn(async move {
+                let (is_ai_label, should_act) =
+                    crate::slopless::check_track_online(&this_ai.http, &track_ai, ai_strict).await;
+                if is_ai_label {
+                    let mut updated = false;
+                    {
+                        let mut st = this_ai.state.lock().unwrap();
+                        for t in &mut st.queue {
+                            if t.id == track_ai.id && !t.is_ai {
+                                t.is_ai = true;
+                                updated = true;
+                            }
+                        }
+                        for t in &mut st.list {
+                            if t.id == track_ai.id && !t.is_ai {
+                                t.is_ai = true;
+                                updated = true;
+                            }
+                        }
+                    }
+                    if updated {
+                        this_ai.refresh_rows();
+                    }
+                }
+                if should_act && start_at.is_none() && this_ai.generation() == generation {
+                    let (beh, is_liked, can_skip) = {
+                        let st = this_ai.state.lock().unwrap();
+                        let is_liked = st.liked_ids.contains(&track_ai.id);
+                        let can_skip = st.wave.is_some() || st.queue.len() > 1;
+                        (st.ai_music_behavior.clone(), is_liked, can_skip)
+                    };
+                    if can_skip {
+                        let do_dislike = beh == "dislike"
+                            || (beh == "dislike_if_not_liked" && !is_liked);
+                        let do_skip = do_dislike
+                            || beh == "skip"
+                            || (beh == "skip_if_not_liked" && !is_liked);
+                        if do_dislike {
+                            this_ai.notify(format!("ИИ-трек «{}» дизлайкнут и пропущен", track_ai.title));
+                            this_ai.dislike_now();
+                        } else if do_skip {
+                            this_ai.notify(format!("ИИ-трек «{}» пропущен", track_ai.title));
+                            this_ai.step(1, true);
+                        }
+                    }
+                }
+            });
+        }
+
         if let Some((file, len)) = cache::open_cached_track(&track.id) {
-            self.audio.load(generation, SourceData::Cached { file, len });
+            self.audio.load(
+                generation,
+                SourceData::Cached { file, len, hint: None },
+                track_gain,
+            );
             if let Some(next_id) = next_track_id {
                 self.prefetch(next_id);
             }
@@ -2445,11 +3920,12 @@ impl YMusicCore {
         let this = self.clone();
         self.rt_handle.spawn(async move {
             let res = async {
-                let url = api.track_direct_url(&track.id).await?;
+                let info = api.track_stream_info(&track.id, &audio_quality).await?;
                 if this.generation() != generation {
                     anyhow::bail!("cancelled");
                 }
-                cache::stream_track(api.http().clone(), url, track.id.clone()).await
+                let reader = cache::stream_track(api.http().clone(), info.url, track.id.clone()).await?;
+                Ok::<_, anyhow::Error>((reader, info.codec))
             }
             .await;
 
@@ -2457,8 +3933,12 @@ impl YMusicCore {
                 return;
             }
             match res {
-                Ok(reader) => {
-                    this.audio.load(generation, SourceData::Stream(reader));
+                Ok((reader, codec)) => {
+                    this.audio.load(
+                        generation,
+                        SourceData::Stream { reader, hint: Some(codec) },
+                        track_gain,
+                    );
                     if let Some(next_id) = next_track_id {
                         this.prefetch(next_id);
                     }
@@ -2475,18 +3955,22 @@ impl YMusicCore {
         if cache::is_track_cached(&track_id) {
             return;
         }
-        let Some(api) = self.api() else { return };
+        let (api, audio_quality) = {
+            let st = self.state.lock().unwrap();
+            (st.api.clone(), st.audio_quality.clone())
+        };
+        let Some(api) = api else { return };
         self.rt_handle.spawn(async move {
-            let Ok(url) = api.track_direct_url(&track_id).await else { return };
+            let Ok(info) = api.track_stream_info(&track_id, &audio_quality).await else { return };
             let Some(path) = cache::track_path(&track_id) else { return };
-            if cache::download_to_file(api.http(), &url, &path).await.is_ok() {
+            if cache::download_to_file(api.http(), &info.url, &path).await.is_ok() {
                 let _ = tokio::task::spawn_blocking(cache::trim_track_cache).await;
             }
         });
     }
 
     pub fn maybe_extend_wave(self: Arc<Self>, current_index: usize) {
-        let (api, session_id, queue_ids) = {
+        let (api, session_id, seed, filters, queue_ids) = {
             let mut st = self.state.lock().unwrap();
             let len = st.queue.len();
             let Some(api) = st.api.clone() else { return };
@@ -2496,15 +3980,32 @@ impl YMusicCore {
                 return;
             }
             w.fetching_more = true;
-            (api, w.session_id.clone(), queue_ids)
+            (api, w.session_id.clone(), w.seed.clone(), w.filters.clone(), queue_ids)
         };
 
         let this = self.clone();
         self.rt_handle.spawn(async move {
             let res = api.rotor_session_tracks(&session_id, &queue_ids).await;
+            let (new_session_id, batch_res) = match res {
+                Ok(batch) if batch.unknown_session => {
+                    let mut seeds = vec![seed.clone()];
+                    seeds.extend(filters.clone());
+                    let seed_refs: Vec<&str> = seeds.iter().map(String::as_str).collect();
+                    match api.rotor_session_new(&seed_refs).await {
+                        Ok(new_sess) => (
+                            Some(new_sess.session_id),
+                            Ok((new_sess.batch_id, new_sess.tracks)),
+                        ),
+                        Err(e) => (None, Err(e)),
+                    }
+                }
+                Ok(batch) => (None, Ok((batch.batch_id, batch.tracks))),
+                Err(e) => (None, Err(e)),
+            };
             let resume;
             let mut new_for_view = false;
             let mut wave_cache_update = None;
+            let mut fresh_for_ai = Vec::new();
             {
                 let mut st = this.state.lock().unwrap();
                 let showing_wave = st.list.len() == st.queue.len()
@@ -2515,14 +4016,20 @@ impl YMusicCore {
                     return;
                 };
                 w.fetching_more = false;
+                if let Some(new_sid) = new_session_id {
+                    w.session_id = new_sid;
+                }
                 resume = std::mem::take(&mut w.resume_on_load);
-                if let Ok((batch_id, more)) = res {
-                    w.batch_id = batch_id;
+                if let Ok((batch_id, more)) = batch_res {
+                    if !batch_id.is_empty() {
+                        w.batch_id = batch_id;
+                    }
                     let fresh: Vec<Track> =
                         more.into_iter().filter(|t| !known.contains(&t.id)).collect();
                     if !fresh.is_empty() {
+                        fresh_for_ai = fresh.clone();
                         w.tracks.extend(fresh.iter().cloned());
-                        let key = format!("wave:{}", w.seed);
+                        let key = w.cache_key();
                         let cached = CachedView {
                             cover_uri: None,
                             title: w.title.clone(),
@@ -2548,6 +4055,9 @@ impl YMusicCore {
             this.send_queue();
             if new_for_view {
                 this.refresh_rows();
+            }
+            if !fresh_for_ai.is_empty() {
+                this.spawn_ai_verification(fresh_for_ai);
             }
             if resume {
                 this.step(1, false);
@@ -2576,12 +4086,16 @@ impl YMusicCore {
                     let mut st = self.state.lock().unwrap();
                     if !paused && secs >= 5.0 && st.history_generation != Some(generation) {
                         st.history_generation = Some(generation);
-                        current_track(&st).cloned()
+                        current_track(&st).cloned().map(|t| (t, st.api.clone(), st.uid))
                     } else { None }
                 };
-                if let Some(track) = listened {
+                if let Some((track, api, uid)) = listened {
                     let this = self.clone();
+                    let from_cache = cache::is_track_cached(&track.id);
                     self.rt_handle.spawn(async move {
+                        if let Some(api) = api {
+                            api.play_audio(uid, &track, from_cache, secs, secs).await;
+                        }
                         match tokio::task::spawn_blocking(move || crate::history::record(track)).await {
                             Ok(Ok(tracks)) => this.send_history_tracks(tracks),
                             _ => this.error("Не удалось сохранить историю прослушивания"),
@@ -2695,18 +4209,23 @@ impl YMusicCore {
     }
 
     pub fn toggle_shuffle(self: Arc<Self>) {
-        let shuffle_on = {
+        let (shuffle_on, extend_wave_idx) = {
             let mut st = self.state.lock().unwrap();
             st.shuffle = !st.shuffle;
+            let mut extend_wave = None;
             if st.shuffle {
                 if st.unshuffled_queue.is_none() {
                     st.unshuffled_queue = Some(st.queue.clone());
                 }
-                if let Some(cur) = st.current {
-                    if cur + 1 < st.queue.len() {
-                        let mut tail = st.queue.split_off(cur + 1);
-                        shuffle_slice(&mut tail);
-                        st.queue.extend(tail);
+                if let Some(cur) = st.current
+                    && cur < st.queue.len()
+                {
+                    let current_track = st.queue.remove(cur);
+                    shuffle_slice(&mut st.queue);
+                    st.queue.insert(0, current_track);
+                    st.current = Some(0);
+                    if st.wave.is_some() && st.queue.len() <= 5 {
+                        extend_wave = Some(0);
                     }
                 } else if !st.queue.is_empty() {
                     shuffle_slice(&mut st.queue);
@@ -2717,21 +4236,24 @@ impl YMusicCore {
                 let extra: Vec<Track> =
                     st.queue.iter().filter(|t| !known.contains(&t.id)).cloned().collect();
                 orig.extend(extra);
-                if let Some(cur) = st.current {
-                    if let Some(track) = st.queue.get(cur) {
-                        let id = track.id.clone();
-                        if let Some(new_idx) = orig.iter().position(|t| t.id == id) {
-                            st.current = Some(new_idx);
-                        }
+                if let Some(cur) = st.current
+                    && let Some(track) = st.queue.get(cur)
+                {
+                    let id = track.id.clone();
+                    if let Some(new_idx) = orig.iter().position(|t| t.id == id) {
+                        st.current = Some(new_idx);
                     }
                 }
                 st.queue = orig;
             }
-            st.shuffle
+            (st.shuffle, extend_wave)
         };
         self.send_playback_state(false);
         self.send_queue();
         self.persist_session();
+        if let Some(idx) = extend_wave_idx {
+            self.clone().maybe_extend_wave(idx);
+        }
         self.rt_handle.spawn_blocking(move || {
             config::update_settings(|s| s.shuffle = shuffle_on);
         });
@@ -2830,6 +4352,7 @@ impl YMusicCore {
         }
         let wave = st.wave.as_ref().map(|w| config::SavedWaveState {
             seed: w.seed.clone(),
+            filters: w.filters.clone(),
             title: w.title.clone(),
             session_id: w.session_id.clone(),
             batch_id: w.batch_id.clone(),
@@ -2891,6 +4414,7 @@ impl YMusicCore {
             if let Some(w) = session.wave {
                 st.wave = Some(WaveState {
                     seed: w.seed,
+                    filters: w.filters,
                     title: w.title,
                     session_id: w.session_id,
                     batch_id: w.batch_id,
@@ -2902,7 +4426,7 @@ impl YMusicCore {
             st.liked_ids.contains(&track.id)
         };
 
-        let cover_url = track.cover_url(400).unwrap_or_default();
+        let cover_url = cache::resolve_track_cover_url(&track, 400);
         let has_cover = !cover_url.is_empty();
 
         self.send_event(EVENT_NOW_PLAYING, &NowPlayingPayload {
@@ -2919,6 +4443,7 @@ impl YMusicCore {
             liked,
             has_artist: track.artist_id.is_some(),
             has_album: track.album_id.is_some(),
+            is_ai: track.is_ai || crate::slopless::is_track_ai_fast(&track),
         });
 
         self.send_event(EVENT_PLAYBACK_PROGRESS, &PlaybackProgressPayload {

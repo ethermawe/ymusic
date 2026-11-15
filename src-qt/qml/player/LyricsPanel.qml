@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
@@ -84,7 +103,6 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                     list.manualBrowsing = false
-                    manualCooldown.stop()
                     list.follow(true)
                 }
             }
@@ -113,15 +131,6 @@ Item {
             radius: parent.radius
             width: parent.width * UiState.activeLyricProgress
             color: root.scheme.primary
-        }
-    }
-
-    Timer {
-        id: manualCooldown
-        interval: 3500
-        onTriggered: {
-            list.manualBrowsing = false
-            list.follow(true)
         }
     }
 
@@ -168,15 +177,14 @@ Item {
 
         onDraggingChanged: {
             if (dragging) {
+                scroll.stop()
                 manualBrowsing = true
-                manualCooldown.restart()
             }
         }
 
         onContentYChanged: {
-            if (!autoScrolling && !scroll.running && (moving || dragging)) {
+            if (!autoScrolling && !scroll.running && (moving || dragging || lyricsWheel.activeFlick === list)) {
                 manualBrowsing = true
-                manualCooldown.restart()
             }
             updateScrolledAway()
         }
@@ -184,15 +192,27 @@ Item {
         onHeightChanged: Qt.callLater(list.follow, false)
 
         ScrollBar.vertical: StyledScrollBar {}
-        FastWheel { target: list }
+        FastWheel {
+            id: lyricsWheel
+            target: list
+            onWheelScrolled: {
+                scroll.stop()
+                list.manualBrowsing = true
+            }
+        }
 
         function follow(animated: bool) {
-            const index = UiState.activeLyricIndex
             if (root.suspended) {
                 return
             }
+            if (manualBrowsing) {
+                updateScrolledAway()
+                return
+            }
+            lyricsWheel.stopSmooth()
+            const index = UiState.activeLyricIndex
             if (index < 0) {
-                if (UiState.lyricsSynced && list.count > 0 && !manualBrowsing) {
+                if (UiState.lyricsSynced && list.count > 0) {
                     autoScrolling = true
                     list.contentY = list.originY - list.topMargin
                     autoScrolling = false
@@ -248,15 +268,18 @@ Item {
                 }
             }
             function onLyricsLinesChanged() {
+                lyricsWheel.stopSmooth()
                 list.manualBrowsing = false
-                manualCooldown.stop()
                 Qt.callLater(list.follow, false)
             }
         }
         Connections {
             target: root
             function onSuspendedChanged() {
-                if (!root.suspended) {
+                if (root.suspended) {
+                    lyricsWheel.stopSmooth()
+                    list.manualBrowsing = false
+                } else {
                     Qt.callLater(list.follow, false)
                 }
             }
@@ -306,48 +329,22 @@ Item {
                 }
             }
 
-            StyledText {
-                id: text
+            Item {
+                id: textScaleWrap
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.leftMargin: 18
                 anchors.rightMargin: timeBadge.visible ? timeBadge.implicitWidth + 24 : 14
+                height: text.implicitHeight
                 transformOrigin: Item.Left
-                text: line.modelData && line.modelData.text && line.modelData.text.length > 0 ? line.modelData.text : "♪"
-                wrapMode: Text.Wrap
-                font.pixelSize: 20
-                font.weight: line.isCurrent || !UiState.lyricsSynced ? Font.Bold : Font.DemiBold
-                color: root.scheme.onSurface
+
                 property real springing: {
                     if (!UiState.lyricsSynced) return 0.94
                     return line.isCurrent ? 1.0 : 0.90
                 }
                 property real eased: springing
                 scale: Appearance.reduceMotion ? eased : springing
-                opacity: {
-                    if (!UiState.lyricsSynced) {
-                        return line.isHovered ? 1.0 : 0.86
-                    }
-                    if (line.isCurrent) return 1.0
-                    if (line.isHovered && line.hasTime) return 0.86
-                    return line.isPast ? 0.34 : 0.56
-                }
-
-                layer.enabled: line.isCurrent
-                layer.smooth: true
-                layer.effect: ShaderEffect {
-                    property variant source
-                    property color accentColor: root.scheme.primary
-                    property color sungColor: root.scheme.onSurface
-                    property size itemSize: Qt.size(text.width, text.height)
-                    property real progress: UiState.activeLyricProgress
-                    property real lineCount: Math.max(1, text.lineCount)
-                    property real textWidthFrac: text.width > 0 ? Math.min(1.0, Math.max(0.06, text.contentWidth / text.width)) : 1.0
-                    property real dimAlpha: 0.28
-                    property real glowAmount: Appearance.performanceMode ? 0.0 : 0.85
-                    fragmentShader: "qrc:/shaders/lyric_karaoke.frag.qsb"
-                }
 
                 Behavior on springing {
                     enabled: !root.suspended && !Appearance.reduceMotion
@@ -357,9 +354,43 @@ Item {
                     enabled: !root.suspended && Appearance.reduceMotion && !Appearance.performanceMode
                     NumberAnimation { duration: 420; easing.type: Easing.OutCubic }
                 }
-                Behavior on opacity {
-                    enabled: !root.suspended
-                    NumberAnimation { duration: Appearance.duration(260); easing.type: Easing.InOutQuad }
+
+                StyledText {
+                    id: text
+                    width: parent.width
+                    text: line.modelData && line.modelData.text && line.modelData.text.length > 0 ? line.modelData.text : "♪"
+                    wrapMode: Text.Wrap
+                    font.pixelSize: 20
+                    font.weight: line.isCurrent || !UiState.lyricsSynced ? Font.Bold : Font.DemiBold
+                    color: root.scheme.onSurface
+                    opacity: {
+                        if (!UiState.lyricsSynced) {
+                            return line.isHovered ? 1.0 : 0.86
+                        }
+                        if (line.isCurrent) return 1.0
+                        if (line.isHovered && line.hasTime) return 0.86
+                        return line.isPast ? 0.34 : 0.56
+                    }
+
+                    layer.enabled: line.isCurrent
+                    layer.smooth: true
+                    layer.effect: ShaderEffect {
+                        property variant source
+                        property color accentColor: root.scheme.primary
+                        property color sungColor: root.scheme.onSurface
+                        property size itemSize: Qt.size(text.width, text.height)
+                        property real progress: UiState.activeLyricProgress
+                        property real lineCount: Math.max(1, text.lineCount)
+                        property real textWidthFrac: text.width > 0 ? Math.min(1.0, Math.max(0.06, text.contentWidth / text.width)) : 1.0
+                        property real dimAlpha: 0.34
+                        property real glowAmount: Appearance.performanceMode ? 0.0 : 0.85
+                        fragmentShader: "qrc:/shaders/lyric_karaoke.frag.qsb"
+                    }
+
+                    Behavior on opacity {
+                        enabled: !root.suspended
+                        NumberAnimation { duration: Appearance.duration(260); easing.type: Easing.InOutQuad }
+                    }
                 }
             }
 
@@ -383,18 +414,38 @@ Item {
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: {
                     list.manualBrowsing = false
-                    manualCooldown.stop()
                     backend.seek(Math.max(0.0, Math.min(1.0, line.timeSecs / backend.durationSecs)))
                 }
             }
         }
 
-        footer: StyledText {
+        footer: Column {
+            width: list.width - list.leftMargin - list.rightMargin
             topPadding: 18
             leftPadding: 14
-            text: qsTr("Яндекс Музыка")
-            font.pixelSize: Appearance.fontSize.smaller
-            color: root.scheme.outline
+            spacing: 4
+
+            StyledText {
+                width: parent.width - 14
+                visible: UiState.lyricsWriters.length > 0
+                text: qsTr("Авторы: ") + UiState.lyricsWriters
+                wrapMode: Text.WordWrap
+                font.pixelSize: Appearance.fontSize.smaller
+                color: root.scheme.onSurfaceVariant
+            }
+            StyledText {
+                width: parent.width - 14
+                visible: UiState.lyricsMajor.length > 0
+                text: "℗ " + UiState.lyricsMajor
+                wrapMode: Text.WordWrap
+                font.pixelSize: Appearance.fontSize.smaller
+                color: root.scheme.onSurfaceVariant
+            }
+            StyledText {
+                text: qsTr("Яндекс Музыка")
+                font.pixelSize: Appearance.fontSize.smaller
+                color: root.scheme.outline
+            }
         }
     }
 }

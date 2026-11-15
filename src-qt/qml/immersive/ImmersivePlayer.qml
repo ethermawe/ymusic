@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import ymusic.ui
@@ -265,7 +284,7 @@ FocusScope {
     ImmersiveLayout {
         id: immersiveLayout
         windowWidth: root.width
-        windowHeight: root.height - (topBar.height - immersiveLayout.topBarHeight)
+        windowHeight: root.height - Math.max(0, topBar.height - 70)
         showsSpectrum: root.showsSpectrum
         showsPanel: root.sideBySide
         circular: appSettings.visualizersEnabled && appSettings.immersiveVisualizer && appSettings.circularVisualizer
@@ -316,6 +335,27 @@ FocusScope {
         onTapped: {
             root.forceActiveFocus();
             root.registerActivity();
+        }
+    }
+
+    WheelHandler {
+        acceptedDevices: PointerDevice.AllDevices
+        onWheel: (event) => {
+            if (panelHost.visible && (root.shownPanel === "lyrics" || root.shownPanel === "queue" || root.shownPanel === "audio")) {
+                const pos = root.mapToItem(panelHost, event.x, event.y);
+                if (pos.x >= 0 && pos.x <= panelHost.width && pos.y >= 0 && pos.y <= panelHost.height) {
+                    event.accepted = false;
+                    return;
+                }
+            }
+            const deltaUnits = event.angleDelta.y !== 0 ? event.angleDelta.y : event.pixelDelta.y;
+            if (deltaUnits === 0) {
+                event.accepted = false;
+                return;
+            }
+            root.registerActivity();
+            backend.setVolume(Math.max(0, Math.min(1, backend.volume + (deltaUnits / 120.0) * 0.05)));
+            event.accepted = true;
         }
     }
 

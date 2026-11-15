@@ -30,6 +30,7 @@ void ymusic_core_free(CoreHandle *handle);
 
 void ymusic_core_login_device(CoreHandle *handle);
 void ymusic_core_login_token(CoreHandle *handle, const char *token);
+void ymusic_core_cancel_login(CoreHandle *handle);
 void ymusic_core_logout(CoreHandle *handle);
 
 void ymusic_core_load_home(CoreHandle *handle);

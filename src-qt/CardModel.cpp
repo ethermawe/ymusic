@@ -18,6 +18,7 @@ QVariant CardModel::data(const QModelIndex &index, int role) const {
     case TitleRole: return c.title;
     case SubtitleRole: return c.subtitle;
     case KindRole: return c.kind;
+    case SectionRole: return c.section;
     case CoverUrlRole: return c.coverUrl;
     case HasCoverRole: return c.hasCover;
     case PinnedRole: return c.pinned;
@@ -31,6 +32,7 @@ QHash<int, QByteArray> CardModel::roleNames() const {
     roles[TitleRole] = "title";
     roles[SubtitleRole] = "subtitle";
     roles[KindRole] = "kind";
+    roles[SectionRole] = "section";
     roles[CoverUrlRole] = "coverUrl";
     roles[HasCoverRole] = "hasCover";
     roles[PinnedRole] = "pinned";
@@ -50,11 +52,35 @@ void CardModel::setCards(const QJsonArray &cardsArray) {
         c.title = obj["title"].toString();
         c.subtitle = obj["subtitle"].toString();
         c.kind = obj["kind"].toString();
+        c.section = obj["section"].toString();
         c.coverUrl = obj["cover_url"].toString();
         c.hasCover = obj["has_cover"].toBool();
         c.pinned = obj["pinned"].toBool();
         m_cards.append(c);
     }
+    ++m_revision;
     endResetModel();
     if (oldCount != m_cards.size()) emit countChanged();
+    emit cardsUpdated();
+}
+
+QVariantList CardModel::cardsForSection(const QString &section) const {
+    QVariantList result;
+    for (int i = 0; i < m_cards.size(); ++i) {
+        const CardData &c = m_cards.at(i);
+        const bool match = section.isEmpty() ? c.section.isEmpty() : (c.section == section);
+        if (!match) continue;
+        QVariantMap item;
+        item["cardIndex"] = i;
+        item["key"] = c.key;
+        item["title"] = c.title;
+        item["subtitle"] = c.subtitle;
+        item["kind"] = c.kind;
+        item["section"] = c.section;
+        item["coverUrl"] = c.coverUrl;
+        item["hasCover"] = c.hasCover;
+        item["pinned"] = c.pinned;
+        result.append(item);
+    }
+    return result;
 }

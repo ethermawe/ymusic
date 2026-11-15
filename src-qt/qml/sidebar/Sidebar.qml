@@ -72,6 +72,10 @@ Item {
             contentHeight: navColumn.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
+            onContentHeightChanged: {
+                const maxY = Math.max(0, contentHeight - height);
+                if (contentY > maxY) contentY = maxY;
+            }
 
             FastWheel { target: navigationFlickable }
 
@@ -141,65 +145,103 @@ Item {
                     }
                 }
 
-                NavigationItem {
+                Column {
                     width: parent.width
-                    compact: root.isCompact
-                    text: qsTr("Плейлисты")
-                    iconShape: "bun"
-                    symbol: "library_music"
-                    selected: root.activePage === 3
-                    trailing: IconButton {
-                        visible: !root.isCompact && backend.pinnedPlaylists.length > 0
-                        symbol: appSettings.pinnedPlaylistsExpanded ? "expand_more" : "chevron_right"
-                        size: 26
-                        iconSize: 18
-                        tooltip: appSettings.pinnedPlaylistsExpanded ? qsTr("Свернуть закреплённые") : qsTr("Развернуть закреплённые")
-                        onClicked: appSettings.pinnedPlaylistsExpanded = !appSettings.pinnedPlaylistsExpanded
-                    }
-                    onClicked: backend.loadPlaylists()
-                }
-
-                Repeater {
-                    model: appSettings.pinnedPlaylistsExpanded ? backend.pinnedPlaylists : []
+                    spacing: 0
 
                     NavigationItem {
-                        id: pinnedItem
-                        required property var modelData
                         width: parent.width
                         compact: root.isCompact
-                        indent: 10
-                        text: modelData.title ?? ""
-                        fallbackKey: modelData.key ?? text
-                        showArtwork: true
-                        artworkUrl: (modelData.has_cover ?? false) ? (modelData.cover_url ?? "") : ""
+                        text: qsTr("Плейлисты")
+                        iconShape: "bun"
                         symbol: "library_music"
-                        selected: root.activePage === 6 && backend.activePlaylistKey === (modelData.key ?? "")
+                        selected: root.activePage === 3
                         trailing: IconButton {
-                            symbol: "close"
-                            size: 24
-                            iconSize: 15
-                            opacity: pinnedItem.hovered ? 0.85 : 0
-                            visible: opacity > 0
-                            tooltip: qsTr("Открепить плейлист")
-                            onClicked: backend.feature({
-                                action: "toggle_pin_playlist",
-                                uid: pinnedItem.modelData.uid,
-                                kind: pinnedItem.modelData.kind
-                            })
+                            visible: !root.isCompact && backend.pinnedPlaylists.length > 0
+                            symbol: "expand_more"
+                            iconRotation: appSettings.pinnedPlaylistsExpanded ? 0 : -90
+                            size: 26
+                            iconSize: 18
+                            tooltip: appSettings.pinnedPlaylistsExpanded ? qsTr("Свернуть закреплённые") : qsTr("Развернуть закреплённые")
+                            onClicked: appSettings.pinnedPlaylistsExpanded = !appSettings.pinnedPlaylistsExpanded
                         }
-                        onClicked: backend.feature({
-                            action: "open_playlist",
-                            uid: pinnedItem.modelData.uid,
-                            kind: pinnedItem.modelData.kind,
-                            title: pinnedItem.modelData.title ?? "Плейлист"
-                        })
-                        TapHandler {
-                            acceptedButtons: Qt.RightButton
-                            onTapped: backend.feature({
-                                action: "toggle_pin_playlist",
-                                uid: pinnedItem.modelData.uid,
-                                kind: pinnedItem.modelData.kind
-                            })
+                        onClicked: backend.loadPlaylists()
+                    }
+
+                    Item {
+                        id: pinnedSection
+                        readonly property bool expanded: appSettings.pinnedPlaylistsExpanded && backend.pinnedPlaylists.length > 0
+                        width: parent.width
+                        height: expanded ? pinnedColumn.implicitHeight + 3 : 0
+                        visible: height > 0
+                        clip: true
+                        opacity: expanded ? 1 : 0
+                        enabled: expanded
+
+                        Behavior on height {
+                            enabled: !Appearance.performanceMode
+                            ElementMove {}
+                        }
+                        Behavior on opacity {
+                            enabled: !Appearance.performanceMode
+                            NumberAnimation { duration: Appearance.duration(180); easing.type: Easing.OutCubic }
+                        }
+
+                        Column {
+                            id: pinnedColumn
+                            width: parent.width
+                            y: pinnedSection.expanded ? 3 : -Math.min(16, implicitHeight * 0.25)
+                            spacing: 3
+
+                            Behavior on y {
+                                enabled: !Appearance.performanceMode
+                                ElementMove {}
+                            }
+
+                            Repeater {
+                                model: backend.pinnedPlaylists
+
+                                NavigationItem {
+                                    id: pinnedItem
+                                    required property var modelData
+                                    width: parent.width
+                                    compact: root.isCompact
+                                    indent: 10
+                                    text: modelData.title ?? ""
+                                    fallbackKey: modelData.key ?? text
+                                    showArtwork: true
+                                    artworkUrl: (modelData.has_cover ?? false) ? (modelData.cover_url ?? "") : ""
+                                    symbol: "library_music"
+                                    selected: root.activePage === 6 && backend.activePlaylistKey === (modelData.key ?? "")
+                                    trailing: IconButton {
+                                        symbol: "close"
+                                        size: 24
+                                        iconSize: 15
+                                        opacity: pinnedItem.hovered ? 0.85 : 0
+                                        visible: opacity > 0
+                                        tooltip: qsTr("Открепить плейлист")
+                                        onClicked: backend.feature({
+                                            action: "toggle_pin_playlist",
+                                            uid: pinnedItem.modelData.uid,
+                                            kind: pinnedItem.modelData.kind
+                                        })
+                                    }
+                                    onClicked: backend.feature({
+                                        action: "open_playlist",
+                                        uid: pinnedItem.modelData.uid,
+                                        kind: pinnedItem.modelData.kind,
+                                        title: pinnedItem.modelData.title ?? "Плейлист"
+                                    })
+                                    TapHandler {
+                                        acceptedButtons: Qt.RightButton
+                                        onTapped: backend.feature({
+                                            action: "toggle_pin_playlist",
+                                            uid: pinnedItem.modelData.uid,
+                                            kind: pinnedItem.modelData.kind
+                                        })
+                                    }
+                                }
+                            }
                         }
                     }
                 }

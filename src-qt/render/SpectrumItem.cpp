@@ -432,9 +432,34 @@ void SpectrumItem::retarget()
     }
 
     QList<float> mapped(next.size());
+    float frameMean = 0;
+    if (!m_loading && m_active && !next.isEmpty()) {
+        for (float v : next) {
+            frameMean += std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : 0.0f;
+        }
+        frameMean /= float(next.size());
+    }
+    const float dynamicFloor = (!m_loading && m_active && m_style.radial)
+        ? std::clamp(m_style.noiseFloor + std::max(0.0f, frameMean - m_style.noiseFloor) * 0.58f, 0.0f, 0.76f)
+        : m_style.noiseFloor;
+
     float largestChange = 0;
-    for (qsizetype index = 0; index < next.size(); ++index) {
-        const float level = std::isfinite(next[index]) ? std::clamp(next[index], 0.0f, 1.0f) : 0.0f;
+    const qsizetype n = next.size();
+    for (qsizetype index = 0; index < n; ++index) {
+        float raw = std::isfinite(next[index]) ? std::clamp(next[index], 0.0f, 1.0f) : 0.0f;
+        if (!m_loading && m_active && m_style.radial && n > 8) {
+            float localSum = 0;
+            constexpr qsizetype kWindow = 4;
+            for (qsizetype d = -kWindow; d <= kWindow; ++d) {
+                const float sample = next[(index + d + n) % n];
+                localSum += std::isfinite(sample) ? std::clamp(sample, 0.0f, 1.0f) : 0.0f;
+            }
+            const float localMean = localSum / float(2 * kWindow + 1);
+            raw = std::clamp(raw + (raw - localMean) * 1.45f, 0.0f, 1.0f);
+        }
+        const float level = (!m_loading && m_active && dynamicFloor > 0.0f)
+            ? std::clamp((raw - dynamicFloor) / std::max(0.08f, 1.0f - dynamicFloor), 0.0f, 1.0f)
+            : raw;
         mapped[index] = std::clamp(m_style.baseLevel + m_style.levelScale * std::pow(level, m_style.responseExponent), 0.0f, 1.0f);
         if (index < m_targets.size()) {
             largestChange = std::max(largestChange, std::abs(m_targets[index] - mapped[index]));
@@ -699,11 +724,11 @@ void SpectrumItem::buildRadial()
     const float footCircle = innerRadius * 0.8f;
     const float hidden = restCircle - footCircle;
     const float maximumLength = std::max(1.0f, edge / 2 - restCircle);
-    const float resting = std::max(m_style.minimumHeight, std::max(barWidth, maximumLength * 0.18f));
+    const float resting = std::max(m_style.minimumHeight, std::max(barWidth, maximumLength * 0.08f));
     const float travel = std::max(0.0f, maximumLength - resting);
     const float footRounding = std::min(2.0f, barWidth * 0.3f);
     const float margin = m_style.glowRadius * 3 + 1;
-    const float haloSpread = edge / 2 * 0.05f;
+    const float haloSpread = edge / 2 * 0.025f;
 
     m_barRadii.resize(0);
     for (int index = 0; index < count; ++index) {
@@ -869,17 +894,9 @@ void SpectrumItem::appendRingHalo(const QList<float> &radii, float centerX, floa
     constexpr int rings = 5;
     prepareRing(count);
 
-    // two passes of a 1-2-1 average round off a lone bar without flattening the ring
+    // catmull-rom already smooths 8 steps per segment; keep full peak-to-valley contrast
     m_ringRadii.resize(count);
     std::copy(radii.begin(), radii.end(), m_ringRadii.begin());
-    m_ringScratch.resize(count);
-    for (int pass = 0; pass < 2; ++pass) {
-        for (qsizetype index = 0; index < count; ++index) {
-            m_ringScratch[index] = (m_ringRadii[(index + count - 1) % count] + 2 * m_ringRadii[index]
-                                    + m_ringRadii[(index + 1) % count]) / 4;
-        }
-        std::swap(m_ringRadii, m_ringScratch);
-    }
     // a smooth outline through the bar tips: catmull-rom on the radius, round
     // the circle, eight steps between bars
     const qsizetype points = count * steps;

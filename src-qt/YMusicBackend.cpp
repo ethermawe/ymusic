@@ -68,6 +68,7 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         break;
     }
     case EVENT_LOGIN_DEVICE_CODE: {
+        if (!m_loginBusy) break;
         m_loginCode = obj["user_code"].toString();
         m_loginUrl = obj["verification_url"].toString();
         emit authChanged();
@@ -91,6 +92,7 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         m_nowLiked = obj["liked"].toBool();
         m_nowHasArtist = obj["has_artist"].toBool();
         m_nowHasAlbum = obj["has_album"].toBool();
+        m_nowIsAi = obj["is_ai"].toBool();
         emit nowPlayingChanged();
         break;
     }
@@ -136,6 +138,17 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
             m_collectionDownloadable = obj["downloadable"].toBool();
             m_activePlaylistKey = obj["playlist_key"].toString();
             m_activePlaylistPinned = obj["playlist_pinned"].toBool();
+            m_isOwnPlaylist = obj["is_own_playlist"].toBool();
+            m_collectionKind = obj["collection_kind"].toString();
+            m_collectionLiked = obj["collection_liked"].toBool();
+            if (obj.contains("audio_quality")) m_audioQuality = obj["audio_quality"].toString("hq");
+            if (obj.contains("normalize_volume")) m_normalizeVolume = obj["normalize_volume"].toBool(true);
+            if (obj.contains("ai_music_behavior")) m_aiMusicBehavior = obj["ai_music_behavior"].toString("skip_if_not_liked");
+            if (obj.contains("ai_strict_tracks")) m_aiStrictTracks = obj["ai_strict_tracks"].toBool(false);
+            if (obj.contains("show_ai_labels")) m_showAiLabels = obj["show_ai_labels"].toBool(true);
+        }
+        else if (type == "search_suggest") {
+            m_searchSuggestions = obj["suggestions"].toArray().toVariantList();
         }
         else if (type == "pinned_playlists") m_pinnedPlaylists = obj["playlists"].toArray().toVariantList();
         else if (type == "search") {
@@ -144,6 +157,7 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         } else if (type == "batch") m_batch = obj.toVariantMap();
         else if (type == "wave_settings") m_waveSettings = obj.toVariantMap();
         else if (type == "wave_applied") m_waveSettings["selected"] = obj["selected"].toObject().toVariantMap();
+        else if (type == "copy_track_link") copyText(obj["url"].toString());
         emit featuresChanged();
         emit featureResult(obj.toVariantMap());
         break;
@@ -194,11 +208,22 @@ void YMusicBackend::loginDevice() {
 }
 
 void YMusicBackend::loginToken(const QString &token) {
-    if (m_loginBusy || token.trimmed().isEmpty()) return;
+    if (token.trimmed().isEmpty()) return;
     clearStatus();
+    m_loginCode.clear();
+    m_loginUrl.clear();
     m_loginBusy = true;
     emit authChanged();
     if (m_core) ymusic_core_login_token(m_core, token.toUtf8().constData());
+}
+
+void YMusicBackend::cancelLogin() {
+    m_loginCode.clear();
+    m_loginUrl.clear();
+    m_loginBusy = false;
+    clearStatus();
+    emit authChanged();
+    if (m_core) ymusic_core_cancel_login(m_core);
 }
 
 void YMusicBackend::logout() {
@@ -234,9 +259,21 @@ void YMusicBackend::removeDownload(const QString &id) {
 bool YMusicBackend::isDownloaded(const QString &id) const {
     QString base = qEnvironmentVariable("XDG_DATA_HOME");
     if (base.isEmpty()) base = QDir::homePath() + "/.local/share";
+    QString safeId = id;
+    for (QChar &ch : safeId) {
+        if (!ch.isLetterOrNumber() && ch != u'_' && ch != u'-') {
+            ch = u'_';
+        }
+    }
+    if (!safeId.isEmpty()) {
+        const QFileInfo bundleAudio(base + "/ymusic/offline/" + safeId + "/audio.mp3");
+        if (bundleAudio.isFile() && bundleAudio.size() > 1024) {
+            return true;
+        }
+    }
     const auto hash = QCryptographicHash::hash(id.toUtf8(), QCryptographicHash::Md5).toHex();
-    const QFileInfo info(base + "/ymusic/offline/" + QString::fromLatin1(hash) + ".mp3");
-    return info.isFile() && info.size() > 1024;
+    const QFileInfo legacyInfo(base + "/ymusic/offline/" + QString::fromLatin1(hash) + ".mp3");
+    return legacyInfo.isFile() && legacyInfo.size() > 1024;
 }
 
 void YMusicBackend::loadPlaylists() {
@@ -326,6 +363,10 @@ void YMusicBackend::downloadTrack(const QString &id, const QUrl &destination) {
 
 void YMusicBackend::copyText(const QString &text) {
     QGuiApplication::clipboard()->setText(text);
+}
+
+QString YMusicBackend::clipboardText() const {
+    return QGuiApplication::clipboard()->text();
 }
 
 void YMusicBackend::toggle() {

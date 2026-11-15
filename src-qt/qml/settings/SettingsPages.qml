@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import ymusic.ui
@@ -8,6 +27,8 @@ Item {
 
     property int page: 0
     readonly property list<string> fades: ["none", "finalSeconds", "entire"]
+    readonly property list<string> qualities: ["nq", "hq", "lossless"]
+    readonly property list<string> aiBehaviors: ["skip_if_not_liked", "dislike_if_not_liked", "skip", "dislike", "nothing"]
     readonly property list<string> themeModes: ["auto", "light", "dark"]
     readonly property list<string> backends: ["auto", "vulkan", "opengl"]
     readonly property string normalizedPreset: (appSettings.themePreset === "" || appSettings.themePreset === "system")
@@ -120,6 +141,12 @@ Item {
                     checked: appSettings.roundArtwork || (appSettings.visualizersEnabled && appSettings.immersiveVisualizer && appSettings.circularVisualizer)
                     onToggledTo: (checked) => appSettings.roundArtwork = checked
                 }
+                ConfigSwitch {
+                    text: "Ускоренная анимация перехода в иммерсивный плеер"
+                    enabled: appSettings.motionEnabled && !appSettings.performanceMode
+                    checked: appSettings.fastImmersiveTransition
+                    onToggledTo: (checked) => appSettings.fastImmersiveTransition = checked
+                }
                 ConfigSlider {
                     text: "Чувствительность"
                     enabled: appSettings.visualizersEnabled && (appSettings.playerBarVisualizer || appSettings.immersiveVisualizer)
@@ -132,6 +159,62 @@ Item {
                 }
                 NoteText {
                     text: "Визуализация реагирует на частотный спектр аудиопотока. Отключите, если хотите снизить нагрузку на GPU."
+                }
+            }
+
+            ContentSection {
+                title: "Моя волна"
+                symbol: "my_wave"
+
+                ConfigSwitch {
+                    text: "Кольцевой визуализатор"
+                    enabled: appSettings.visualizersEnabled
+                    checked: appSettings.waveVisualizer
+                    onToggledTo: (checked) => appSettings.waveVisualizer = checked
+                }
+                ConfigSelection {
+                    text: "Форма визуализатора"
+                    enabled: appSettings.visualizersEnabled && appSettings.waveVisualizer
+                    currentIndex: appSettings.waveVisualizerShape === "wave" ? 1 : 0
+                    segments: [
+                        Segment { text: "Столбцы" },
+                        Segment { text: "Волна" }
+                    ]
+                    onActivated: (index) => appSettings.waveVisualizerShape = index === 1 ? "wave" : "bars"
+                }
+                ConfigSlider {
+                    text: "Чувствительность визуализатора"
+                    enabled: appSettings.visualizersEnabled && appSettings.waveVisualizer
+                    from: 0.6
+                    to: 1.8
+                    stepSize: 0.05
+                    value: appSettings.waveVisualizerSensitivity
+                    valueText: Math.round(appSettings.waveVisualizerSensitivity * 100) + "%"
+                    onMoved: (value) => appSettings.waveVisualizerSensitivity = Number(value.toFixed(2))
+                }
+                ConfigSwitch {
+                    text: "Обложка трека в сфере"
+                    checked: appSettings.waveOrbArtwork
+                    onToggledTo: (checked) => appSettings.waveOrbArtwork = checked
+                }
+                ConfigSwitch {
+                    text: "Волнистый контур сферы"
+                    enabled: !appSettings.noShapes
+                    checked: appSettings.waveOrbSquiggle
+                    onToggledTo: (checked) => appSettings.waveOrbSquiggle = checked
+                }
+                ConfigSlider {
+                    text: "Реакция сферы на звук"
+                    enabled: appSettings.motionEnabled && !appSettings.performanceMode
+                    from: 0
+                    to: 3
+                    stepSize: 0.1
+                    value: appSettings.waveReactivity
+                    valueText: Math.round(appSettings.waveReactivity * 100) + "%"
+                    onMoved: (value) => appSettings.waveReactivity = Number(value.toFixed(1))
+                }
+                NoteText {
+                    text: "Визуализатор и анимация сферы на экране «Моя волна» настраиваются отдельно от иммерсивного плеера."
                 }
             }
         }
@@ -181,6 +264,21 @@ Item {
                 title: "Воспроизведение"
                 symbol: "play_circle"
 
+                ConfigSelection {
+                    text: "Качество звука"
+                    currentIndex: Math.max(0, root.qualities.indexOf(backend.audioQuality))
+                    segments: [
+                        Segment { text: "Обычное" },
+                        Segment { text: "Высокое (HQ)" },
+                        Segment { text: "Lossless (FLAC)" }
+                    ]
+                    onActivated: (index) => backend.feature({action: "set_audio_quality", quality: root.qualities[index]})
+                }
+                ConfigSwitch {
+                    text: "Выравнивание громкости (EBU R128)"
+                    checked: backend.normalizeVolume
+                    onToggledTo: (checked) => backend.feature({action: "set_normalize_volume", enabled: checked})
+                }
                 ConfigSlider {
                     text: "Скорость воспроизведения"
                     from: 0.5
@@ -208,6 +306,37 @@ Item {
                     text: "Загружать обложки треков"
                     checked: appSettings.coversEnabled
                     onToggledTo: (checked) => appSettings.coversEnabled = checked
+                }
+            }
+
+            ContentSection {
+                title: "Анти-ИИ (Slopless)"
+                symbol: "smart_toy"
+
+                ConfigSelection {
+                    text: "Действие при ИИ-треке"
+                    currentIndex: Math.max(0, root.aiBehaviors.indexOf(backend.aiMusicBehavior))
+                    segments: [
+                        Segment { text: "Пропуск (кроме ♥)" },
+                        Segment { text: "Дизлайк (кроме ♥)" },
+                        Segment { text: "Всегда пропуск" },
+                        Segment { text: "Всегда дизлайк" },
+                        Segment { text: "Только метка" }
+                    ]
+                    onActivated: (index) => backend.feature({action: "set_ai_music_behavior", behavior: root.aiBehaviors[index]})
+                }
+                ConfigSwitch {
+                    text: "Показывать метку AI рядом с треком"
+                    checked: backend.showAiLabels
+                    onToggledTo: (checked) => backend.feature({action: "set_show_ai_labels", enabled: checked})
+                }
+                ConfigSwitch {
+                    text: "Строго по трекам (не блокировать живые треки артиста)"
+                    checked: backend.aiStrictTracks
+                    onToggledTo: (checked) => backend.feature({action: "set_ai_strict_tracks", enabled: checked})
+                }
+                NoteText {
+                    text: "Использует встроенную базу Slopless (141 000+ ИИ-исполнителей Яндекс Музыки) и онлайн-проверку slopless.art."
                 }
             }
 
@@ -313,7 +442,7 @@ Item {
             }
 
             ContentSection {
-                title: "Масштаб"
+                title: "Масштаб и прокрутка"
                 symbol: "zoom_in"
 
                 ConfigSlider {
@@ -324,6 +453,15 @@ Item {
                     value: appSettings.zoom
                     valueText: Math.round(appSettings.zoom * 100) + "%"
                     onMoved: (value) => appSettings.zoom = Number(value.toFixed(2))
+                }
+                ConfigSlider {
+                    text: "Сила прокрутки колесом"
+                    from: 0.5
+                    to: 6.0
+                    stepSize: 0.25
+                    value: appSettings.scrollSpeed
+                    valueText: appSettings.scrollSpeed.toFixed(2) + "×"
+                    onMoved: (value) => appSettings.scrollSpeed = Number(value.toFixed(2))
                 }
             }
 
@@ -364,10 +502,25 @@ Item {
                 title: "Движение"
                 symbol: "animation"
 
+                ConfigSlider {
+                    text: "Сила прокрутки колесом"
+                    from: 0.5
+                    to: 6.0
+                    stepSize: 0.25
+                    value: appSettings.scrollSpeed
+                    valueText: appSettings.scrollSpeed.toFixed(2) + "×"
+                    onMoved: (value) => appSettings.scrollSpeed = Number(value.toFixed(2))
+                }
                 ConfigSwitch {
                     text: "Анимации интерфейса"
                     checked: appSettings.motionEnabled
                     onToggledTo: (checked) => appSettings.motionEnabled = checked
+                }
+                ConfigSwitch {
+                    text: "Ускоренная анимация перехода в иммерсивный плеер"
+                    enabled: appSettings.motionEnabled && !appSettings.performanceMode
+                    checked: appSettings.fastImmersiveTransition
+                    onToggledTo: (checked) => appSettings.fastImmersiveTransition = checked
                 }
                 ConfigSwitch {
                     text: "Уменьшить фоновое движение"
@@ -488,6 +641,60 @@ Item {
                                 UiState.showToast("Не удалось открыть папку загрузок.");
                             }
                         }
+                    }
+                }
+            }
+
+            ContentSection {
+                title: "Обновления и версия"
+                symbol: "system_update"
+
+                StatusRow {
+                    label: "Версия v" + updater.currentVersion
+                    value: updater.supported ? updater.statusText : "Автообновление активно только на Windows"
+                    good: !updater.supported || !updater.hasError
+                }
+
+                ConfigSwitch {
+                    visible: updater.supported
+                    text: "Автоматически проверять и скачивать обновления"
+                    checked: appSettings.autoUpdateEnabled
+                    onToggledTo: (checked) => appSettings.autoUpdateEnabled = checked
+                }
+
+                Flow {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+                    topPadding: 4
+
+                    TextButton {
+                        visible: updater.supported && updater.readyToInstall
+                        variant: TextButton.Filled
+                        symbol: "restart_alt"
+                        text: "Перезапустить и обновить" + (updater.latestVersion.length > 0 ? (" (v" + updater.latestVersion + ")") : "")
+                        onClicked: updater.installAndRestart()
+                    }
+                    TextButton {
+                        visible: updater.supported && updater.portableUpdateAvailable
+                        variant: TextButton.Filled
+                        symbol: "open_in_new"
+                        text: "Открыть релиз v" + updater.latestVersion
+                        onClicked: updater.openReleasePage()
+                    }
+                    TextButton {
+                        visible: updater.supported && !updater.readyToInstall
+                        variant: TextButton.Tonal
+                        symbol: "refresh"
+                        text: updater.busy ? "Обновление…" : "Проверить обновления"
+                        enabled: !updater.busy
+                        onClicked: updater.checkForUpdates(true)
+                    }
+                    TextButton {
+                        variant: TextButton.Text
+                        symbol: "open_in_new"
+                        text: "Релизы на GitHub"
+                        onClicked: updater.openReleasePage()
                     }
                 }
             }

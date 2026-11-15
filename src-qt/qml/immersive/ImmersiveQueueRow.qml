@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
@@ -11,6 +30,7 @@ T.AbstractButton {
     property url artworkUrl: ""
     property bool available: true
     property bool current: false
+    property bool isAi: false
     property MaterialScheme scheme: PlayerStyle.darkScheme
 
     enabled: !current
@@ -54,14 +74,33 @@ T.AbstractButton {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 3
 
-            ScrollingText {
+            Item {
                 width: parent.width
-                text: root.trackTitle
-                horizontalAlignment: Text.AlignLeft
-                font.pixelSize: Appearance.fontSize.small
-                font.weight: root.current ? Font.Bold : Font.DemiBold
-                color: root.current ? "white" : Qt.rgba(1, 1, 1, 0.86)
-                running: root.current || root.hovered
+                height: Math.max(immersiveQueueTitle.implicitHeight, 18)
+
+                readonly property bool showAiBadge: backend.showAiLabels && root.isAi
+
+                ScrollingText {
+                    id: immersiveQueueTitle
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.max(0, parent.width - (immersiveQueueAiBadge.visible ? immersiveQueueAiBadge.width + 6 : 0))
+                    text: root.trackTitle
+                    horizontalAlignment: Text.AlignLeft
+                    font.pixelSize: Appearance.fontSize.small
+                    font.weight: root.current ? Font.Bold : Font.DemiBold
+                    color: root.current ? "white" : Qt.rgba(1, 1, 1, 0.86)
+                    running: root.current || root.hovered
+                }
+
+                AiBadge {
+                    id: immersiveQueueAiBadge
+                    visible: parent.showAiBadge
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    compact: true
+                    scheme: root.scheme
+                }
             }
             StyledText {
                 width: parent.width

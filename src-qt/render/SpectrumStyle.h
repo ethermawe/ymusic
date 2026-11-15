@@ -35,6 +35,7 @@ struct SpectrumStyle {
     int count = 6;
     float spacing = 2.6f;
     float minimumHeight = 3;
+    float noiseFloor = 0.0f;
     float baseLevel = 0.08f;
     float levelScale = 0.92f;
     float responseExponent = 1;
@@ -129,8 +130,12 @@ struct SpectrumStyle {
         style.count = 36;
         style.spacing = 2;
         style.minimumHeight = 2;
-        style.glowOpacity = 0.5f;
-        style.glowRadius = 4;
+        style.noiseFloor = 0.36f;
+        style.baseLevel = 0.01f;
+        style.levelScale = 1.05f;
+        style.responseExponent = 1.95f;
+        style.glowOpacity = 0.65f;
+        style.glowRadius = 5;
         style.radial = true;
         return style;
     }

@@ -24,6 +24,12 @@ layout(binding = 1) uniform sampler2D source;
 void main()
 {
     vec4 tex = texture(source, qt_TexCoord0);
+    float glyphAlpha = tex.a;
+    if (glyphAlpha <= 0.0005) {
+        fragColor = vec4(0.0);
+        return;
+    }
+
     float rows = max(1.0, lineCount);
     float row = clamp(floor(qt_TexCoord0.y * rows), 0.0, rows - 1.0);
     float rowProgress = clamp(progress * rows - row, 0.0, 1.0);
@@ -37,34 +43,18 @@ void main()
     float edge = mix(-feather, 1.0 + feather, rowProgress);
     float sung = 1.0 - smoothstep(edge - feather, edge + feather, u);
 
-    // Bright luminous wave right at the singing cursor.
+    // Subtle accent highlight right at the singing cursor (strictly inside glyph coverage, no shifted ghost taps).
     float dist = (u - edge) / max(feather * 1.45, 0.045);
     float frontier = exp(-dist * dist * 1.5) * smoothstep(0.0, 0.03, rowProgress) * smoothstep(1.0, 0.97, rowProgress);
 
-    // 4-tap local halo around sung glyphs so only the sung portion glows softly.
-    vec2 stepUv = vec2(2.6) / max(itemSize, vec2(1.0));
-    float neighborAlpha = 0.25 * (
-        texture(source, clamp(qt_TexCoord0 + vec2( stepUv.x,  0.0), 0.0, 1.0)).a +
-        texture(source, clamp(qt_TexCoord0 + vec2(-stepUv.x,  0.0), 0.0, 1.0)).a +
-        texture(source, clamp(qt_TexCoord0 + vec2( 0.0,  stepUv.y), 0.0, 1.0)).a +
-        texture(source, clamp(qt_TexCoord0 + vec2( 0.0, -stepUv.y), 0.0, 1.0)).a
-    );
+    vec3 sungTint = mix(sungColor.rgb, accentColor.rgb, 0.16 * clamp(glowAmount, 0.0, 1.0));
+    vec3 frontTint = mix(sungColor.rgb, accentColor.rgb, 0.55);
 
-    float glyphAlpha = tex.a;
-    vec3 baseRgb = glyphAlpha > 0.001 ? tex.rgb / glyphAlpha : sungColor.rgb;
-    vec3 sungTint = mix(sungColor.rgb, accentColor.rgb, 0.24);
-    vec3 frontTint = mix(accentColor.rgb, vec3(1.0), 0.25);
-
-    vec3 dimRgb = mix(baseRgb, sungColor.rgb, 0.5);
-    vec3 litRgb = mix(sungTint, frontTint, clamp(frontier * 0.9, 0.0, 0.9));
+    vec3 dimRgb = sungColor.rgb;
+    vec3 litRgb = mix(sungTint, frontTint, clamp(frontier * 0.75 * glowAmount, 0.0, 0.85));
     vec3 finalRgb = mix(dimRgb, litRgb, sung);
 
     float alphaScale = mix(dimAlpha, 1.0, sung);
-    vec4 glyphOut = vec4(finalRgb * (glyphAlpha * alphaScale), glyphAlpha * alphaScale);
-
-    // Soft colored aura outside glyph silhouette on the sung/active frontier side.
-    float haloMask = max(0.0, neighborAlpha - glyphAlpha * 0.6) * clamp(sung * 0.5 + frontier * 1.4, 0.0, 1.5);
-    vec4 haloOut = vec4(accentColor.rgb * (haloMask * glowAmount), haloMask * glowAmount * 0.72);
-
-    fragColor = (glyphOut + haloOut * (1.0 - glyphOut.a)) * qt_Opacity;
+    float outAlpha = glyphAlpha * alphaScale;
+    fragColor = vec4(finalRgb * outAlpha, outAlpha) * qt_Opacity;
 }

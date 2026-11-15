@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import ymusic.ui
@@ -17,8 +36,11 @@ Item {
     property string placeholderSymbol: "music_note"
     property string fallbackKey: source.toString().length > 0 ? source.toString() : placeholderSymbol
     property bool cache: true
-    readonly property bool ready: front.status === Image.Ready && appSettings.coversEnabled && source.toString().length > 0
-    readonly property bool showArtPlaceholder: !appSettings.coversEnabled || source.toString().length === 0 || front.status === Image.Error
+    property bool showArtwork: true
+    property color blankTopColor: Appearance.colors.surfaceContainerHigh
+    property color blankBottomColor: Appearance.colors.surfaceContainer
+    readonly property bool ready: showArtwork && front.status === Image.Ready && appSettings.coversEnabled && source.toString().length > 0
+    readonly property bool showArtPlaceholder: showArtwork && (!appSettings.coversEnabled || source.toString().length === 0 || front.status === Image.Error)
     property int maximumPixelSize: 2048
     readonly property int pixelSize: {
         const ratio = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
@@ -30,7 +52,9 @@ Item {
     property real waviness: 0
     property real wavelength: 22
     readonly property real wavePhase: waveDrift.value
+    property real dim: 0
     property bool squiggly: true
+    property real squiggleAmplitudeBoost: 1
     readonly property bool showsSquiggle: circular && squiggly && !appSettings.noShapes && Math.min(width, height) >= 40
     property color squiggleColor: Appearance.colors.primary
     property bool squiggleFollowsPlayback: false
@@ -42,9 +66,10 @@ Item {
     }
 
     readonly property real squiggleThickness: Math.max(2, Math.min(width, height) * 0.02)
-    readonly property real squiggleAmplitude: Math.max(1.4, squiggleThickness * 0.7)
+    readonly property real baseSquiggleAmplitude: Math.max(1.4, squiggleThickness * 0.7)
+    readonly property real squiggleAmplitude: baseSquiggleAmplitude * squiggleAmplitudeBoost
     readonly property real squiggleWaves: {
-        const middle = Math.min(width, height) / 2 - squiggleAmplitude - squiggleThickness / 2 - 0.75
+        const middle = Math.min(width, height) / 2 - baseSquiggleAmplitude - squiggleThickness / 2 - 0.75
         return Math.max(8, Math.round(2 * Math.PI * middle / (8 * squiggleThickness)))
     }
     readonly property real squigglePhase: squiggleFollowsPlayback && visible ? (squiggleWaves * 0.1 * UiState.spin) % (2 * Math.PI)
@@ -87,6 +112,7 @@ Item {
         property real ringPhase: root.squigglePhase
         property color ringColor: root.squiggleColor
         property real reveal: 1
+        property real dim: root.dim
 
         anchors.fill: parent
         fragmentShader: "qrc:/shaders/rounded_image.frag.qsb"
@@ -115,12 +141,39 @@ Item {
 
         // Calm neutral placeholder while a real cover loads; avoids flashing colorful fallback art.
         Rectangle {
-            anchors.fill: parent
-            radius: root.effectiveRadius
+            anchors.centerIn: parent
+            width: root.showsSquiggle ? Math.max(0, (root.squiggleMiddle - root.squiggleAmplitude) * 2) : parent.width
+            height: root.showsSquiggle ? width : parent.height
+            radius: root.showsSquiggle ? width / 2 : root.effectiveRadius
             color: Appearance.colors.surfaceContainerHigh
             border.width: root.borderWidth
             border.color: root.borderColor
-            visible: !root.showArtPlaceholder && !backLayer.visible && (!root.ready || frontLayer.opacity < 1)
+            visible: root.showArtwork && !root.showArtPlaceholder && !backLayer.visible && (!root.ready || frontLayer.opacity < 1)
+        }
+
+        Item {
+            id: blankFill
+            width: 128
+            height: 128
+            visible: false
+            layer.enabled: !root.showArtwork
+            layer.smooth: true
+
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: root.blankTopColor }
+                    GradientStop { position: 1.0; color: root.blankBottomColor }
+                }
+            }
+        }
+
+        Layer {
+            image: blankFill
+            radius: root.effectiveRadius
+            borderWidth: root.borderWidth
+            borderColor: root.borderColor
+            visible: !root.showArtwork
         }
 
         Image {
@@ -155,7 +208,7 @@ Item {
             visible: false
             asynchronous: true
             cache: root.cache
-            source: appSettings.coversEnabled ? root.artworkUrl(root.source) : ""
+            source: root.showArtwork && appSettings.coversEnabled ? root.artworkUrl(root.source) : ""
             sourceSize: Qt.size(root.pixelSize, root.pixelSize)
             onStatusChanged: {
                 if (status === Image.Error) {
@@ -201,7 +254,7 @@ Item {
             radius: root.effectiveRadius
             borderWidth: root.borderWidth
             borderColor: root.borderColor
-            visible: back.status === Image.Ready && (root.sameCover || root.crossfade)
+            visible: root.showArtwork && back.status === Image.Ready && (root.sameCover || root.crossfade)
                      && (!root.ready || frontLayer.opacity < 1 || frontLayer.reveal < 1)
         }
 

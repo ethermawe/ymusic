@@ -20,7 +20,9 @@
 #include <QLocalSocket>
 #include <QLockFile>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QLoggingCategory>
 #ifndef QT_NO_SESSIONMANAGER
 #include <QSessionManager>
 #endif
@@ -31,6 +33,7 @@
 #include "ThemeManager.h"
 #include "AppSettings.h"
 #include "app/Fonts.h"
+#include "app/UpdateChecker.h"
 #include "app/WindowController.h"
 #include "artwork/ArtworkCache.h"
 #include "motion/AmbientClock.h"
@@ -103,6 +106,9 @@ int main(int argc, char *argv[]) {
     app.setApplicationName("ymusic");
     app.setOrganizationName("finrixx");
     app.setApplicationDisplayName("Yandex Music");
+#ifdef YMUSIC_APP_VERSION
+    app.setApplicationVersion(QStringLiteral(YMUSIC_APP_VERSION));
+#endif
     app.setDesktopFileName("ymusic");
 
     QIcon appIcon = QIcon::fromTheme(QStringLiteral("ymusic"));
@@ -194,6 +200,11 @@ int main(int argc, char *argv[]) {
     }
 
     ymusic::WindowController windowController;
+    ymusic::UpdateChecker updateChecker;
+    updateChecker.setAutoCheckEnabled(settings.autoUpdateEnabled());
+    QObject::connect(&settings, &AppSettings::autoUpdateEnabledChanged, &updateChecker, [&]() {
+        updateChecker.setAutoCheckEnabled(settings.autoUpdateEnabled());
+    });
 
     QQmlApplicationEngine engine;
     engine.setNetworkAccessManagerFactory(new CustomNamFactory);
@@ -204,6 +215,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("spinClock", ymusic::AmbientClock::spin());
     engine.rootContext()->setContextProperty("trayAvailable", trayAvailable);
     engine.rootContext()->setContextProperty("windowController", &windowController);
+    engine.rootContext()->setContextProperty("updater", &updateChecker);
 
     engine.loadFromModule("ymusic.ui", "Main");
 
@@ -310,7 +322,11 @@ int main(int argc, char *argv[]) {
     });
 #endif
 
-    return app.exec();
+    updateChecker.startAutoCheck();
+    const int exitCode = app.exec();
+    instanceServer.close();
+    instanceLock.unlock();
+    return exitCode;
 }
 
 #include "main.moc"

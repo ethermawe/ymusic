@@ -71,10 +71,12 @@ jobs:
 
       - name: Configure and build Qt frontend
         run: |
+          TAG="${{ needs.meta.outputs.tag }}"
           cmake -S src-qt -B build-qt -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
-            -DCMAKE_INSTALL_LIBDIR=lib
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DYMUSIC_VERSION="${TAG#v}"
           cmake --build build-qt
 
       - name: Stage and archive release bundles
@@ -150,16 +152,50 @@ jobs:
         run: cargo build --release --locked --lib
 
       - name: Configure and build Qt frontend
+        shell: pwsh
         run: |
-          cmake -S src-qt -B build-qt -A x64
+          $tag = "${{ needs.meta.outputs.tag }}"
+          $ver = $tag.TrimStart('v')
+          cmake -S src-qt -B build-qt -A x64 "-DYMUSIC_VERSION=$ver"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build build-qt --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --install build-qt --config Release --prefix dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Deploy Qt runtime (windeployqt)
         shell: pwsh
         run: |
           windeployqt --qmldir src-qt/qml --release --no-translations --no-opengl-sw dist/ymusic-qml.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Remove-Item -Recurse -Force dist/qmltooling -ErrorAction SilentlyContinue
+
+      - name: Build Windows installer (NSIS) and update manifest
+        shell: pwsh
+        run: |
+          $tag = "${{ needs.meta.outputs.tag }}"
+          $ver = $tag.TrimStart('v')
+          $root = (Get-Location).Path
+          New-Item -ItemType Directory -Force -Path "$root\out" | Out-Null
+          $setupName = "ymusic-$tag-windows-x86_64-setup.exe"
+          $setupPath = "$root\out\$setupName"
+          & "C:\Program Files (x86)\NSIS\makensis.exe" `
+            "/DAPP_VERSION=$ver" `
+            "/DDIST_DIR=$root\dist" `
+            "/DOUT_FILE=$setupPath" `
+            "/DICON_FILE=$root\icons\ymusic.ico" `
+            "packaging\windows\installer.nsi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $hash = (Get-FileHash -Path $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $manifest = [ordered]@{
+            version   = $ver
+            tag       = $tag
+            url       = "https://github.com/${{ github.repository }}/releases/download/$tag/$setupName"
+            sha256    = $hash
+            notes_url = "https://github.com/${{ github.repository }}/releases/tag/$tag"
+          }
+          $manifest | ConvertTo-Json | Set-Content -Encoding utf8NoBOM "$root\out\latest-windows.json"
 
       - name: Build single-file portable EXE (NSIS)
         shell: pwsh
@@ -168,6 +204,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path out | Out-Null
           $exeName = "out/ymusic-$tag-windows-x86_64.exe"
           @"
+          Icon "icons\ymusic.ico"
           OutFile "$exeName"
           SilentInstall silent
           RequestExecutionLevel user
@@ -180,6 +217,7 @@ jobs:
           SectionEnd
           "@ | Set-Content -Encoding ASCII portable.nsi
           & "C:\Program Files (x86)\NSIS\makensis.exe" portable.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Archive Windows bundle
         shell: pwsh

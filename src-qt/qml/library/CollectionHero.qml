@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import ymusic.ui
@@ -215,6 +234,99 @@ Item {
                 text: "Моя волна по артисту"
                 onClicked: backend.startArtistWave()
             }
+
+            IconButton {
+                visible: backend.loggedIn && backend.collectionKind !== "" && backend.collectionKind !== "own_playlist"
+                symbol: backend.collectionLiked ? "favorite" : "favorite_border"
+                toggled: backend.collectionLiked
+                burst: "hearts"
+                size: 40
+                iconSize: 22
+                tooltip: backend.collectionLiked ? "Убрать из Моей музыки" : "Добавить в Мою музыку"
+                onClicked: backend.feature({action: "toggle_like_collection"})
+            }
+
+            TextButton {
+                visible: !root.isArtist && backend.page === 6 && backend.isOwnPlaylist && backend.loggedIn
+                variant: TextButton.Outlined
+                symbol: "edit"
+                text: "Переименовать"
+                onClicked: {
+                    renameField.text = root.title;
+                    renamePlaylistDialog.open();
+                }
+            }
+
+            IconButton {
+                visible: !root.isArtist && backend.page === 6 && backend.isOwnPlaylist && backend.loggedIn
+                symbol: "delete"
+                size: 40
+                iconSize: 21
+                tooltip: "Удалить плейлист"
+                onClicked: deletePlaylistDialog.open()
+            }
         }
+    }
+
+    StyledDialog {
+        id: renamePlaylistDialog
+        headline: "Переименовать плейлист"
+        symbol: "edit"
+        iconShape: "bun"
+        preferredWidth: 420
+
+        onOpened: renameField.inputItem.forceActiveFocus()
+
+        OutlinedTextField {
+            id: renameField
+            width: parent.width
+            placeholder: "Новое название плейлиста"
+            onAccepted: {
+                if (text.trim().length > 0) {
+                    backend.feature({action: "rename_playlist", title: text.trim()});
+                    renamePlaylistDialog.accept();
+                }
+            }
+        }
+
+        buttons: [
+            TextButton {
+                text: "Отмена"
+                variant: TextButton.Text
+                onClicked: renamePlaylistDialog.close()
+            },
+            TextButton {
+                text: "Сохранить"
+                variant: TextButton.Filled
+                enabled: renameField.text.trim().length > 0
+                onClicked: {
+                    backend.feature({action: "rename_playlist", title: renameField.text.trim()});
+                    renamePlaylistDialog.accept();
+                }
+            }
+        ]
+    }
+
+    StyledDialog {
+        id: deletePlaylistDialog
+        headline: "Удалить плейлист?"
+        symbol: "delete"
+        iconShape: "clover4"
+        body: "Плейлист «" + root.title + "» будет удалён без возможности восстановления."
+        buttons: [
+            TextButton {
+                text: "Отмена"
+                variant: TextButton.Text
+                onClicked: deletePlaylistDialog.close()
+            },
+            TextButton {
+                text: "Удалить"
+                variant: TextButton.Filled
+                onClicked: {
+                    backend.feature({action: "delete_playlist"});
+                    deletePlaylistDialog.accept();
+                }
+            }
+        ]
     }
 }

@@ -54,6 +54,7 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(bool nowLiked READ nowLiked NOTIFY nowPlayingChanged)
     Q_PROPERTY(bool nowHasArtist READ nowHasArtist NOTIFY nowPlayingChanged)
     Q_PROPERTY(bool nowHasAlbum READ nowHasAlbum NOTIFY nowPlayingChanged)
+    Q_PROPERTY(bool nowIsAi READ nowIsAi NOTIFY nowPlayingChanged)
 
     // Progress
     Q_PROPERTY(qreal progress READ progress NOTIFY progressChanged)
@@ -87,6 +88,15 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(QVariantList pinnedPlaylists READ pinnedPlaylists NOTIFY featuresChanged)
     Q_PROPERTY(QString activePlaylistKey READ activePlaylistKey NOTIFY featuresChanged)
     Q_PROPERTY(bool activePlaylistPinned READ activePlaylistPinned NOTIFY featuresChanged)
+    Q_PROPERTY(bool isOwnPlaylist READ isOwnPlaylist NOTIFY featuresChanged)
+    Q_PROPERTY(QString collectionKind READ collectionKind NOTIFY featuresChanged)
+    Q_PROPERTY(bool collectionLiked READ collectionLiked NOTIFY featuresChanged)
+    Q_PROPERTY(QString audioQuality READ audioQuality NOTIFY featuresChanged)
+    Q_PROPERTY(bool normalizeVolume READ normalizeVolume NOTIFY featuresChanged)
+    Q_PROPERTY(QString aiMusicBehavior READ aiMusicBehavior NOTIFY featuresChanged)
+    Q_PROPERTY(bool aiStrictTracks READ aiStrictTracks NOTIFY featuresChanged)
+    Q_PROPERTY(bool showAiLabels READ showAiLabels NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantList searchSuggestions READ searchSuggestions NOTIFY featuresChanged)
 
 public:
     explicit YMusicBackend(QObject *parent = nullptr);
@@ -130,6 +140,7 @@ public:
     bool nowLiked() const { return m_nowLiked; }
     bool nowHasArtist() const { return m_nowHasArtist; }
     bool nowHasAlbum() const { return m_nowHasAlbum; }
+    bool nowIsAi() const { return m_nowIsAi; }
 
     qreal progress() const { return m_progress; }
     QString positionText() const { return m_positionText; }
@@ -160,11 +171,21 @@ public:
     QVariantList pinnedPlaylists() const { return m_pinnedPlaylists; }
     QString activePlaylistKey() const { return m_activePlaylistKey; }
     bool activePlaylistPinned() const { return m_activePlaylistPinned; }
+    bool isOwnPlaylist() const { return m_isOwnPlaylist; }
+    QString collectionKind() const { return m_collectionKind; }
+    bool collectionLiked() const { return m_collectionLiked; }
+    QString audioQuality() const { return m_audioQuality; }
+    bool normalizeVolume() const { return m_normalizeVolume; }
+    QString aiMusicBehavior() const { return m_aiMusicBehavior; }
+    bool aiStrictTracks() const { return m_aiStrictTracks; }
+    bool showAiLabels() const { return m_showAiLabels; }
+    QVariantList searchSuggestions() const { return m_searchSuggestions; }
     Q_INVOKABLE void feature(const QVariantMap &command);
 
     // Q_INVOKABLE Actions
     Q_INVOKABLE void loginDevice();
     Q_INVOKABLE void loginToken(const QString &token);
+    Q_INVOKABLE void cancelLogin();
     Q_INVOKABLE void logout();
 
     Q_INVOKABLE void loadHome();
@@ -196,6 +217,7 @@ public:
     Q_INVOKABLE void saveOffline(const QString &id);
     Q_INVOKABLE void downloadTrack(const QString &id, const QUrl &destination);
     Q_INVOKABLE void copyText(const QString &text);
+    Q_INVOKABLE QString clipboardText() const;
     Q_INVOKABLE void requestTrackMenu(const QString &id, const QString &title, bool available, qreal x, qreal y) {
         emit trackMenuRequested(id, title, available, x, y);
     }
@@ -251,6 +273,15 @@ private:
     QVariantList m_pinnedPlaylists;
     QString m_activePlaylistKey;
     bool m_activePlaylistPinned = false;
+    bool m_isOwnPlaylist = false;
+    QString m_collectionKind;
+    bool m_collectionLiked = false;
+    QString m_audioQuality = "hq";
+    bool m_normalizeVolume = true;
+    QString m_aiMusicBehavior = "skip_if_not_liked";
+    bool m_aiStrictTracks = false;
+    bool m_showAiLabels = true;
+    QVariantList m_searchSuggestions;
 
     bool m_loggedIn = false;
     bool m_authReady = false;
@@ -288,6 +319,7 @@ private:
     bool m_nowLiked = false;
     bool m_nowHasArtist = false;
     bool m_nowHasAlbum = false;
+    bool m_nowIsAi = false;
 
     qreal m_progress = 0.0;
     QString m_positionText = "0:00";

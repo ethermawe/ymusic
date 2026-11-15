@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Effects
@@ -16,8 +35,9 @@ Item {
     readonly property bool showsRing: appSettings.visualizersEnabled && appSettings.immersiveVisualizer && appSettings.circularVisualizer
     readonly property bool roundCover: showsRing || ((!appSettings.visualizersEnabled || !appSettings.immersiveVisualizer) && appSettings.roundArtwork)
     readonly property bool compactHorizontal: layout.contentHeight < 460
-    property real artworkSize: compactHorizontal ? Math.min(240, Math.max(0, layout.contentHeight - 16), width * 0.36)
-                                                 : layout.artworkSize
+    readonly property real targetArtworkSize: compactHorizontal ? Math.min(240, Math.max(0, layout.contentHeight - 16), width * 0.36)
+                                                               : layout.artworkSize
+    property real artworkSize: targetArtworkSize
     readonly property real innerSize: showsRing ? artworkSize * ring.innerRadiusRatio : artworkSize
     readonly property real artworkRadius: Math.max(18, innerSize * 0.055)
 
@@ -169,6 +189,12 @@ Item {
                     color: "white"
                     rounded: true
                     animateChange: true
+                }
+
+                AiBadge {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    visible: backend.hasTrack && backend.showAiLabels && backend.nowIsAi
+                    scheme: root.scheme
                 }
 
                 Item {

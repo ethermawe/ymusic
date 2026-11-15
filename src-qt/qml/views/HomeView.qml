@@ -7,9 +7,9 @@ import ymusic.ui
 Flickable {
     id: root
 
-    topMargin: Appearance.sizes.topBarHeight
+    topMargin: width < 560 ? Appearance.sizes.topBarHeight : 0
     contentWidth: width
-    contentHeight: column.implicitHeight + 28 + Appearance.sizes.playerBarClearance
+    contentHeight: column.y + column.implicitHeight + 28 + Appearance.sizes.playerBarClearance
     boundsBehavior: Flickable.StopAtBounds
     clip: true
 
@@ -19,6 +19,56 @@ Flickable {
     readonly property real margin: Appearance.sizes.pageMargin
     readonly property real innerWidth: Math.max(0, width - 2 * margin)
     readonly property bool narrow: innerWidth < 680
+
+    readonly property var personalCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("personal") : []
+    readonly property var newReleaseCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("new_releases") : []
+    readonly property var newPlaylistCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("new_playlists") : []
+    readonly property var userPlaylistCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("user_playlists") : []
+    readonly property var userAlbumCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("user_albums") : []
+    readonly property var uncategorizedCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("") : []
+
+    component HomeSectionBlock: Column {
+        id: secBlock
+        property string title: ""
+        property string symbol: "auto_awesome"
+        property string iconShape: "sunny"
+        property var items: []
+        property bool showsSeeAll: false
+        signal seeAllClicked()
+
+        width: parent ? parent.width : 0
+        spacing: 14
+        visible: items.length > 0
+
+        SectionHeader {
+            width: parent.width
+            title: secBlock.title
+            symbol: secBlock.symbol
+            iconShape: secBlock.iconShape
+            showsSeeAll: secBlock.showsSeeAll
+            onSeeAll: secBlock.seeAllClicked()
+        }
+
+        GridView {
+            id: secGrid
+            width: parent.width
+            height: Math.ceil(Math.max(1, count) / Math.max(1, Math.floor(width / cellWidth))) * cellHeight
+            clip: false
+            interactive: false
+            cellWidth: 194
+            cellHeight: 264
+            reuseItems: true
+            model: secBlock.items
+
+            delegate: CardItem {
+                required property var modelData
+                cardIndex: modelData.cardIndex
+                cardData: modelData
+                width: 178
+                height: 252
+            }
+        }
+    }
 
     Stickers {
         width: root.width
@@ -222,7 +272,7 @@ Flickable {
         // Quick Shortcuts
         GridLayout {
             width: parent.width
-            columns: root.narrow ? 1 : 2
+            columns: root.narrow ? 1 : (root.innerWidth < 940 ? 2 : 3)
             columnSpacing: 14
             rowSpacing: 12
 
@@ -243,6 +293,15 @@ Flickable {
                 iconShape: "heart"
                 keepsShape: true
                 onClicked: backend.loadLikes()
+            }
+
+            HomeShortcut {
+                Layout.fillWidth: true
+                title: "Чарт"
+                subtitle: "Самые популярные треки сейчас"
+                symbol: "trending_up"
+                iconShape: "sunny"
+                onClicked: backend.feature({action: "open_chart"})
             }
         }
 
@@ -327,46 +386,62 @@ Flickable {
             }
         }
 
-        // Collection Cards Grid
-        Column {
+        // Categorized Sections on Home
+        HomeSectionBlock {
+            title: "Умные плейлисты для вас"
+            symbol: "auto_awesome"
+            iconShape: "sunny"
+            items: root.personalCards
+        }
+
+        HomeSectionBlock {
+            title: "Новые релизы"
+            symbol: "new_releases"
+            iconShape: "cookie9"
+            items: root.newReleaseCards
+        }
+
+        HomeSectionBlock {
+            title: "Новые плейлисты"
+            symbol: "library_music"
+            iconShape: "bun"
+            items: root.newPlaylistCards
+        }
+
+        HomeSectionBlock {
+            title: "Ваши плейлисты"
+            symbol: "queue_music"
+            iconShape: "clover4"
+            items: root.userPlaylistCards
+            showsSeeAll: true
+            onSeeAllClicked: backend.loadPlaylists()
+        }
+
+        HomeSectionBlock {
+            title: "Понравившиеся альбомы"
+            symbol: "album"
+            iconShape: "sunny"
+            items: root.userAlbumCards
+            showsSeeAll: true
+            onSeeAllClicked: backend.loadAlbums()
+        }
+
+        HomeSectionBlock {
+            title: "Ваша коллекция"
+            symbol: "library_music"
+            iconShape: "sunny"
+            items: root.uncategorizedCards
+            showsSeeAll: true
+            onSeeAllClicked: backend.loadPlaylists()
+        }
+
+        EmptyState {
             width: parent.width
-            spacing: 14
-
-            SectionHeader {
-                width: parent.width
-                title: "Ваши плейлисты и альбомы"
-                symbol: "auto_awesome"
-                iconShape: "sunny"
-                showsSeeAll: backend.cards.count > 0
-                onSeeAll: backend.loadPlaylists()
-            }
-
-            GridView {
-                id: homeCardsGrid
-                width: parent.width
-                height: Math.ceil(Math.max(1, count) / Math.max(1, Math.floor(width / cellWidth))) * cellHeight
-                clip: true
-                interactive: false
-                cellWidth: 194
-                cellHeight: 254
-                reuseItems: true
-                model: backend.cards
-                visible: count > 0
-
-                delegate: CardItem {
-                    width: 178
-                    height: 238
-                }
-            }
-
-            EmptyState {
-                width: parent.width
-                height: 180
-                visible: backend.cards.count === 0
-                symbol: "auto_awesome"
-                title: "Подборки появятся здесь"
-                description: "Музыка, плейлисты и альбомы из вашей библиотеки"
-            }
+            height: 180
+            visible: backend.cards.count === 0
+            symbol: "auto_awesome"
+            title: "Подборки появятся здесь"
+            description: "Музыка, плейлисты и альбомы из вашей библиотеки"
         }
     }
 

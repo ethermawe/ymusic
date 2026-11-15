@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
@@ -14,10 +33,11 @@ ApplicationWindow {
     readonly property bool rightPanelFits: layoutWidth - sidebar.width - Appearance.sizes.sideSheetWidth - 32 >= 404
 
     readonly property bool isHome: backend.page === 0
+    readonly property bool isWavePage: backend.page === 1
     readonly property bool isCardsPage: backend.page >= 3 && backend.page <= 5
     readonly property bool isSearchPage: backend.page === 8
-    readonly property bool isTrackListPage: backend.page === 1 || backend.page === 2 || backend.page === 7
-        || (!isHome && !isCardsPage && !isSearchPage)
+    readonly property bool isTrackListPage: backend.page === 2 || backend.page === 7
+        || (!isHome && !isWavePage && !isCardsPage && !isSearchPage)
 
     readonly property bool isMacOS: Qt.platform.os === "osx"
     readonly property bool isWindows: Qt.platform.os === "windows"
@@ -132,11 +152,13 @@ ApplicationWindow {
     Connections {
         target: backend
         function onTrackMenuRequested(id, title, available, x, y) {
+            trackMenu.prepareFor(id, title, available);
+            const menuH = Math.max(380, trackMenu.implicitHeight + 16);
             const clampedX = Math.max(12, Math.min(x - trackMenu.width, window.layoutWidth - trackMenu.width - 12));
-            const clampedY = Math.max(12, Math.min(y, window.layoutHeight - 340));
+            const clampedY = Math.max(12, Math.min(y, window.layoutHeight - menuH));
             trackMenu.x = clampedX;
             trackMenu.y = clampedY;
-            trackMenu.showFor(id, title, available);
+            trackMenu.popup();
         }
     }
 
@@ -233,6 +255,14 @@ ApplicationWindow {
                     sourceComponent: SearchView {}
                 }
 
+                // View 3.5: My Wave Dedicated Stage
+                Loader {
+                    id: waveStageView
+                    anchors.fill: parent
+                    active: backend.loggedIn && window.isWavePage
+                    sourceComponent: WaveHero {}
+                }
+
                 // View 4: Cards Grid (Playlists, Albums, Artists)
                 Item {
                     id: cardsView
@@ -248,13 +278,13 @@ ApplicationWindow {
                         bottomMargin: Appearance.sizes.playerBarClearance
                         clip: true
                         cellWidth: 194
-                        cellHeight: 254
+                        cellHeight: 264
                         reuseItems: true
                         maximumFlickVelocity: 5000
                         flickDeceleration: 2400
                         displayMarginBeginning: 200
                         displayMarginEnd: 200
-                        model: cardsView.visible ? backend.cards : null
+                        model: backend.cards
 
                         FastWheel { target: cardsGrid }
                         ScrollBar.vertical: StyledScrollBar { topPadding: 3 + Appearance.sizes.topBarHeight }
@@ -298,8 +328,12 @@ ApplicationWindow {
                         }
 
                         delegate: CardItem {
+                            required property int index
+                            required property var model
+                            cardIndex: index
+                            cardData: model
                             width: 178
-                            height: 238
+                            height: 252
                         }
                     }
 
@@ -344,17 +378,13 @@ ApplicationWindow {
                         flickDeceleration: 2400
                         displayMarginBeginning: 200
                         displayMarginEnd: 200
-                        model: trackListView.visible ? backend.tracks : null
+                        model: backend.tracks
 
                         FastWheel { target: listView }
                         ScrollBar.vertical: StyledScrollBar { topPadding: 3 + Appearance.sizes.topBarHeight }
 
-                        header: Loader {
+                        header: CollectionHero {
                             width: listView.width
-                            height: implicitHeight
-                            sourceComponent: backend.page === 1 ? waveHeader : collectionHeader
-                            Component { id: waveHeader; WaveHero {} }
-                            Component { id: collectionHeader; CollectionHero {} }
                         }
 
                         delegate: TrackRow {
@@ -391,6 +421,10 @@ ApplicationWindow {
                                     reuseItems: true
                                     model: trackListView.visible && backend.isArtistView ? backend.cards : null
                                     delegate: CardItem {
+                                        required property int index
+                                        required property var model
+                                        cardIndex: index
+                                        cardData: model
                                         width: 174
                                         height: 234
                                     }
@@ -470,6 +504,74 @@ ApplicationWindow {
                 z: 40
                 message: backend.statusMessage
                 onDismissed: backend.clearStatus()
+            }
+
+            // Auto-update ready banner (Windows)
+            Rectangle {
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: topBar.bottom
+                anchors.topMargin: 8
+                width: Math.min(540, sheet.width - 40)
+                height: 68
+                visible: updater.updateBannerVisible
+                color: Appearance.colors.surfaceContainerHigh
+                border.width: 1
+                border.color: Appearance.colors.outlineVariant
+                radius: Appearance.rounding.normal
+                z: 39
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 8
+                    anchors.topMargin: 10
+                    anchors.bottomMargin: 10
+                    spacing: 12
+
+                    ShapeIcon {
+                        Layout.alignment: Qt.AlignVCenter
+                        size: 36
+                        iconSize: 20
+                        shape: "cookie9"
+                        symbol: "system_update"
+                        color: Appearance.colors.primaryContainer
+                        iconColor: Appearance.colors.onPrimaryContainer
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        StyledText {
+                            Layout.fillWidth: true
+                            text: updater.readyToInstall
+                                ? ("Обновление v" + updater.latestVersion + " готово")
+                                : ("Доступна версия v" + updater.latestVersion)
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                        }
+                        StyledText {
+                            Layout.fillWidth: true
+                            text: updater.readyToInstall
+                                ? "Нажмите, чтобы перезапустить и установить"
+                                : "Откройте страницу релиза на GitHub для обновления"
+                            font.pixelSize: Appearance.fontSize.smaller
+                            color: Appearance.colors.onSurfaceVariant
+                            elide: Text.ElideRight
+                        }
+                    }
+                    TextButton {
+                        variant: TextButton.Filled
+                        symbol: updater.readyToInstall ? "restart_alt" : "open_in_new"
+                        text: updater.readyToInstall ? "Перезапустить и обновить" : "Скачать"
+                        onClicked: updater.installAndRestart()
+                    }
+                    IconButton {
+                        Layout.alignment: Qt.AlignVCenter
+                        symbol: "close"
+                        size: 32
+                        iconSize: 18
+                        onClicked: updater.dismissBanner()
+                    }
+                }
             }
 
             // Batch offline download progress pill
@@ -589,7 +691,9 @@ ApplicationWindow {
     ]
 
     function shapeMotion(milliseconds: int): int {
-        return immersiveFades ? 0 : Appearance.motion(milliseconds);
+        if (immersiveFades) return 0;
+        const scaled = appSettings.fastImmersiveTransition ? Math.round(milliseconds * 0.42) : milliseconds;
+        return Appearance.motion(scaled);
     }
 
     function finishOpening() {
@@ -636,17 +740,17 @@ ApplicationWindow {
                 NumberAnimation {
                     target: window
                     property: "revealReach"
-                    to: 0.2
-                    duration: window.shapeMotion(260)
-                    easing.type: Easing.OutBack
+                    to: appSettings.fastImmersiveTransition ? 1 : 0.2
+                    duration: window.shapeMotion(appSettings.fastImmersiveTransition ? 420 : 260)
+                    easing.type: appSettings.fastImmersiveTransition ? Easing.OutCubic : Easing.OutBack
                     easing.overshoot: 2.4
                 }
-                PauseAnimation { duration: window.shapeMotion(60) }
+                PauseAnimation { duration: appSettings.fastImmersiveTransition ? 0 : window.shapeMotion(60) }
                 NumberAnimation {
                     target: window
                     property: "revealReach"
                     to: 1
-                    duration: window.shapeMotion(280)
+                    duration: appSettings.fastImmersiveTransition ? 0 : window.shapeMotion(280)
                     easing.type: Easing.InBack
                     easing.overshoot: 1.2
                 }
@@ -781,7 +885,9 @@ ApplicationWindow {
 
     Toast {
         id: toast
-        anchors.centerIn: parent
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 16
         z: 200
     }
 

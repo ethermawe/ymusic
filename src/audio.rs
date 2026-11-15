@@ -19,12 +19,12 @@ pub enum Event {
 }
 
 pub enum SourceData {
-    Cached { file: File, len: u64 },
-    Stream(StreamReader),
+    Cached { file: File, len: u64, hint: Option<String> },
+    Stream { reader: StreamReader, hint: Option<String> },
 }
 
 enum Cmd {
-    Load(u64, SourceData),
+    Load(u64, SourceData, f32),
     #[allow(dead_code)]
     Play,
     Pause,
@@ -34,6 +34,7 @@ enum Cmd {
     Volume(f32),
     Speed(f32),
     SleepFade(f32),
+    TrackGain(f32),
     Stop,
 }
 
@@ -290,8 +291,12 @@ impl Audio {
         let _ = self.tx.send(Cmd::SleepFade(factor.clamp(0.0, 1.0)));
     }
 
-    pub fn load(&self, generation: u64, data: SourceData) {
-        let _ = self.tx.send(Cmd::Load(generation, data));
+    pub fn set_track_gain(&self, gain: f32) {
+        let _ = self.tx.send(Cmd::TrackGain(gain.clamp(0.1, 2.0)));
+    }
+
+    pub fn load(&self, generation: u64, data: SourceData, track_gain: f32) {
+        let _ = self.tx.send(Cmd::Load(generation, data, track_gain.clamp(0.1, 2.0)));
     }
 
     #[allow(dead_code)]
@@ -362,11 +367,12 @@ fn run(
     let mut stream: Option<StreamReader> = None;
     let mut target_volume: f32 = 1.0;
     let mut sleep_fade: f32 = 1.0;
+    let mut track_gain: f32 = 1.0;
     let mut current_volume: f32 = 1.0;
     let mut fade_in_remaining: u8 = 0;
     let mut last_pos_emit = Instant::now();
 
-    let effective_target = |v: f32, fade: f32| (v * fade).clamp(0.0, 1.0);
+    let effective_target = |v: f32, fade: f32, gain: f32| (v * fade * gain).clamp(0.0, 1.5);
 
     // Отпускает текущий поток, чтобы `clear()` не ждал сеть внутри `read()`.
     let release = |stream: &mut Option<StreamReader>| {
@@ -384,7 +390,7 @@ fn run(
             Duration::from_millis(250)
         };
         match rx.recv_timeout(tick) {
-            Ok(Cmd::Load(new_generation, data)) => {
+            Ok(Cmd::Load(new_generation, data, new_gain)) => {
                 if active && !player.is_paused() {
                     fade_out(&player, current_volume, FADE_OUT_SWITCH);
                 }
@@ -396,24 +402,59 @@ fn run(
                 spectrum_active.store(false, Ordering::Relaxed);
                 fade_in_remaining = 0;
                 generation = new_generation;
+                track_gain = new_gain;
                 let res = match data {
-                    SourceData::Cached { file, len } => Decoder::builder()
-                        .with_data(BufReader::new(file))
-                        .with_byte_len(len)
-                        .with_seekable(true)
-                        .with_hint("mp3")
-                        .build()
-                        .map(|s| player.append(SpectrumTap::new(s, spectrum.clone()))),
-                    SourceData::Stream(reader) => {
+                    SourceData::Cached { file, len, hint } => {
+                        let ext = hint_ext(hint.as_deref());
+                        let file_clone = file.try_clone().ok();
+                        let primary = Decoder::builder()
+                            .with_data(BufReader::new(file))
+                            .with_byte_len(len)
+                            .with_seekable(true)
+                            .with_hint(ext)
+                            .build();
+                        let decoded = match primary {
+                            Ok(s) => Ok(s),
+                            Err(e) => {
+                                if let Some( mut f2) = file_clone {
+                                    use std::io::Seek;
+                                    let _ = f2.seek(std::io::SeekFrom::Start(0));
+                                    Decoder::builder()
+                                        .with_data(BufReader::new(f2))
+                                        .with_byte_len(len)
+                                        .with_seekable(true)
+                                        .build()
+                                } else {
+                                    Err(e)
+                                }
+                            }
+                        };
+                        decoded.map(|s| player.append(SpectrumTap::new(s, spectrum.clone())))
+                    }
+                    SourceData::Stream { reader, hint } => {
                         stream = Some(reader.clone());
+                        let ext = hint_ext(hint.as_deref());
                         let mut b = Decoder::builder()
                             .with_data(reader.clone())
                             .with_seekable(true)
-                            .with_hint("mp3");
+                            .with_hint(ext);
                         if let Some(len) = reader.byte_len() {
                             b = b.with_byte_len(len);
                         }
-                        b.build().map(|s| player.append(SpectrumTap::new(s, spectrum.clone())))
+                        let primary = b.build();
+                        let decoded = match primary {
+                            Ok(s) => Ok(s),
+                            Err(_) => {
+                                let mut b2 = Decoder::builder()
+                                    .with_data(reader.clone())
+                                    .with_seekable(true);
+                                if let Some(len) = reader.byte_len() {
+                                    b2 = b2.with_byte_len(len);
+                                }
+                                b2.build()
+                            }
+                        };
+                        decoded.map(|s| player.append(SpectrumTap::new(s, spectrum.clone())))
                     }
                 };
                 match res {
@@ -430,7 +471,7 @@ fn run(
                     Err(e) => {
                         active = false;
                         spectrum_active.store(false, Ordering::Relaxed);
-                        current_volume = effective_target(target_volume, sleep_fade);
+                        current_volume = effective_target(target_volume, sleep_fade, track_gain);
                         player.set_volume(current_volume);
                         release(&mut stream);
                         on_event(Event::Error(
@@ -483,7 +524,7 @@ fn run(
             Ok(Cmd::Volume(v)) => {
                 target_volume = v;
                 if fade_in_remaining == 0 {
-                    current_volume = effective_target(target_volume, sleep_fade);
+                    current_volume = effective_target(target_volume, sleep_fade, track_gain);
                     player.set_volume(current_volume);
                 }
             }
@@ -493,7 +534,14 @@ fn run(
             Ok(Cmd::SleepFade(factor)) => {
                 sleep_fade = factor;
                 if fade_in_remaining == 0 {
-                    current_volume = effective_target(target_volume, sleep_fade);
+                    current_volume = effective_target(target_volume, sleep_fade, track_gain);
+                    player.set_volume(current_volume);
+                }
+            }
+            Ok(Cmd::TrackGain(gain)) => {
+                track_gain = gain;
+                if fade_in_remaining == 0 {
+                    current_volume = effective_target(target_volume, sleep_fade, track_gain);
                     player.set_volume(current_volume);
                 }
             }
@@ -509,7 +557,7 @@ fn run(
                 active = false;
                 spectrum_active.store(false, Ordering::Relaxed);
                 fade_in_remaining = 0;
-                current_volume = effective_target(target_volume, sleep_fade);
+                current_volume = effective_target(target_volume, sleep_fade, track_gain);
                 player.set_volume(current_volume);
             }
             Ok(_) => {}
@@ -523,7 +571,7 @@ fn run(
         if fade_in_remaining > 0 && active && !player.is_paused() {
             fade_in_remaining -= 1;
             let progress = 1.0 - (f32::from(fade_in_remaining) / f32::from(FADE_IN_STEPS));
-            current_volume = effective_target(target_volume, sleep_fade) * progress;
+            current_volume = effective_target(target_volume, sleep_fade, track_gain) * progress;
             player.set_volume(current_volume);
         }
 
@@ -532,7 +580,7 @@ fn run(
                 active = false;
                 spectrum_active.store(false, Ordering::Relaxed);
                 fade_in_remaining = 0;
-                current_volume = effective_target(target_volume, sleep_fade);
+                current_volume = effective_target(target_volume, sleep_fade, track_gain);
                 player.set_volume(current_volume);
                 stream = None;
                 on_event(Event::Ended(generation));
@@ -545,6 +593,14 @@ fn run(
                 });
             }
         }
+    }
+}
+
+fn hint_ext(codec: Option<&str>) -> &'static str {
+    match codec.unwrap_or("mp3") {
+        "flac" => "flac",
+        "flac-mp4" | "aac-mp4" | "he-aac-mp4" | "aac" | "he-aac" | "m4a" | "mp4" => "m4a",
+        _ => "mp3",
     }
 }
 

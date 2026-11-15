@@ -6,16 +6,18 @@ import ymusic.ui
 T.AbstractButton {
     id: root
 
-    required property int index
-    required property var model
-    property bool isArtist: (model?.kind ?? "") === "artist"
-    property url artworkUrl: (model?.hasCover ?? false) ? (model?.coverUrl ?? "") : ""
-    property string placeholderSymbol: isArtist ? "artists" : ((model?.kind ?? "") === "album" ? "album" : "library_music")
-    property string title: model?.title ?? ""
+    property int cardIndex: -1
+    property var cardData: null
+    readonly property int effectiveCardIndex: (cardData?.cardIndex !== undefined && cardData?.cardIndex !== null)
+        ? Number(cardData.cardIndex) : cardIndex
+    property bool isArtist: (cardData?.kind ?? "") === "artist"
+    property url artworkUrl: (cardData?.hasCover ?? false) ? (cardData?.coverUrl ?? "") : ""
+    property string placeholderSymbol: isArtist ? "artists" : ((cardData?.kind ?? "") === "album" ? "album" : "library_music")
+    property string title: cardData?.title ?? ""
     property string fallbackKey: title
-    property string subtitle: model?.subtitle ?? ""
-    property bool isPlaylist: (model?.kind ?? "") === "playlist"
-    property bool isPinned: model?.pinned ?? false
+    property string subtitle: cardData?.subtitle ?? ""
+    property bool isPlaylist: (cardData?.kind ?? "") === "playlist"
+    property bool isPinned: cardData?.pinned ?? false
     property bool circular: isArtist
     property bool current: false
     property string badgeSymbol: "arrow_forward"
@@ -37,7 +39,7 @@ T.AbstractButton {
         Bounce {}
     }
 
-    onClicked: backend.openCard(root.index)
+    onClicked: backend.openCard(root.effectiveCardIndex)
 
     contentItem: Column {
         id: column
@@ -143,7 +145,7 @@ T.AbstractButton {
         colBackgroundToggledHover: Appearance.colors.primaryContainer
         iconColor: root.isPinned ? Appearance.colors.onPrimaryContainer : "white"
         tooltip: root.isPinned ? qsTr("Открепить плейлист") : qsTr("Закрепить в сайдбаре")
-        onClicked: backend.feature({action: "toggle_pin_playlist", card_index: root.index})
+        onClicked: backend.feature({action: "toggle_pin_playlist", card_index: root.effectiveCardIndex})
     }
 
     StyledMenu {
@@ -151,7 +153,7 @@ T.AbstractButton {
         StyledMenuItem {
             symbol: "push_pin"
             text: root.isPinned ? qsTr("Открепить из сайдбара") : qsTr("Закрепить в сайдбаре")
-            onTriggered: backend.feature({action: "toggle_pin_playlist", card_index: root.index})
+            onTriggered: backend.feature({action: "toggle_pin_playlist", card_index: root.effectiveCardIndex})
         }
     }
 }

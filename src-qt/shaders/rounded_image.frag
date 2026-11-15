@@ -58,6 +58,7 @@ layout(std140, binding = 0) uniform buf {
     float ringPhase;
     vec4 ringColor;
     float reveal;
+    float dim;
 };
 
 layout(binding = 1) uniform sampler2D source;
@@ -145,11 +146,13 @@ void main()
         float d = (r - curve) / sqrt(1.0 + slope * slope);
         float line = clamp(0.5 * ringThickness - abs(d) + 0.5, 0.0, 1.0) * ringColor.a;
 
-        // the cover's edge: the same sine, two line widths further in
-        float edge = curve - 2.0 * ringThickness;
+        // the cover's edge meets the squiggle line seamlessly without a gap
+        float edge = curve;
         float edgeSlope = rise / max(edge, 1.0);
         float inside = (r - edge) / sqrt(1.0 + edgeSlope * edgeSlope);
-        vec4 art = texture(source, qt_TexCoord0 * uvScale + uvOffset) * clamp(0.5 - inside, 0.0, 1.0);
+        vec4 tex = texture(source, qt_TexCoord0 * uvScale + uvOffset);
+        tex.rgb *= (1.0 - clamp(dim, 0.0, 1.0));
+        vec4 art = tex * clamp(0.5 - inside, 0.0, 1.0);
         fragColor = (art * (1.0 - line) + vec4(ringColor.rgb, 1.0) * line) * (qt_Opacity * revealed());
         return;
     }
@@ -161,6 +164,7 @@ void main()
     float distanceToEdge = edgeDistance(point, halfSize, corner, scallopCount(0.5 * itemSize));
     float coverage = clamp(0.5 - distanceToEdge, 0.0, 1.0);
     vec4 color = texture(source, qt_TexCoord0 * uvScale + uvOffset);
+    color.rgb *= (1.0 - clamp(dim, 0.0, 1.0));
     if (borderWidth > 0.0) {
         float inner = clamp(0.5 - (distanceToEdge + borderWidth), 0.0, 1.0);
         float band = coverage - inner;

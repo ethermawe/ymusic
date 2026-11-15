@@ -68,6 +68,13 @@ pub unsafe extern "C" fn ymusic_core_login_token(handle: *mut CoreHandle, token:
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_core_cancel_login(handle: *mut CoreHandle) {
+    if let Some(h) = unsafe { handle.as_ref() } {
+        h.core.cancel_login();
+    }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_logout(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
         h.core.logout();

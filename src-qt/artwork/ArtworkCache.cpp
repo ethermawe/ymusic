@@ -1,3 +1,22 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "artwork/ArtworkCache.h"
 
 #include "app/Paths.h"
@@ -105,6 +124,17 @@ void ArtworkCache::bytes(const QUrl &url, BytesCallback callback)
         return;
     }
 
+    if (QAbstractNetworkCache *disk = m_network->cache()) {
+        if (std::unique_ptr<QIODevice> dev{disk->data(url)}) {
+            QByteArray cachedData = dev->readAll();
+            if (!cachedData.isEmpty()) {
+                cachedData.squeeze();
+                finishDownload(url, cachedData);
+                return;
+            }
+        }
+    }
+
     QNetworkRequest request(url);
     request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::PreferCache);
     request.setTransferTimeout(30'000);
@@ -112,7 +142,9 @@ void ArtworkCache::bytes(const QUrl &url, BytesCallback callback)
     connect(reply, &QNetworkReply::finished, this, [this, url, reply] {
         reply->deleteLater();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        QByteArray data = status >= 200 && status < 300 ? reply->readAll() : QByteArray();
+        QByteArray data = (reply->error() == QNetworkReply::NoError || (status >= 200 && status < 300))
+            ? reply->readAll()
+            : QByteArray();
         data.squeeze();
         finishDownload(url, data);
     });

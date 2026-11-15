@@ -30,7 +30,9 @@ QList<float> bassExpanded(const QList<float> &levels, int perSideCount)
     }
     constexpr float bassBarFraction = 0.46f;
     constexpr float bassBandFraction = 0.30f;
-    const float lastBand = float(levels.size() - 1);
+    const float firstBand = levels.size() > 8 ? 2.0f : 0.0f;
+    const float lastBand = levels.size() > 8 ? float(levels.size() - 4) : float(levels.size() - 1);
+    const float bandSpan = std::max(1.0f, lastBand - firstBand);
 
     QList<float> positions(perSideCount);
     for (int index = 0; index < perSideCount; ++index) {
@@ -38,7 +40,7 @@ QList<float> bassExpanded(const QList<float> &levels, int perSideCount)
         const float source = progress <= bassBarFraction
             ? progress / bassBarFraction * bassBandFraction
             : bassBandFraction + (progress - bassBarFraction) / (1 - bassBarFraction) * (1 - bassBandFraction);
-        positions[index] = source * lastBand;
+        positions[index] = firstBand + source * bandSpan;
     }
 
     const auto interpolated = [&](float position) {
@@ -51,7 +53,7 @@ QList<float> bassExpanded(const QList<float> &levels, int perSideCount)
     QList<float> result(perSideCount);
     for (int index = 0; index < perSideCount; ++index) {
         const float position = positions[index];
-        const float lower = index == 0 ? 0.0f : (positions[index - 1] + position) / 2;
+        const float lower = index == 0 ? firstBand : (positions[index - 1] + position) / 2;
         const float upper = index == perSideCount - 1 ? lastBand : (position + positions[index + 1]) / 2;
         if (upper - lower <= 1) {
             result[index] = interpolated(position);

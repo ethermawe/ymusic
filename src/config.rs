@@ -1,13 +1,320 @@
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::api::Track;
 
+const KEYRING_SERVICE: &str = "ymusic";
+const KEYRING_USER: &str = "oauth-token";
+#[cfg(target_os = "linux")]
+const KEYRING_LABEL: &str = "Yandex Music OAuth token";
+#[cfg(target_os = "windows")]
+const WIN_CRED_TARGET: &str = "ymusic/oauth-token";
+#[cfg(target_os = "windows")]
+const WIN_CRED_USER: &str = "ymusic";
+
+#[derive(Debug, PartialEq, Eq)]
+enum KeyringRead {
+    Found(String),
+    Missing,
+    Unavailable,
+}
+
+trait KeyringBackend {
+    fn read(&self) -> KeyringRead;
+    fn write(&self, token: &str) -> Result<(), ()>;
+    fn delete(&self);
+}
+
+struct PlatformKeyring;
+
+#[cfg(target_os = "linux")]
+mod linux_keyring {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use keyring_core::{Entry, Error};
+    use zbus_secret_service_keyring_store::Store;
+
+    use super::{KEYRING_LABEL, KEYRING_SERVICE, KEYRING_USER, KeyringRead};
+
+    fn entry() -> Option<Entry> {
+        let store: Arc<Store> = Store::new().ok()?;
+        let mods = HashMap::from([("label", KEYRING_LABEL)]);
+        keyring_core::api::CredentialStoreApi::build(
+            store.as_ref(),
+            KEYRING_SERVICE,
+            KEYRING_USER,
+            Some(&mods),
+        )
+        .ok()
+    }
+
+    pub(super) fn read() -> KeyringRead {
+        let Some(entry) = entry() else {
+            return KeyringRead::Unavailable;
+        };
+        match entry.get_password() {
+            Ok(token) => {
+                let trimmed = token.trim();
+                if trimmed.is_empty() {
+                    KeyringRead::Missing
+                } else {
+                    KeyringRead::Found(trimmed.to_string())
+                }
+            }
+            Err(Error::NoEntry) => KeyringRead::Missing,
+            Err(Error::Ambiguous(entries)) => {
+                for candidate in entries {
+                    if let Ok(token) = candidate.get_password() {
+                        let trimmed = token.trim();
+                        if !trimmed.is_empty() {
+                            return KeyringRead::Found(trimmed.to_string());
+                        }
+                    }
+                }
+                KeyringRead::Unavailable
+            }
+            Err(_) => KeyringRead::Unavailable,
+        }
+    }
+
+    pub(super) fn write(token: &str) -> Result<(), ()> {
+        let entry = entry().ok_or(())?;
+        match entry.set_password(token) {
+            Ok(()) => Ok(()),
+            Err(Error::Ambiguous(entries)) => {
+                for duplicate in entries {
+                    let _ = duplicate.delete_credential();
+                }
+                entry.set_password(token).map_err(|_| ())
+            }
+            Err(_) => Err(()),
+        }
+    }
+
+    pub(super) fn delete() {
+        let Some(entry) = entry() else {
+            return;
+        };
+        if let Err(Error::Ambiguous(entries)) = entry.delete_credential() {
+            for duplicate in entries {
+                let _ = duplicate.delete_credential();
+            }
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn encode_utf16_le(text: &str) -> Vec<u8> {
+    text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect()
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn decode_utf16_blob(bytes: &[u8]) -> Option<String> {
+    // Windows Credential Manager stores generic secrets as UTF-16LE blobs without a trailing NUL.
+    if bytes.len() % 2 == 0 {
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        if let Ok(s) = String::from_utf16(&units) {
+            return Some(s);
+        }
+    }
+    String::from_utf8(bytes.to_vec()).ok()
+}
+
+#[cfg(target_os = "windows")]
+mod windows_keyring {
+    use std::ffi::c_void;
+    use std::ptr;
+
+    use windows_sys::Win32::Foundation::{ERROR_NOT_FOUND, GetLastError};
+    use windows_sys::Win32::Security::Credentials::{
+        CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredDeleteW, CredFree,
+        CredReadW, CredWriteW,
+    };
+
+    use super::{KeyringRead, WIN_CRED_TARGET, WIN_CRED_USER, decode_utf16_blob, encode_utf16_le};
+
+    fn to_wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    struct CredGuard(*mut CREDENTIALW);
+    impl Drop for CredGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { CredFree(self.0 as *const c_void) };
+            }
+        }
+    }
+
+    pub(super) fn read() -> KeyringRead {
+        let target = to_wide(WIN_CRED_TARGET);
+        let mut raw: *mut CREDENTIALW = ptr::null_mut();
+        let ok = unsafe { CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut raw) };
+        if ok == 0 {
+            let err = unsafe { GetLastError() };
+            return if err == ERROR_NOT_FOUND {
+                KeyringRead::Missing
+            } else {
+                KeyringRead::Unavailable
+            };
+        }
+        let guard = CredGuard(raw);
+        let cred = unsafe { &*guard.0 };
+        if cred.CredentialBlob.is_null() || cred.CredentialBlobSize == 0 {
+            return KeyringRead::Missing;
+        }
+        let bytes = unsafe {
+            std::slice::from_raw_parts(cred.CredentialBlob, cred.CredentialBlobSize as usize)
+        };
+        let Some(decoded) = decode_utf16_blob(bytes) else {
+            return KeyringRead::Unavailable;
+        };
+        let trimmed = decoded.trim();
+        if trimmed.is_empty() {
+            KeyringRead::Missing
+        } else {
+            KeyringRead::Found(trimmed.to_string())
+        }
+    }
+
+    pub(super) fn write(token: &str) -> Result<(), ()> {
+        let mut target = to_wide(WIN_CRED_TARGET);
+        let mut user = to_wide(WIN_CRED_USER);
+        let mut blob = encode_utf16_le(token);
+        let blob_size = u32::try_from(blob.len()).map_err(|_| ())?;
+        let cred = CREDENTIALW {
+            Flags: 0,
+            Type: CRED_TYPE_GENERIC,
+            TargetName: target.as_mut_ptr(),
+            Comment: ptr::null_mut(),
+            LastWritten: Default::default(),
+            CredentialBlobSize: blob_size,
+            CredentialBlob: blob.as_mut_ptr(),
+            Persist: CRED_PERSIST_LOCAL_MACHINE,
+            AttributeCount: 0,
+            Attributes: ptr::null_mut(),
+            TargetAlias: ptr::null_mut(),
+            UserName: user.as_mut_ptr(),
+        };
+        let ok = unsafe { CredWriteW(&cred, 0) };
+        if ok == 0 { Err(()) } else { Ok(()) }
+    }
+
+    pub(super) fn delete() {
+        let target = to_wide(WIN_CRED_TARGET);
+        unsafe {
+            CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0);
+        }
+    }
+}
+
+impl KeyringBackend for PlatformKeyring {
+    fn read(&self) -> KeyringRead {
+        #[cfg(target_os = "linux")]
+        {
+            linux_keyring::read()
+        }
+        #[cfg(target_os = "windows")]
+        {
+            windows_keyring::read()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        {
+            KeyringRead::Unavailable
+        }
+    }
+
+    fn write(&self, token: &str) -> Result<(), ()> {
+        #[cfg(target_os = "linux")]
+        {
+            linux_keyring::write(token)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            windows_keyring::write(token)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        {
+            let _ = token;
+            Err(())
+        }
+    }
+
+    fn delete(&self) {
+        #[cfg(target_os = "linux")]
+        linux_keyring::delete();
+        #[cfg(target_os = "windows")]
+        windows_keyring::delete();
+    }
+}
+
 fn token_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("ymusic").join("token"))
+}
+
+fn read_legacy_token(path: Option<&Path>) -> Option<String> {
+    let token = fs::read_to_string(path?).ok()?;
+    let token = token.trim();
+    (!token.is_empty()).then(|| token.to_string())
+}
+
+fn write_legacy_token(path: Option<&Path>, token: &str) -> io::Result<()> {
+    let path = path.ok_or_else(|| io::Error::other("нет каталога конфигурации"))?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(path, token)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+fn load_token_with(backend: &dyn KeyringBackend, legacy_path: Option<&Path>) -> Option<String> {
+    match backend.read() {
+        KeyringRead::Found(token) => Some(token),
+        KeyringRead::Missing => {
+            let token = read_legacy_token(legacy_path)?;
+            if backend.write(&token).is_ok()
+                && let Some(path) = legacy_path
+            {
+                let _ = fs::remove_file(path);
+            }
+            Some(token)
+        }
+        KeyringRead::Unavailable => read_legacy_token(legacy_path),
+    }
+}
+
+fn save_token_with(
+    backend: &dyn KeyringBackend,
+    legacy_path: Option<&Path>,
+    token: &str,
+) -> io::Result<()> {
+    if backend.write(token).is_ok() {
+        if let Some(path) = legacy_path {
+            let _ = fs::remove_file(path);
+        }
+        return Ok(());
+    }
+    backend.delete();
+    write_legacy_token(legacy_path, token)
+}
+
+fn clear_token_with(backend: &dyn KeyringBackend, legacy_path: Option<&Path>) {
+    backend.delete();
+    if let Some(path) = legacy_path {
+        let _ = fs::remove_file(path);
+    }
 }
 
 pub fn load_token() -> Option<String> {
@@ -16,29 +323,18 @@ pub fn load_token() -> Option<String> {
     {
         return Some(token.trim().to_string());
     }
-    let token = fs::read_to_string(token_path()?).ok()?;
-    let token = token.trim();
-    (!token.is_empty()).then(|| token.to_string())
+    let path = token_path();
+    load_token_with(&PlatformKeyring, path.as_deref())
 }
 
 pub fn save_token(token: &str) -> io::Result<()> {
-    let path = token_path().ok_or_else(|| io::Error::other("нет каталога конфигурации"))?;
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    fs::write(&path, token)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(())
+    let path = token_path();
+    save_token_with(&PlatformKeyring, path.as_deref(), token)
 }
 
 pub fn clear_token() {
-    if let Some(path) = token_path() {
-        let _ = fs::remove_file(path);
-    }
+    let path = token_path();
+    clear_token_with(&PlatformKeyring, path.as_deref());
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -48,6 +344,8 @@ pub struct SavedWaveState {
     pub session_id: String,
     pub batch_id: String,
     pub tracks: Vec<Track>,
+    #[serde(default)]
+    pub filters: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -76,6 +374,10 @@ pub struct UserSettings {
     #[serde(default)]
     pub session: Option<SavedSession>,
     #[serde(default)]
+    pub user_uid: u64,
+    #[serde(default)]
+    pub user_name: Option<String>,
+    #[serde(default)]
     pub user_avatar_url: Option<String>,
     #[serde(default)]
     pub repeat_mode: u8,
@@ -83,10 +385,36 @@ pub struct UserSettings {
     pub shuffle: bool,
     #[serde(default)]
     pub pinned_playlists: Vec<PinnedPlaylist>,
+    #[serde(default = "default_audio_quality")]
+    pub audio_quality: String,
+    #[serde(default = "default_normalize_volume")]
+    pub normalize_volume: bool,
+    #[serde(default = "default_ai_music_behavior")]
+    pub ai_music_behavior: String,
+    #[serde(default)]
+    pub ai_strict_tracks: bool,
+    #[serde(default = "default_show_ai_labels")]
+    pub show_ai_labels: bool,
 }
 
 fn default_volume() -> f32 {
     0.7
+}
+
+fn default_audio_quality() -> String {
+    "hq".to_string()
+}
+
+fn default_normalize_volume() -> bool {
+    true
+}
+
+fn default_ai_music_behavior() -> String {
+    "skip_if_not_liked".to_string()
+}
+
+fn default_show_ai_labels() -> bool {
+    true
 }
 
 impl Default for UserSettings {
@@ -94,10 +422,17 @@ impl Default for UserSettings {
         Self {
             volume: default_volume(),
             session: None,
+            user_uid: 0,
+            user_name: None,
             user_avatar_url: None,
             repeat_mode: 0,
             shuffle: false,
             pinned_playlists: Vec::new(),
+            audio_quality: default_audio_quality(),
+            normalize_volume: default_normalize_volume(),
+            ai_music_behavior: default_ai_music_behavior(),
+            ai_strict_tracks: false,
+            show_ai_labels: default_show_ai_labels(),
         }
     }
 }
@@ -141,4 +476,117 @@ pub fn update_settings(f: impl FnOnce(&mut UserSettings)) {
     let mut settings = load_settings();
     f(&mut settings);
     let _ = save_settings(&settings);
+}
+
+#[cfg(test)]
+mod token_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    struct FakeKeyring {
+        available: bool,
+        secret: RefCell<Option<String>>,
+    }
+
+    impl FakeKeyring {
+        fn available(initial: Option<&str>) -> Self {
+            Self {
+                available: true,
+                secret: RefCell::new(initial.map(|s| s.to_string())),
+            }
+        }
+
+        fn unavailable() -> Self {
+            Self {
+                available: false,
+                secret: RefCell::new(None),
+            }
+        }
+    }
+
+    impl KeyringBackend for FakeKeyring {
+        fn read(&self) -> KeyringRead {
+            if !self.available {
+                return KeyringRead::Unavailable;
+            }
+            match self.secret.borrow().as_ref() {
+                Some(s) if !s.trim().is_empty() => KeyringRead::Found(s.trim().to_string()),
+                _ => KeyringRead::Missing,
+            }
+        }
+
+        fn write(&self, token: &str) -> Result<(), ()> {
+            if !self.available {
+                return Err(());
+            }
+            *self.secret.borrow_mut() = Some(token.to_string());
+            Ok(())
+        }
+
+        fn delete(&self) {
+            if self.available {
+                *self.secret.borrow_mut() = None;
+            }
+        }
+    }
+
+    fn temp_token_path(name: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("ymusic-cfg-test-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("token");
+        (dir, file)
+    }
+
+    #[test]
+    fn save_load_clear_uses_keyring_and_removes_legacy_file() {
+        let (dir, legacy) = temp_token_path("keyring");
+        fs::write(&legacy, "stale-file-token").unwrap();
+        let kr = FakeKeyring::available(None);
+
+        save_token_with(&kr, Some(&legacy), "y0_fresh").unwrap();
+        assert!(!legacy.exists());
+        assert_eq!(kr.secret.borrow().as_deref(), Some("y0_fresh"));
+        assert_eq!(load_token_with(&kr, Some(&legacy)).as_deref(), Some("y0_fresh"));
+
+        clear_token_with(&kr, Some(&legacy));
+        assert!(kr.secret.borrow().is_none());
+        assert_eq!(load_token_with(&kr, Some(&legacy)), None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_migrates_legacy_file_into_keyring() {
+        let (dir, legacy) = temp_token_path("migrate");
+        fs::write(&legacy, "y0_legacy\n").unwrap();
+        let kr = FakeKeyring::available(None);
+
+        let loaded = load_token_with(&kr, Some(&legacy));
+        assert_eq!(loaded.as_deref(), Some("y0_legacy"));
+        assert_eq!(kr.secret.borrow().as_deref(), Some("y0_legacy"));
+        assert!(!legacy.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unavailable_keyring_falls_back_to_file() {
+        let (dir, legacy) = temp_token_path("fallback");
+        let kr = FakeKeyring::unavailable();
+
+        save_token_with(&kr, Some(&legacy), "y0_fallback").unwrap();
+        assert!(legacy.exists());
+        assert_eq!(load_token_with(&kr, Some(&legacy)).as_deref(), Some("y0_fallback"));
+
+        clear_token_with(&kr, Some(&legacy));
+        assert!(!legacy.exists());
+        assert_eq!(load_token_with(&kr, Some(&legacy)), None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn windows_utf16_blob_roundtrip() {
+        let token = "y0_AgAAAAAtoken-123_юникод";
+        let bytes = encode_utf16_le(token);
+        assert_eq!(decode_utf16_blob(&bytes).as_deref(), Some(token));
+    }
 }

@@ -63,6 +63,9 @@ jobs:
       - name: Build Qt frontend
         run: cmake --build build-qt
 
+      - name: Run Qt unit tests
+        run: ctest --test-dir build-qt --output-on-failure
+
   build-windows:
     runs-on: windows-2022
 
@@ -95,6 +98,7 @@ jobs:
         run: |
           cmake -S src-qt -B build-qt -A x64
           cmake --build build-qt --config Release
+          ctest --test-dir build-qt -C Release --output-on-failure
           cmake --install build-qt --config Release --prefix dist
 
       - name: Deploy Qt runtime (windeployqt)
@@ -103,10 +107,23 @@ jobs:
           windeployqt --qmldir src-qt/qml --release --no-translations --no-opengl-sw dist/ymusic-qml.exe
           Remove-Item -Recurse -Force dist/qmltooling -ErrorAction SilentlyContinue
 
+      - name: Build Windows installer (NSIS)
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          & "C:\Program Files (x86)\NSIS\makensis.exe" `
+            "/DAPP_VERSION=0.2.2" `
+            "/DDIST_DIR=$root\dist" `
+            "/DOUT_FILE=$root\ymusic-setup-windows-x86_64.exe" `
+            "/DICON_FILE=$root\icons\ymusic.ico" `
+            "packaging\windows\installer.nsi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Build single-file portable EXE (NSIS)
         shell: pwsh
         run: |
           @'
+          Icon "icons\ymusic.ico"
           OutFile "ymusic-portable-windows-x86_64.exe"
           SilentInstall silent
           RequestExecutionLevel user

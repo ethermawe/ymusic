@@ -28,6 +28,7 @@ QVariant TrackModel::data(const QModelIndex &index, int role) const {
     case HasCoverRole: return t.hasCover;
     case HasArtistRole: return t.hasArtist;
     case HasAlbumRole: return t.hasAlbum;
+    case IsAiRole: return t.isAi;
     case IsCurrentRole: return index.row() == m_currentIndex;
     case IsPlayingRole: return (index.row() == m_currentIndex) && m_playing;
     default: return QVariant();
@@ -50,6 +51,7 @@ QHash<int, QByteArray> TrackModel::roleNames() const {
     roles[HasCoverRole] = "hasCover";
     roles[HasArtistRole] = "hasArtist";
     roles[HasAlbumRole] = "hasAlbum";
+    roles[IsAiRole] = "isAi";
     roles[IsCurrentRole] = "isCurrent";
     roles[IsPlayingRole] = "isPlaying";
     return roles;
@@ -111,6 +113,7 @@ void TrackModel::setTracks(const QJsonArray &tracksArray, int currentIndex) {
         t.hasCover = obj["has_cover"].toBool();
         t.hasArtist = obj["has_artist"].toBool();
         t.hasAlbum = obj["has_album"].toBool();
+        t.isAi = obj["is_ai"].toBool();
         if (sameOrder) m_tracks[row] = t;
         else m_tracks.append(t);
         ++row;

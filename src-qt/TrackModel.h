@@ -22,6 +22,7 @@ struct TrackData {
     bool hasCover = false;
     bool hasArtist = false;
     bool hasAlbum = false;
+    bool isAi = false;
 };
 
 class TrackModel : public QAbstractListModel {
@@ -47,7 +48,8 @@ public:
         IsCurrentRole,
         IsPlayingRole,
         DownloadedRole,
-        ArtistLinksRole
+        ArtistLinksRole,
+        IsAiRole
     };
 
     explicit TrackModel(QObject *parent = nullptr);

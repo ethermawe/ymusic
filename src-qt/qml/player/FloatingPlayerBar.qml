@@ -18,6 +18,14 @@ Item {
     readonly property bool showsMeter: !compact && appSettings.visualizersEnabled && appSettings.playerBarVisualizer && backend.hasTrack
     property bool progressExpanded: seek.expanded || seekTwoRow.expanded
 
+    function openTrackMenuAt(item, lx, ly) {
+        if (!backend.hasTrack) return
+        const appWindow = root.Window.window
+        if (!appWindow) return
+        const pt = item.mapToItem(appWindow.contentItem, lx, ly)
+        backend.requestTrackMenu(backend.nowId, backend.nowTitle, true, pt.x, pt.y)
+    }
+
     implicitHeight: twoRow ? 98 : 66
     opacity: Window.active ? 1 : 0.88
 
@@ -43,8 +51,13 @@ Item {
 
         MouseArea {
             anchors.fill: parent
-            acceptedButtons: Qt.AllButtons
+            acceptedButtons: Qt.RightButton
             hoverEnabled: true
+            onClicked: (mouse) => {
+                if (mouse.button === Qt.RightButton) {
+                    root.openTrackMenuAt(surface, mouse.x, mouse.y)
+                }
+            }
             onWheel: (wheel) => {
                 if (wheel.angleDelta.y > 0) {
                     backend.setVolume(Math.min(1.0, backend.volume + 0.05))
@@ -255,7 +268,7 @@ Item {
                 anchors.rightMargin: root.showsMeter ? 9 : 0
                 anchors.top: parent.top
                 anchors.topMargin: root.twoRow ? 4 : 7
-                anchors.bottom: root.twoRow ? parent.bottom : seek.top
+                anchors.bottom: root.twoRow ? parent.bottom : seekSlot.top
                 anchors.bottomMargin: root.twoRow ? 4 : 0
                 layer.enabled: blurAmount > 0.001
                 layer.effect: MultiEffect {
@@ -267,58 +280,76 @@ Item {
 
                 Column {
                     anchors.left: parent.left
-                    anchors.right: more.visible ? more.left : parent.right
-                    anchors.rightMargin: more.visible ? 4 : 0
+                    anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 1
 
-                    TitleText {
+                    Item {
                         width: parent.width
-                        text: backend.hasTrack ? backend.nowTitle : qsTr("Ничего не играет")
-                        elide: Text.ElideRight
-                        animateChange: true
-                        changeDistanceX: 6
-                        changeDistanceY: 0
-                        font.pixelSize: Appearance.fontSize.small
-                        color: root.scheme.onSurface
-                        font.underline: titleHover.hovered && backend.nowHasAlbum
+                        height: Math.max(nowTitleItem.implicitHeight, 18)
 
-                        HoverHandler {
-                            id: titleHover
-                            cursorShape: backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        }
-                        TapHandler {
-                            enabled: backend.nowHasAlbum
-                            onTapped: backend.openNowAlbum()
-                        }
+                        readonly property bool showAiBadge: backend.hasTrack && backend.showAiLabels && backend.nowIsAi
 
-                        ShaderEffect {
-                            id: scan
+                        TitleText {
+                            id: nowTitleItem
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(implicitWidth, Math.max(0, parent.width - (playerAiBadge.visible ? playerAiBadge.width + 6 : 0)))
+                            text: backend.hasTrack ? backend.nowTitle : qsTr("Ничего не играет")
+                            elide: Text.ElideRight
+                            animateChange: true
+                            changeDistanceX: 6
+                            changeDistanceY: 0
+                            font.pixelSize: Appearance.fontSize.small
+                            color: root.scheme.onSurface
+                            font.underline: titleHover.hovered && backend.nowHasAlbum
 
-                            property color color: root.scheme.primary
-                            property real halfWidth: 0.22
-                            property real edge: 0.18
-                            property real position: -halfWidth
-
-                            anchors.top: parent.bottom
-                            anchors.topMargin: 1
-                            width: parent.width
-                            height: 2
-                            opacity: backend.buffering ? 1 : 0
-                            visible: opacity > 0
-                            fragmentShader: "qrc:/shaders/gleam.frag.qsb"
-
-                            Behavior on opacity {
-                                NumberAnimation { duration: Appearance.duration(260); easing.type: Easing.InOutSine }
+                            HoverHandler {
+                                id: titleHover
+                                cursorShape: backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            }
+                            TapHandler {
+                                enabled: backend.nowHasAlbum
+                                onTapped: backend.openNowAlbum()
                             }
 
-                            NumberAnimation on position {
-                                running: scan.visible && !Appearance.reduceMotion
-                                from: -scan.halfWidth
-                                to: 1 + scan.halfWidth
-                                duration: 1300
-                                loops: Animation.Infinite
+                            ShaderEffect {
+                                id: scan
+
+                                property color color: root.scheme.primary
+                                property real halfWidth: 0.22
+                                property real edge: 0.18
+                                property real position: -halfWidth
+
+                                anchors.top: parent.bottom
+                                anchors.topMargin: 1
+                                width: parent.width
+                                height: 2
+                                opacity: backend.buffering ? 1 : 0
+                                visible: opacity > 0
+                                fragmentShader: "qrc:/shaders/gleam.frag.qsb"
+
+                                Behavior on opacity {
+                                    NumberAnimation { duration: Appearance.duration(260); easing.type: Easing.InOutSine }
+                                }
+
+                                NumberAnimation on position {
+                                    running: scan.visible && !Appearance.reduceMotion
+                                    from: -scan.halfWidth
+                                    to: 1 + scan.halfWidth
+                                    duration: 1300
+                                    loops: Animation.Infinite
+                                }
                             }
+                        }
+
+                        AiBadge {
+                            id: playerAiBadge
+                            visible: parent.showAiBadge
+                            anchors.left: nowTitleItem.right
+                            anchors.leftMargin: 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            scheme: root.scheme
                         }
                     }
 
@@ -330,24 +361,6 @@ Item {
                         clickable: backend.hasTrack
                         color: root.scheme.onSurfaceVariant
                         font.pixelSize: Appearance.fontSize.smaller
-                    }
-                }
-
-                IconButton {
-                    id: more
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    Reveal.shown: backend.hasTrack && !root.compact
-                    scheme: root.scheme
-                    symbol: "more_horiz"
-                    size: 28
-                    iconSize: 18
-                    tooltip: qsTr("Действия с треком")
-                    onClicked: {
-                        const appWindow = root.Window.window
-                        if (!appWindow) return
-                        const pt = more.mapToItem(appWindow.contentItem, 0, 0)
-                        backend.requestTrackMenu(backend.nowId, backend.nowTitle, true, pt.x, pt.y)
                     }
                 }
             }
@@ -362,17 +375,9 @@ Item {
                 active: backend.playing
             }
 
-            SeekBar {
-                id: seek
+            Item {
+                id: seekSlot
                 visible: !root.twoRow
-
-                property real lift: seek.expanded ? -5 : 0
-                Behavior on lift {
-                    enabled: !Appearance.performanceMode
-                    Bounce {}
-                }
-                transform: Translate { y: seek.lift }
-
                 anchors.left: root.titleFits ? artwork.right : parent.left
                 anchors.leftMargin: root.titleFits ? 8 : 0
                 anchors.right: parent.right
@@ -380,14 +385,33 @@ Item {
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: 2
                 height: 18
-                scheme: root.scheme
+
+                HoverHandler {
+                    id: seekHover
+                    cursorShape: seek.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
+
+                SeekBar {
+                    id: seek
+                    anchors.fill: parent
+                    externalHover: seekHover.hovered
+
+                    property real lift: seek.expanded ? -5 : 0
+                    Behavior on lift {
+                        enabled: !Appearance.performanceMode
+                        Bounce {}
+                    }
+                    transform: Translate { y: seek.lift }
+
+                    scheme: root.scheme
+                }
             }
 
             Row {
                 visible: !root.twoRow && opacity > 0
-                anchors.left: seek.left
-                anchors.right: seek.right
-                anchors.bottom: seek.top
+                anchors.left: seekSlot.left
+                anchors.right: seekSlot.right
+                anchors.bottom: seekSlot.top
                 anchors.bottomMargin: -2
                 transform: Translate { y: seek.lift }
                 opacity: seek.expanded ? 1 : 0
@@ -436,6 +460,18 @@ Item {
                 tooltip: backend.nowLiked ? qsTr("Убрать из «Мне нравится»") : qsTr("Добавить в «Мне нравится»")
                 enabled: backend.hasTrack
                 onClicked: backend.toggleNowLike()
+            }
+
+            IconButton {
+                id: moreButton
+                anchors.verticalCenter: parent.verticalCenter
+                scheme: root.scheme
+                symbol: "more_horiz"
+                size: root.buttonSize
+                iconSize: 20
+                tooltip: qsTr("Действия с треком")
+                enabled: backend.hasTrack
+                onClicked: root.openTrackMenuAt(moreButton, moreButton.width, 0)
             }
 
             IconButton {
