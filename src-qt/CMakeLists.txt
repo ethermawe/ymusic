@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(ymusic_qt LANGUAGES CXX)
 include(GNUInstallDirs)
 
-set(YMUSIC_VERSION "0.2.2" CACHE STRING "Application version")
+set(YMUSIC_VERSION "0.2.4" CACHE STRING "Application version")
 string(REGEX REPLACE "^v" "" YMUSIC_VERSION_CLEAN "${YMUSIC_VERSION}")
 string(REGEX MATCHALL "[0-9]+" YMUSIC_VERSION_PARTS "${YMUSIC_VERSION_CLEAN}")
 list(LENGTH YMUSIC_VERSION_PARTS _ymusic_ver_len)

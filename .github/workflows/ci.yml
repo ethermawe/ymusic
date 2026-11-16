@@ -112,7 +112,7 @@ jobs:
         run: |
           $root = (Get-Location).Path
           & "C:\Program Files (x86)\NSIS\makensis.exe" `
-            "/DAPP_VERSION=0.2.2" `
+            "/DAPP_VERSION=0.2.4" `
             "/DDIST_DIR=$root\dist" `
             "/DOUT_FILE=$root\ymusic-setup-windows-x86_64.exe" `
             "/DICON_FILE=$root\icons\ymusic.ico" `

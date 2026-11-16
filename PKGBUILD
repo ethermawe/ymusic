@@ -1,7 +1,7 @@
 # Maintainer: ethermawe
 pkgname=ymusic
-pkgver=0.2.2
-pkgrel=3
+pkgver=0.2.4
+pkgrel=1
 pkgdesc="Нативный клиент Яндекс Музыки на Rust и Qt Quick"
 arch=('x86_64')
 url="https://github.com/ethermawe/ymusic"
