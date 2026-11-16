@@ -24,7 +24,7 @@ sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 prepare() {
     mkdir -p "$srcdir/ymusic"
-    cp -a "$startdir/src" "$startdir/src-qt" "$startdir/icons" "$srcdir/ymusic/"
+    cp -a "$startdir/src" "$startdir/src-qt" "$startdir/icons" "$startdir/data" "$srcdir/ymusic/"
     cp "$srcdir/Cargo.toml" "$srcdir/Cargo.lock" \
         "$srcdir/ymusic.desktop" "$srcdir/icon.svg" "$srcdir/icon.png" "$srcdir/ymusic/"
     cd "$srcdir/ymusic"
