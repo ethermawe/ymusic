@@ -34,6 +34,10 @@ Rectangle {
         input.selectAll()
     }
 
+    function clearFocus() {
+        input.focus = false
+    }
+
     implicitWidth: 260
     implicitHeight: 40
     radius: height / 2

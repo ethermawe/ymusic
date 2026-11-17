@@ -1,7 +1,7 @@
 Unicode True
 
 !ifndef APP_VERSION
-  !define APP_VERSION "0.2.5"
+  !define APP_VERSION "0.2.6"
 !endif
 !ifndef DIST_DIR
   !define DIST_DIR "dist"

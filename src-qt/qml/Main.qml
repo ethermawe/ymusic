@@ -56,10 +56,6 @@ ApplicationWindow {
     flags: isMacOS ? (Qt.Window | Qt.ExpandedClientAreaHint | Qt.NoTitleBarBackgroundHint)
          : appSettings.nativeTitleBar ? (Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
          : (Qt.Window | Qt.FramelessWindowHint)
-    topPadding: 0
-    leftPadding: 0
-    rightPadding: 0
-    bottomPadding: 0
     color: immersiveReveal > 0 ? PlayerStyle.darkScheme.layer0 : Appearance.colors.layer0
     onColorChanged: windowController.updateTheme(window, window.color)
 
@@ -173,6 +169,21 @@ ApplicationWindow {
         id: shell
         anchors.fill: parent
         visible: window.onScreen && window.immersiveReveal < 1
+
+        // Dismiss active search focus / suggestions when clicking empty space or another control.
+        MouseArea {
+            anchors.fill: parent
+            z: 1000
+            enabled: topBar.searchEditing
+            acceptedButtons: Qt.AllButtons
+            propagateComposedEvents: true
+            onPressed: (mouse) => {
+                if (!topBar.isSearchInteractiveAt(shell, mouse.x, mouse.y)) {
+                    topBar.dismissSearch();
+                }
+                mouse.accepted = false;
+            }
+        }
 
         // Top window drag & maximize strip under window controls and panels
         Item {

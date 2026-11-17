@@ -17,7 +17,7 @@
 #include <algorithm>
 
 #ifndef YMUSIC_APP_VERSION
-#define YMUSIC_APP_VERSION "0.2.5"
+#define YMUSIC_APP_VERSION "0.2.6"
 #endif
 
 namespace ymusic {

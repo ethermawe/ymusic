@@ -35,8 +35,32 @@ Item {
     readonly property real searchLeftEdge: back.x + (back.visible ? back.width + 10 : 0)
     readonly property real reservedSearchWidth: Math.max(120, Math.min(320, searchRightEdge - searchLeftEdge))
 
+    readonly property bool searchEditing: search.editing
+
     function focusSearch() {
         search.focusField()
+    }
+
+    function dismissSearch() {
+        suggestTimer.stop()
+        search.clearFocus()
+    }
+
+    function isSearchInteractiveAt(sourceItem: Item, x: real, y: real): bool {
+        if (!sourceItem) return false
+        const inSearch = sourceItem.mapToItem(search, x, y)
+        if (inSearch.x >= 0 && inSearch.x <= search.width
+            && inSearch.y >= 0 && inSearch.y <= search.height) {
+            return true
+        }
+        if (suggestionsPopup.visible) {
+            const inPopup = sourceItem.mapToItem(suggestionsPopup, x, y)
+            if (inPopup.x >= 0 && inPopup.x <= suggestionsPopup.width
+                && inPopup.y >= 0 && inPopup.y <= suggestionsPopup.height) {
+                return true
+            }
+        }
+        return false
     }
 
     implicitHeight: Appearance.sizes.topBarHeight
@@ -172,9 +196,10 @@ Item {
             }
         }
         onAccepted: {
-            suggestTimer.stop()
-            if (text.trim().length > 0) {
-                backend.search(text.trim())
+            const query = text.trim()
+            root.dismissSearch()
+            if (query.length > 0) {
+                backend.search(query)
             }
         }
 
@@ -240,7 +265,7 @@ Item {
                     TapHandler {
                         onTapped: {
                             search.text = modelData
-                            suggestTimer.stop()
+                            root.dismissSearch()
                             backend.search(modelData)
                         }
                     }
