@@ -166,9 +166,29 @@ jobs:
       - name: Deploy Qt runtime (windeployqt)
         shell: pwsh
         run: |
-          windeployqt --qmldir src-qt/qml --release --no-translations --no-opengl-sw dist/ymusic-qml.exe
+          windeployqt --qmldir src-qt/qml --release --no-translations --no-opengl-sw --no-compiler-runtime dist/ymusic-qml.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Remove-Item -Recurse -Force dist/qmltooling -ErrorAction SilentlyContinue
+
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          if (-not $vsPath) { throw "Could not locate Visual Studio installation via vswhere.exe" }
+          $crtDir = Get-ChildItem -Path "$vsPath\VC\Redist\MSVC" -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^\d' } |
+            Sort-Object Name -Descending |
+            Select-Object -First 1 |
+            ForEach-Object { Join-Path $_.FullName "x64\Microsoft.VC143.CRT" }
+          if (-not $crtDir -or -not (Test-Path $crtDir)) {
+            $crtDir = Get-ChildItem -Path "$vsPath\VC\Redist\MSVC" -Recurse -Directory -Filter "Microsoft.VC*.CRT" -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\' } |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $crtDir -or -not (Test-Path $crtDir)) {
+            throw "Could not find MSVC x64 CRT directory under $vsPath"
+          }
+          Copy-Item "$crtDir\*.dll" -Destination "dist\" -Force
+          if (-not (Test-Path "dist\vcruntime140_1.dll") -or -not (Test-Path "dist\msvcp140.dll")) {
+            throw "Missing required MSVC CRT DLLs in dist/"
+          }
 
       - name: Build Windows installer (NSIS) and update manifest
         shell: pwsh

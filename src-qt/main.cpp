@@ -6,6 +6,7 @@
 #include <QFont>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlError>
 #include <QQuickStyle>
 #include <QQmlNetworkAccessManagerFactory>
 #include <QNetworkAccessManager>
@@ -20,9 +21,16 @@
 #include <QLocalSocket>
 #include <QLockFile>
 #include <QDir>
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QLoggingCategory>
+#include <QMessageBox>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QSysInfo>
+#include <QTextStream>
+#include <cstdio>
 #ifndef QT_NO_SESSIONMANAGER
 #include <QSessionManager>
 #endif
@@ -33,6 +41,7 @@
 #include "ThemeManager.h"
 #include "AppSettings.h"
 #include "app/Fonts.h"
+#include "app/Paths.h"
 #include "app/UpdateChecker.h"
 #include "app/WindowController.h"
 #include "artwork/ArtworkCache.h"
@@ -43,6 +52,64 @@
 #include "theme/Theme.h"
 
 namespace {
+
+QMutex g_logMutex;
+QFile g_logFile;
+QtMessageHandler g_prevHandler = nullptr;
+
+void fileMessageHandler(QtMsgType type, const QMessageLogContext &ctx, const QString &msg) {
+    {
+        QMutexLocker lock(&g_logMutex);
+        if (g_logFile.isOpen()) {
+            const char *lvl = "DBG";
+            switch (type) {
+            case QtDebugMsg: lvl = "DBG"; break;
+            case QtInfoMsg: lvl = "INF"; break;
+            case QtWarningMsg: lvl = "WRN"; break;
+            case QtCriticalMsg: lvl = "CRT"; break;
+            case QtFatalMsg: lvl = "FTL"; break;
+            }
+            QTextStream out(&g_logFile);
+            out << QDateTime::currentDateTime().toString(Qt::ISODateWithMs)
+                << " [" << lvl << "] " << msg << '\n';
+            out.flush();
+        }
+    }
+    if (g_prevHandler) {
+        g_prevHandler(type, ctx, msg);
+    } else if (type != QtDebugMsg) {
+        const QByteArray local = msg.toLocal8Bit();
+        std::fprintf(stderr, "%s\n", local.constData());
+        std::fflush(stderr);
+    }
+}
+
+void installFileLogger() {
+    const QString path = ymusic::paths::logFilePath();
+    QMutexLocker lock(&g_logMutex);
+    const QFileInfo info(path);
+    QIODevice::OpenMode mode = QIODevice::WriteOnly | QIODevice::Text;
+    if (info.exists() && info.size() < 1024 * 1024) {
+        mode |= QIODevice::Append;
+    } else {
+        mode |= QIODevice::Truncate;
+    }
+    g_logFile.setFileName(path);
+    if (g_logFile.open(mode)) {
+        g_prevHandler = qInstallMessageHandler(fileMessageHandler);
+    }
+}
+
+void showFatalStartupError(const QString &details) {
+    qCritical().noquote() << details;
+    if (qEnvironmentVariable("QT_QPA_PLATFORM") == QLatin1StringView("offscreen")) {
+        return;
+    }
+    QMessageBox::critical(
+        nullptr,
+        QStringLiteral("Yandex Music"),
+        details + QStringLiteral("\n\nЛог: ") + ymusic::paths::logFilePath());
+}
 
 void tuneSceneGraph() {
     const auto fallback = [](const char *name, const char *value) {
@@ -110,6 +177,9 @@ int main(int argc, char *argv[]) {
     app.setApplicationVersion(QStringLiteral(YMUSIC_APP_VERSION));
 #endif
     app.setDesktopFileName("ymusic");
+    installFileLogger();
+    qInfo().noquote() << QStringLiteral("Starting Yandex Music %1 on %2 (%3)")
+        .arg(app.applicationVersion(), QSysInfo::prettyProductName(), QGuiApplication::platformName());
 
     QIcon appIcon = QIcon::fromTheme(QStringLiteral("ymusic"));
     if (appIcon.isNull()) appIcon = QIcon(QStringLiteral(":/icons/ymusic.svg"));
@@ -127,6 +197,7 @@ int main(int argc, char *argv[]) {
     const QString socketName = runtimeDir + "/ymusic-qml-instance";
 #endif
     QLockFile instanceLock(lockPath);
+    instanceLock.setStaleLockTime(0);
     if (!instanceLock.tryLock(0)) {
         QLocalSocket socket;
         socket.connectToServer(socketName);
@@ -142,7 +213,9 @@ int main(int argc, char *argv[]) {
     instanceServer.setSocketOptions(QLocalServer::UserAccessOption);
     QLocalServer::removeServer(socketName);
     if (!instanceServer.listen(socketName)) {
-        qCritical() << "Could not create the single-instance socket:" << instanceServer.errorString();
+        showFatalStartupError(
+            QStringLiteral("Не удалось создать сокет одиночного экземпляра: %1")
+                .arg(instanceServer.errorString()));
         return 1;
     }
 
@@ -217,9 +290,22 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("windowController", &windowController);
     engine.rootContext()->setContextProperty("updater", &updateChecker);
 
+    QStringList qmlErrors;
+    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app, [&](const QList<QQmlError> &warnings) {
+        for (const QQmlError &err : warnings) {
+            const QString line = err.toString();
+            qWarning().noquote() << line;
+            qmlErrors.append(line);
+        }
+    });
+
     engine.loadFromModule("ymusic.ui", "Main");
 
     if (engine.rootObjects().isEmpty()) {
+        const QString detail = qmlErrors.isEmpty()
+            ? QStringLiteral("Не удалось загрузить интерфейс приложения (ymusic.ui/Main).")
+            : QStringLiteral("Не удалось загрузить интерфейс приложения:\n\n") + qmlErrors.join(QLatin1Char('\n'));
+        showFatalStartupError(detail);
         return -1;
     }
 

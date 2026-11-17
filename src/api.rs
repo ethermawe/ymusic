@@ -1004,8 +1004,14 @@ impl Api {
                 .and_then(|c| c["uri"].as_str())
                 .map(str::to_string);
         }
-        if artist.stats.is_empty() {
-            artist.stats = format_artist_stats(&r["stats"], r["artist"]["likesCount"].as_u64());
+        let stats_src = if r["stats"].is_object() {
+            &r["stats"]
+        } else {
+            &r["artist"]["stats"]
+        };
+        let page_stats = format_artist_page_stats(stats_src, r["artist"]["likesCount"].as_u64());
+        if !page_stats.is_empty() {
+            artist.stats = page_stats;
         }
         let popular_tracks = r["popularTracks"]
             .as_array()
@@ -1639,14 +1645,29 @@ fn parse_artist(v: &Value) -> Option<ArtistCard> {
     })
 }
 
-fn format_artist_stats(stats: &Value, likes_count: Option<u64>) -> String {
+fn artist_stat_parts(stats: &Value, likes_count: Option<u64>) -> Vec<String> {
+    let mut parts = Vec::new();
     if let Some(m) = stats["lastMonthListeners"].as_u64().filter(|&n| n > 0) {
-        return format!("{} слушателей в месяц", fmt_compact_num(m));
+        parts.push(format!("{} слушателей в месяц", fmt_compact_num(m)));
     }
-    if let Some(l) = likes_count.or_else(|| stats["likesCount"].as_u64()).filter(|&n| n > 0) {
-        return format!("{} лайков", fmt_compact_num(l));
+    if let Some(l) = likes_count
+        .or_else(|| stats["likesCount"].as_u64())
+        .filter(|&n| n > 0)
+    {
+        parts.push(format!("{} лайков", fmt_compact_num(l)));
     }
-    String::new()
+    parts
+}
+
+fn format_artist_stats(stats: &Value, likes_count: Option<u64>) -> String {
+    artist_stat_parts(stats, likes_count)
+        .into_iter()
+        .next()
+        .unwrap_or_default()
+}
+
+fn format_artist_page_stats(stats: &Value, likes_count: Option<u64>) -> String {
+    artist_stat_parts(stats, likes_count).join("  •  ")
 }
 
 fn fmt_compact_num(n: u64) -> String {
@@ -2134,5 +2155,25 @@ mod tests {
         // Quiet track (-20 LUFS => +6 dB desired, but capped by TP -2.0 dB to +1.0 dB => ~1.122)
         let limited = t.r128_gain();
         assert!((limited - 1.122).abs() < 0.02, "limited={limited}");
+    }
+
+    #[test]
+    fn artist_page_stats_include_monthly_listeners_and_likes() {
+        let stats = serde_json::json!({
+            "lastMonthListeners": 1_450_000,
+            "lastMonthListenersDelta": 12_000
+        });
+        assert_eq!(
+            format_artist_page_stats(&stats, Some(340_000)),
+            "1.4 млн слушателей в месяц  •  340 тыс. лайков"
+        );
+        assert_eq!(
+            format_artist_stats(&stats, Some(340_000)),
+            "1.4 млн слушателей в месяц"
+        );
+        assert_eq!(
+            format_artist_page_stats(&Value::Null, Some(42_000)),
+            "42 тыс. лайков"
+        );
     }
 }
