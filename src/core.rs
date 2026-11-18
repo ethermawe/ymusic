@@ -1354,7 +1354,7 @@ impl YMusicCore {
                         c.on_mpris(action);
                     }
                 }),
-                discord: Discord::spawn(),
+                discord: Discord::spawn_with_sink(sink.clone()),
                 sink,
             }
         });

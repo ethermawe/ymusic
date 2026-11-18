@@ -158,6 +158,13 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         else if (type == "wave_settings") m_waveSettings = obj.toVariantMap();
         else if (type == "wave_applied") m_waveSettings["selected"] = obj["selected"].toObject().toVariantMap();
         else if (type == "copy_track_link") copyText(obj["url"].toString());
+        else if (type == "discord_status") {
+            m_discordConnected = obj["connected"].toBool(false);
+            m_discordStatus = obj["text"].toString();
+            if (!m_discordConnected && obj["is_error"].toBool(false)) {
+                qWarning().noquote() << "Discord RPC:" << m_discordStatus;
+            }
+        }
         emit featuresChanged();
         emit featureResult(obj.toVariantMap());
         break;

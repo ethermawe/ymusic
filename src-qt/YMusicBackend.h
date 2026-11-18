@@ -96,6 +96,8 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(QString aiMusicBehavior READ aiMusicBehavior NOTIFY featuresChanged)
     Q_PROPERTY(bool aiStrictTracks READ aiStrictTracks NOTIFY featuresChanged)
     Q_PROPERTY(bool showAiLabels READ showAiLabels NOTIFY featuresChanged)
+    Q_PROPERTY(bool discordConnected READ discordConnected NOTIFY featuresChanged)
+    Q_PROPERTY(QString discordStatus READ discordStatus NOTIFY featuresChanged)
     Q_PROPERTY(QVariantList searchSuggestions READ searchSuggestions NOTIFY featuresChanged)
 
 public:
@@ -179,6 +181,8 @@ public:
     QString aiMusicBehavior() const { return m_aiMusicBehavior; }
     bool aiStrictTracks() const { return m_aiStrictTracks; }
     bool showAiLabels() const { return m_showAiLabels; }
+    bool discordConnected() const { return m_discordConnected; }
+    QString discordStatus() const { return m_discordStatus; }
     QVariantList searchSuggestions() const { return m_searchSuggestions; }
     Q_INVOKABLE void feature(const QVariantMap &command);
 
@@ -281,6 +285,8 @@ private:
     QString m_aiMusicBehavior = "skip_if_not_liked";
     bool m_aiStrictTracks = false;
     bool m_showAiLabels = true;
+    bool m_discordConnected = false;
+    QString m_discordStatus = QStringLiteral("Ожидание трека");
     QVariantList m_searchSuggestions;
 
     bool m_loggedIn = false;
