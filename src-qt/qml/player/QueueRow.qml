@@ -41,10 +41,21 @@ T.AbstractButton {
     leftPadding: 10
     rightPadding: 10
     enabled: !current && available
+    scale: down ? 0.975 : (hovered ? 1.015 : 1)
+
+    Behavior on scale {
+        enabled: !Appearance.performanceMode
+        Bounce {}
+    }
 
     background: Rectangle {
         radius: 10
-        color: root.hovered ? root.scheme.layer1Hover : "transparent"
+        color: root.current ? Qt.alpha(root.scheme.primary, 0.09)
+             : (root.hovered ? root.scheme.layer1Hover : "transparent")
+
+        Behavior on color {
+            ElementMoveFastColor {}
+        }
     }
 
     contentItem: Item {

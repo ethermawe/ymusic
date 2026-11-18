@@ -13,6 +13,11 @@ Item {
 
     implicitWidth: isCompact ? 72 : 220
 
+    Behavior on implicitWidth {
+        enabled: !Appearance.performanceMode
+        ElementMove {}
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: root.isCompact ? 10 : 12

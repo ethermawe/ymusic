@@ -35,7 +35,7 @@ Item {
 
     WheelHandler {
         onWheel: (event) => {
-            backend.setVolume(Math.max(0, Math.min(1, backend.volume + event.angleDelta.y / 120 * 0.05)))
+            backend.setVolume(Math.max(0, Math.min(1, backend.volume + event.angleDelta.y / 120 * appSettings.volumeStep)))
             event.accepted = true
         }
     }

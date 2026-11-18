@@ -59,10 +59,11 @@ Item {
                 }
             }
             onWheel: (wheel) => {
+                const step = appSettings.volumeStep
                 if (wheel.angleDelta.y > 0) {
-                    backend.setVolume(Math.min(1.0, backend.volume + 0.05))
+                    backend.setVolume(Math.min(1.0, backend.volume + step))
                 } else if (wheel.angleDelta.y < 0) {
-                    backend.setVolume(Math.max(0.0, backend.volume - 0.05))
+                    backend.setVolume(Math.max(0.0, backend.volume - step))
                 }
                 wheel.accepted = true
             }

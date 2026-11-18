@@ -279,7 +279,7 @@ QtObject {
     signal settingsRequested()
 
     function burst(item: Item, kind: string) {
-        if (item !== null && !Appearance.performanceMode) {
+        if (item !== null && !Appearance.performanceMode && appSettings.burstsEnabled) {
             burstRequested(item, kind)
         }
     }

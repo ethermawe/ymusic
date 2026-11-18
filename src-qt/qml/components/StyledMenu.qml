@@ -39,10 +39,24 @@ T.Menu {
     delegate: StyledMenuItem {}
 
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Appearance.duration(150); easing.type: Easing.OutCubic }
+        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Appearance.duration(160); easing.type: Easing.OutCubic }
+        NumberAnimation {
+            property: "scale"
+            from: Appearance.performanceMode || Appearance.reduceMotion ? 1 : 0.9
+            to: 1
+            duration: Appearance.motion(260)
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Appearance.curves.expressiveFastSpatial
+        }
     }
     exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Appearance.duration(100) }
+        NumberAnimation { property: "opacity"; to: 0; duration: Appearance.duration(110); easing.type: Easing.InCubic }
+        NumberAnimation {
+            property: "scale"
+            to: Appearance.performanceMode || Appearance.reduceMotion ? 1 : 0.94
+            duration: Appearance.duration(110)
+            easing.type: Easing.InCubic
+        }
     }
 
     contentItem: ListView {

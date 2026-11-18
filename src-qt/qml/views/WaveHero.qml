@@ -457,7 +457,7 @@ FocusScope {
                         kind: SpectrumView.Ring
                         wave: appSettings.waveVisualizerShape === "wave"
                         sensitivity: appSettings.waveVisualizerSensitivity
-                        active: root.wavePlaying && root.showsRing
+                        active: root.visible && root.wavePlaying && root.showsRing
                         cutWaves: orbCover.showsSquiggle ? orbCover.squiggleWaves : 0
                         cutRadius: orbCover.squiggleMiddle
                         cutAmplitude: orbCover.squiggleAmplitude

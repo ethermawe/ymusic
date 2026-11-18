@@ -183,6 +183,7 @@ set(QML_FILES
     qml/motion/ElementResize.qml
     qml/motion/HeroFlight.qml
     qml/motion/HoverFade.qml
+    qml/motion/PageTransition.qml
     qml/motion/ShapeBurst.qml
     qml/motion/SidebarSlideEnter.qml
     qml/motion/SidebarSlideExit.qml
@@ -454,4 +455,26 @@ if(BUILD_TESTING)
     target_link_libraries(update_checker_test PRIVATE Qt6::Core Qt6::Gui Qt6::Network)
     target_compile_definitions(update_checker_test PRIVATE YMUSIC_APP_VERSION="${YMUSIC_VERSION_CLEAN}")
     add_test(NAME update_checker_test COMMAND update_checker_test)
+
+    add_executable(theme_test
+        tests/ThemeTest.cpp
+        AppSettings.h
+        app/Fonts.h
+        app/Fonts.cpp
+        app/Paths.h
+        app/Paths.cpp
+        artwork/ArtworkPalette.h
+        artwork/ArtworkPalette.cpp
+        theme/ColorMath.h
+        theme/MaterialScheme.h
+        theme/MaterialScheme.cpp
+        theme/Theme.h
+        theme/Theme.cpp
+        theme/Themes.h
+        theme/Themes.cpp
+    )
+    target_include_directories(theme_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(theme_test PRIVATE Qt6::Core Qt6::Gui Qt6::Qml material_color_utilities)
+    add_test(NAME theme_test COMMAND theme_test)
+    set_tests_properties(theme_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

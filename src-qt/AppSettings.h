@@ -2,11 +2,16 @@
 
 #include <QDesktopServices>
 #include <QDir>
+#include <QDirIterator>
+#include <QFile>
+#include <QFileInfo>
 #include <QObject>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QUrl>
 #include <algorithm>
+
+#include "app/Paths.h"
 
 // UI preferences are separate from the Rust playback/session settings.
 class AppSettings : public QObject {
@@ -55,6 +60,9 @@ class AppSettings : public QObject {
     Q_PROPERTY(bool showWindowControls READ showWindowControls WRITE setShowWindowControls NOTIFY windowControlsChanged)
     Q_PROPERTY(bool windowControlsOnRight READ windowControlsOnRight WRITE setWindowControlsOnRight NOTIFY windowControlsChanged)
     Q_PROPERTY(bool nativeTitleBar READ nativeTitleBar WRITE setNativeTitleBar NOTIFY windowControlsChanged)
+    Q_PROPERTY(bool minimizeToTray READ minimizeToTray WRITE setMinimizeToTray NOTIFY minimizeToTrayChanged)
+    Q_PROPERTY(bool burstsEnabled READ burstsEnabled WRITE setBurstsEnabled NOTIFY burstsEnabledChanged)
+    Q_PROPERTY(double volumeStep READ volumeStep WRITE setVolumeStep NOTIFY volumeStepChanged)
     Q_PROPERTY(bool autoUpdateEnabled READ autoUpdateEnabled WRITE setAutoUpdateEnabled NOTIFY autoUpdateEnabledChanged)
 
 public:
@@ -114,6 +122,9 @@ public:
     bool showWindowControls() const { return m_store.value("ui/showWindowControls", true).toBool(); }
     bool windowControlsOnRight() const { return m_store.value("ui/windowControlsOnRight", false).toBool(); }
     bool nativeTitleBar() const { return m_store.value("ui/nativeTitleBar", false).toBool(); }
+    bool minimizeToTray() const { return m_store.value("ui/minimizeToTray", true).toBool(); }
+    bool burstsEnabled() const { return m_store.value("ui/burstsEnabled", true).toBool(); }
+    double volumeStep() const { return std::clamp(m_store.value("ui/volumeStep", 0.05).toDouble(), 0.01, 0.2); }
     bool autoUpdateEnabled() const { return m_store.value("app/autoUpdateEnabled", true).toBool(); }
 
     void setMotionEnabled(bool value) {
@@ -325,6 +336,25 @@ public:
             emit windowControlsChanged();
         }
     }
+    void setMinimizeToTray(bool value) {
+        if (value != minimizeToTray()) {
+            save("ui/minimizeToTray", value);
+            emit minimizeToTrayChanged();
+        }
+    }
+    void setBurstsEnabled(bool value) {
+        if (value != burstsEnabled()) {
+            save("ui/burstsEnabled", value);
+            emit burstsEnabledChanged();
+        }
+    }
+    void setVolumeStep(double value) {
+        const double clamped = std::clamp(value, 0.01, 0.2);
+        if (!qFuzzyCompare(clamped, volumeStep())) {
+            save("ui/volumeStep", clamped);
+            emit volumeStepChanged();
+        }
+    }
     void setAutoUpdateEnabled(bool value) {
         if (value != autoUpdateEnabled()) {
             save("app/autoUpdateEnabled", value);
@@ -337,6 +367,73 @@ public:
         if (base.isEmpty()) base = QDir::homePath() + "/.local/share";
         const QString path = base + "/ymusic/offline";
         return QDir().mkpath(path) && QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    }
+
+    Q_INVOKABLE bool openLogsFolder() {
+        const QString path = ymusic::paths::logDirectory();
+        return QDir().mkpath(path) && QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    }
+
+    Q_INVOKABLE QString cacheSizeText() const {
+        const QString root = ymusic::paths::cacheDirectory();
+        qint64 bytes = 0;
+        QDirIterator it(root, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            it.next();
+            bytes += it.fileInfo().size();
+        }
+        if (bytes < 1024) return QStringLiteral("0 КБ");
+        if (bytes < 1024 * 1024) return QString::number(qMax(1LL, bytes / 1024)) + QStringLiteral(" КБ");
+        if (bytes < 1024LL * 1024 * 1024) {
+            return QString::number(static_cast<double>(bytes) / (1024.0 * 1024.0), 'f', 1) + QStringLiteral(" МБ");
+        }
+        return QString::number(static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0), 'f', 2) + QStringLiteral(" ГБ");
+    }
+
+    Q_INVOKABLE bool clearCoverCache() {
+        const QString root = ymusic::paths::cacheDirectory();
+        QDir dir(root);
+        if (!dir.exists()) return true;
+        bool ok = true;
+        const QFileInfoList entries = dir.entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries);
+        for (const QFileInfo &entry : entries) {
+            if (entry.isDir()) {
+                QDir sub(entry.absoluteFilePath());
+                if (!sub.removeRecursively()) ok = false;
+            } else {
+                if (!QFile::remove(entry.absoluteFilePath())) ok = false;
+            }
+        }
+        return ok;
+    }
+
+    Q_INVOKABLE void resetUiSettings() {
+        m_store.beginGroup("ui");
+        m_store.remove("");
+        m_store.endGroup();
+        m_store.sync();
+        emit changed();
+        emit reduceMotionChanged();
+        emit performanceModeChanged();
+        emit fastImmersiveTransitionChanged();
+        emit noShapesChanged();
+        emit visualizersEnabledChanged();
+        emit visualizerTogglesChanged();
+        emit roundArtworkChanged();
+        emit visualizerShapeChanged();
+        emit visualizerSensitivityChanged();
+        emit livingBackdropChanged();
+        emit backdropBlurChanged();
+        emit backdropReactivityChanged();
+        emit waveSettingsChanged();
+        emit zoomChanged();
+        emit scrollSpeedChanged();
+        emit debuggingEnabledChanged();
+        emit windowControlsChanged();
+        emit minimizeToTrayChanged();
+        emit burstsEnabledChanged();
+        emit volumeStepChanged();
+        emit themeChanged();
     }
 
 signals:
@@ -359,6 +456,9 @@ signals:
     void scrollSpeedChanged();
     void debuggingEnabledChanged();
     void windowControlsChanged();
+    void minimizeToTrayChanged();
+    void burstsEnabledChanged();
+    void volumeStepChanged();
     void themeChanged();
     void autoUpdateEnabledChanged();
 

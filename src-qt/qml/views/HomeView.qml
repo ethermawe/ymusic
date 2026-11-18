@@ -60,6 +60,16 @@ Flickable {
             reuseItems: true
             model: secBlock.items
 
+            displaced: Transition {
+                enabled: !Appearance.performanceMode
+                NumberAnimation {
+                    properties: "x,y"
+                    duration: Appearance.motion(320)
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: Appearance.curves.expressiveDefaultSpatial
+                }
+            }
+
             delegate: CardItem {
                 required property var modelData
                 cardIndex: modelData.cardIndex
@@ -134,9 +144,42 @@ Flickable {
                 rowSpacing: 16
 
                 Item {
+                    id: spotlightArtBox
                     Layout.preferredWidth: root.narrow ? 124 : 152
                     Layout.preferredHeight: Layout.preferredWidth
                     Layout.alignment: root.narrow ? Qt.AlignLeft : Qt.AlignVCenter
+                    scale: spotlightArtHover.hovered && backend.hasTrack ? 1.04 : 1
+
+                    Behavior on scale {
+                        enabled: !Appearance.performanceMode
+                        Bounce {}
+                    }
+
+                    transform: Scale {
+                        id: spotlightPop
+                        origin.x: spotlightArtBox.width / 2
+                        origin.y: spotlightArtBox.height / 2
+                    }
+
+                    Connections {
+                        target: backend
+                        function onTrackInstanceIdChanged() {
+                            if (!Appearance.performanceMode && !Appearance.reduceMotion) {
+                                spotlightPopIn.restart()
+                            }
+                        }
+                    }
+
+                    NumberAnimation {
+                        id: spotlightPopIn
+                        target: spotlightPop
+                        properties: "xScale,yScale"
+                        from: 0.84
+                        to: 1
+                        duration: Appearance.motion(520)
+                        easing.type: Easing.OutBack
+                        easing.overshoot: 2.0
+                    }
 
                     ArtworkGlow {
                         anchors.fill: parent
@@ -149,8 +192,18 @@ Flickable {
                         anchors.fill: parent
                         radius: Appearance.rounding.large
                         source: backend.hasCover ? backend.nowCover : ""
+                        crossfade: true
                         placeholderSymbol: "music_note"
                         fallbackKey: backend.nowTitle
+                    }
+
+                    HoverHandler {
+                        id: spotlightArtHover
+                        cursorShape: backend.hasTrack ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    }
+                    TapHandler {
+                        enabled: backend.hasTrack
+                        onTapped: UiState.openImmersive()
                     }
                 }
 
@@ -165,6 +218,11 @@ Flickable {
                         radius: 12
                         color: Appearance.colors.primaryContainer
 
+                        Behavior on Layout.preferredWidth {
+                            enabled: !Appearance.performanceMode
+                            ElementMoveSmall {}
+                        }
+
                         Row {
                             id: statusRow
                             anchors.centerIn: parent
@@ -175,6 +233,8 @@ Flickable {
                                 iconSize: 14
                                 fill: 1
                                 color: Appearance.colors.onPrimaryContainer
+                                scale: backend.playing && !Appearance.reduceMotion && !Appearance.performanceMode
+                                    ? 1 + 0.1 * Math.sin(UiState.spin * 6) : 1
                             }
                             StyledText {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -190,6 +250,8 @@ Flickable {
                     TitleText {
                         Layout.fillWidth: true
                         text: backend.hasTrack ? backend.nowTitle : "Готовы слушать"
+                        animateChange: true
+                        changeDistanceY: 6
                         font.pixelSize: root.narrow ? 20 : 25
                         maximumLineCount: 2
                         wrapMode: Text.WordWrap
@@ -339,8 +401,13 @@ Flickable {
                     color: tileHover.hovered ? Appearance.colors.surfaceContainerHigh : Appearance.colors.surfaceContainerLow
                     border.width: 1
                     border.color: Appearance.colors.outlineVariant
+                    scale: tileTap.pressed ? 0.96 : (tileHover.hovered ? 1.02 : 1)
 
                     Behavior on color { ElementMoveFastColor {} }
+                    Behavior on scale {
+                        enabled: !Appearance.performanceMode
+                        Bounce {}
+                    }
 
                     RowLayout {
                         anchors.fill: parent
@@ -354,6 +421,12 @@ Flickable {
                             source: historyTile.model.coverUrl
                             placeholderSymbol: "music_note"
                             fallbackKey: historyTile.model.title
+                            scale: tileHover.hovered ? 1.06 : 1
+
+                            Behavior on scale {
+                                enabled: !Appearance.performanceMode
+                                Bounce {}
+                            }
                         }
 
                         ColumnLayout {
@@ -380,6 +453,7 @@ Flickable {
                         cursorShape: Qt.PointingHandCursor
                     }
                     TapHandler {
+                        id: tileTap
                         onTapped: backend.feature({action: "play_history", id: historyTile.model.id})
                     }
                 }

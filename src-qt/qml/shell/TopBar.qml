@@ -91,7 +91,9 @@ Item {
             shape: "arrow"
             shapeAngle: -90
             turnsOnHover: false
-            visible: backend.canGoBack
+            Reveal.shown: backend.canGoBack
+            Reveal.scaleFrom: 0.72
+            Reveal.overshoot: 1.9
             enabled: backend.canGoBack
             onClicked: backend.goBack()
             tooltip: qsTr("Назад")
@@ -210,8 +212,9 @@ Item {
 
     Rectangle {
         id: suggestionsPopup
+        readonly property bool suggestionsOpen: search.editing && search.text.trim().length > 0 && backend.searchSuggestions.length > 0
         x: search.x
-        y: search.y + search.height + 6
+        y: search.y + search.height + (suggestionsOpen ? 6 : 0)
         width: search.width
         height: suggestColumn.implicitHeight + 12
         z: 30
@@ -219,7 +222,20 @@ Item {
         color: Appearance.colors.surfaceContainerHigh
         border.width: 1
         border.color: Appearance.colors.outlineVariant
-        visible: search.editing && search.text.trim().length > 0 && backend.searchSuggestions.length > 0
+        transformOrigin: Item.Top
+        Reveal.shown: suggestionsOpen
+        Reveal.scaleFrom: 0.94
+        Reveal.overshoot: 1.3
+        clip: true
+
+        Behavior on y {
+            enabled: !Appearance.performanceMode
+            ElementMoveSmall {}
+        }
+        Behavior on height {
+            enabled: !Appearance.performanceMode && suggestionsPopup.visible
+            ElementMoveSmall {}
+        }
 
         Column {
             id: suggestColumn
@@ -231,28 +247,42 @@ Item {
             Repeater {
                 model: backend.searchSuggestions
                 delegate: Rectangle {
+                    id: suggestItem
                     required property string modelData
                     width: suggestColumn.width
                     height: 34
                     radius: Appearance.rounding.small
                     color: suggestHover.hovered ? Appearance.colors.surfaceContainerHighest : "transparent"
 
+                    Behavior on color {
+                        ElementMoveFastColor {}
+                    }
+
                     Row {
                         anchors.fill: parent
-                        anchors.leftMargin: 10
+                        anchors.leftMargin: suggestHover.hovered ? 13 : 10
                         anchors.rightMargin: 10
                         spacing: 8
+
+                        Behavior on anchors.leftMargin {
+                            enabled: !Appearance.performanceMode
+                            ElementMoveSmall {}
+                        }
 
                         MaterialSymbol {
                             anchors.verticalCenter: parent.verticalCenter
                             text: "search"
                             iconSize: 16
-                            color: Appearance.colors.onSurfaceVariant
+                            color: suggestHover.hovered ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
+
+                            Behavior on color {
+                                ElementMoveFastColor {}
+                            }
                         }
                         StyledText {
                             anchors.verticalCenter: parent.verticalCenter
                             width: parent.width - 28
-                            text: modelData
+                            text: suggestItem.modelData
                             elide: Text.ElideRight
                             font.pixelSize: Appearance.fontSize.small
                         }
@@ -264,9 +294,9 @@ Item {
                     }
                     TapHandler {
                         onTapped: {
-                            search.text = modelData
+                            search.text = suggestItem.modelData
                             root.dismissSearch()
-                            backend.search(modelData)
+                            backend.search(suggestItem.modelData)
                         }
                     }
                 }

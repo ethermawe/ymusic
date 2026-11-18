@@ -21,24 +21,38 @@
 
 #include "AppSettings.h"
 #include "app/Fonts.h"
+#include "artwork/ArtworkPalette.h"
 #include "cpp/cam/hct.h"
 #include "cpp/scheme/scheme_content.h"
 #include "cpp/scheme/scheme_tonal_spot.h"
 #include "theme/ColorMath.h"
 
+#include <QAbstractNativeEventFilter>
+#include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
+#include <QEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLoggingCategory>
+#include <QPalette>
 #include <QQmlEngine>
 #include <QStandardPaths>
 #include <QStyleHints>
 #include <QUrl>
 
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include <functional>
+#include <iterator>
 
 namespace ymusic {
 
@@ -246,6 +260,113 @@ QString normalizedPreset(const QString &preset)
     return preset;
 }
 
+#ifdef Q_OS_WIN
+class WindowsThemeEventFilter final : public QAbstractNativeEventFilter {
+public:
+    explicit WindowsThemeEventFilter(std::function<void()> onChange)
+        : m_onChange(std::move(onChange)) {}
+
+    bool nativeEventFilter(const QByteArray &eventType, void *message, qintptr *) override
+    {
+        if (eventType != QByteArrayLiteral("windows_generic_MSG") || !message) {
+            return false;
+        }
+        const auto *msg = static_cast<const MSG *>(message);
+        if (msg->message == WM_DWMCOLORIZATIONCOLORCHANGED) {
+            m_onChange();
+        } else if (msg->message == WM_SETTINGCHANGE) {
+            if (msg->wParam == SPI_SETDESKWALLPAPER) {
+                m_onChange();
+            } else if (msg->lParam) {
+                const QString area = QString::fromWCharArray(reinterpret_cast<const wchar_t *>(msg->lParam));
+                if (area == QLatin1StringView("ImmersiveColorSet")
+                    || area == QLatin1StringView("WindowsThemeElement")) {
+                    m_onChange();
+                }
+            }
+        }
+        return false;
+    }
+
+private:
+    std::function<void()> m_onChange;
+};
+
+QStringList windowsWallpaperCandidates(QStringList &watchedDirectories)
+{
+    QStringList candidates;
+    wchar_t pathBuf[1024] {};
+    if (SystemParametersInfoW(SPI_GETDESKWALLPAPER, static_cast<UINT>(std::size(pathBuf)), pathBuf, 0)) {
+        const QString spiPath = QDir::cleanPath(QString::fromWCharArray(pathBuf));
+        if (!spiPath.isEmpty()) {
+            const QFileInfo info(spiPath);
+            if (info.isFile()) {
+                candidates.append(info.absoluteFilePath());
+            }
+            watchedDirectories.append(existingAncestor(info.absolutePath()));
+        }
+    }
+
+    const QString appData = qEnvironmentVariable("APPDATA");
+    if (!appData.isEmpty()) {
+        const QString themesDir = QDir::cleanPath(appData + QStringLiteral("/Microsoft/Windows/Themes"));
+        watchedDirectories.append(existingAncestor(themesDir));
+        const QString transcoded = themesDir + QStringLiteral("/TranscodedWallpaper");
+        if (QFileInfo::exists(transcoded)) {
+            candidates.append(QFileInfo(transcoded).absoluteFilePath());
+        }
+    }
+    candidates.removeDuplicates();
+    watchedDirectories.removeDuplicates();
+    return candidates;
+}
+
+std::optional<QColor> extractWallpaperSeedCached(const QString &path)
+{
+    struct Cache {
+        QString path;
+        qint64 modifiedMs = -1;
+        qint64 size = -1;
+        QColor seed;
+    };
+    static Cache cache;
+
+    const QFileInfo info(path);
+    if (!info.isFile() || info.size() <= 0 || info.size() > 32 * 1024 * 1024) {
+        return std::nullopt;
+    }
+    const qint64 modifiedMs = info.lastModified().toMSecsSinceEpoch();
+    const qint64 size = info.size();
+    if (cache.path == info.absoluteFilePath() && cache.modifiedMs == modifiedMs
+        && cache.size == size && cache.seed.isValid()) {
+        return cache.seed;
+    }
+
+    QFile file(info.absoluteFilePath());
+    if (!file.open(QIODevice::ReadOnly)) {
+        return std::nullopt;
+    }
+    const auto seed = Theme::wallpaperSeedFromBytes(file.readAll());
+    if (seed && seed->isValid()) {
+        cache = {info.absoluteFilePath(), modifiedMs, size, *seed};
+        return seed;
+    }
+    return std::nullopt;
+}
+
+std::optional<MaterialScheme::Roles> readWindowsWallpaperRoles(const QString &path, bool dark)
+{
+    if (const auto seed = extractWallpaperSeedCached(path)) {
+        return Theme::rolesFromSeed(*seed, dark, false);
+    }
+    const QColor accent = QGuiApplication::palette().color(QPalette::Accent);
+    if (accent.isValid() && accent.alpha() > 0) {
+        return Theme::rolesFromSeed(accent, dark, false);
+    }
+    return std::nullopt;
+}
+#endif
+
 } // namespace
 
 Theme::Theme(AppSettings *settings, QObject *parent)
@@ -264,6 +385,13 @@ Theme::Theme(AppSettings *settings, QObject *parent)
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, scheduleReload);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, scheduleReload);
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, scheduleReload);
+    if (auto *coreApp = QCoreApplication::instance()) {
+        coreApp->installEventFilter(this);
+#ifdef Q_OS_WIN
+        m_nativeFilter = new WindowsThemeEventFilter(scheduleReload);
+        coreApp->installNativeEventFilter(m_nativeFilter);
+#endif
+    }
     if (m_settings) {
         connect(m_settings, &AppSettings::themeChanged, this, scheduleReload);
     }
@@ -273,9 +401,26 @@ Theme::Theme(AppSettings *settings, QObject *parent)
 
 Theme::~Theme()
 {
+#ifdef Q_OS_WIN
+    if (m_nativeFilter) {
+        if (auto *coreApp = QCoreApplication::instance()) {
+            coreApp->removeNativeEventFilter(m_nativeFilter);
+        }
+        delete m_nativeFilter;
+        m_nativeFilter = nullptr;
+    }
+#endif
     if (s_instance == this) {
         s_instance = nullptr;
     }
+}
+
+bool Theme::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == QCoreApplication::instance() && event->type() == QEvent::ApplicationPaletteChange) {
+        m_reloadDebounce.start();
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 Theme *Theme::instance()
@@ -323,6 +468,21 @@ void Theme::resolveSystemScheme(bool dark)
             return;
         }
     }
+#ifdef Q_OS_WIN
+    for (const QString &wallpaperPath : windowsWallpaperCandidates(m_schemeDirectories)) {
+        if (const auto roles = readWindowsWallpaperRoles(wallpaperPath, dark)) {
+            m_systemSchemePath = wallpaperPath;
+            m_schemeFiles.append(wallpaperPath);
+            m_systemRoles = roles;
+            return;
+        }
+    }
+    const QColor accent = QGuiApplication::palette().color(QPalette::Accent);
+    if (accent.isValid() && accent.alpha() > 0) {
+        m_systemSchemePath = QStringLiteral("Windows Accent");
+        m_systemRoles = rolesFromSeed(accent, dark, false);
+    }
+#endif
 }
 
 void Theme::refreshSystemScheme()
@@ -348,6 +508,15 @@ MaterialScheme::Roles Theme::rolesFromSeed(QColor seed, bool dark, bool fidelity
         return MaterialScheme::fromDynamicScheme(SchemeContent(hct, dark, 0.0));
     }
     return MaterialScheme::fromDynamicScheme(SchemeTonalSpot(hct, dark, 0.0));
+}
+
+std::optional<QColor> Theme::wallpaperSeedFromBytes(const QByteArray &encoded)
+{
+    const auto extracted = palette::extract(encoded);
+    if (!extracted || extracted->colors.isEmpty()) {
+        return std::nullopt;
+    }
+    return extracted->colors.first();
 }
 
 QColor Theme::mix(const QColor &a, const QColor &b, qreal amountOfA)
@@ -422,7 +591,12 @@ QList<ThemeOption> Theme::themeOptions(bool dark) const
                             role(Role::Primary), role(Role::Secondary), role(Role::Tertiary)};
     };
     QList<ThemeOption> options;
-    const auto desktop = readScheme(systemSchemePath(), dark);
+    std::optional<MaterialScheme::Roles> desktop = readScheme(systemSchemePath(), dark);
+#ifdef Q_OS_WIN
+    if (!desktop && !systemSchemePath().isEmpty()) {
+        desktop = readWindowsWallpaperRoles(systemSchemePath(), dark);
+    }
+#endif
     const themes::Family *yandex = themes::find(QStringLiteral("yandex"));
     const MaterialScheme::Roles fallbackAuto = yandex
         ? themes::roles(dark ? yandex->dark : yandex->light, dark)

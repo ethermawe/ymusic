@@ -79,12 +79,28 @@ Flickable {
             id: cards
             width: parent.width
             height: Math.ceil(Math.max(1, count) / Math.max(1, Math.floor(width / cellWidth))) * cellHeight
-            visible: !backend.listLoading && count > 0
+            opacity: !backend.listLoading && count > 0 ? 1 : 0
+            visible: opacity > 0
             cellWidth: 194
             cellHeight: 264
             interactive: false
             reuseItems: true
             model: root.visible ? backend.cards : null
+
+            Behavior on opacity {
+                enabled: !Appearance.performanceMode
+                NumberAnimation { duration: Appearance.duration(220); easing.type: Easing.OutCubic }
+            }
+            displaced: Transition {
+                enabled: !Appearance.performanceMode
+                NumberAnimation {
+                    properties: "x,y"
+                    duration: Appearance.motion(300)
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: Appearance.curves.expressiveDefaultSpatial
+                }
+            }
+
             delegate: CardItem {
                 required property int index
                 required property var model
@@ -99,16 +115,32 @@ Flickable {
             id: tracks
             width: parent.width
             height: contentHeight
-            visible: !backend.listLoading && count > 0
+            opacity: !backend.listLoading && count > 0 ? 1 : 0
+            visible: opacity > 0
             interactive: false
             model: root.visible ? backend.tracks : null
+
+            Behavior on opacity {
+                enabled: !Appearance.performanceMode
+                NumberAnimation { duration: Appearance.duration(220); easing.type: Easing.OutCubic }
+            }
+            displaced: Transition {
+                enabled: !Appearance.performanceMode
+                NumberAnimation {
+                    properties: "x,y"
+                    duration: Appearance.motion(280)
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: Appearance.curves.expressiveDefaultSpatial
+                }
+            }
+
             delegate: TrackRow { width: tracks.width }
         }
 
         EmptyState {
             width: parent.width
             height: 260
-            visible: !backend.listLoading && backend.cards.count === 0 && backend.tracks.count === 0
+            Reveal.shown: !backend.listLoading && backend.cards.count === 0 && backend.tracks.count === 0
             title: "Ничего не найдено"
             description: "Измените запрос или выберите другой фильтр."
             symbol: "search_off"

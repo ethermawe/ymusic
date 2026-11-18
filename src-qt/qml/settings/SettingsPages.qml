@@ -26,13 +26,37 @@ Item {
     id: root
 
     property int page: 0
+    property string cacheSizeLabel: appSettings.cacheSizeText()
+
     readonly property list<string> fades: ["none", "finalSeconds", "entire"]
     readonly property list<string> qualities: ["nq", "hq", "lossless"]
     readonly property list<string> aiBehaviors: ["skip_if_not_liked", "dislike_if_not_liked", "skip", "dislike", "nothing"]
     readonly property list<string> themeModes: ["auto", "light", "dark"]
     readonly property list<string> backends: ["auto", "vulkan", "opengl"]
+    readonly property list<string> immersivePanels: ["artwork", "lyrics", "queue"]
+    readonly property list<real> volumeSteps: [0.02, 0.05, 0.10]
     readonly property string normalizedPreset: (appSettings.themePreset === "" || appSettings.themePreset === "system")
         ? "auto" : appSettings.themePreset
+
+    function nearestVolumeStepIndex(): int {
+        let best = 1;
+        let minDiff = 999;
+        for (let i = 0; i < volumeSteps.length; ++i) {
+            const diff = Math.abs(volumeSteps[i] - appSettings.volumeStep);
+            if (diff < minDiff) {
+                minDiff = diff;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    onVisibleChanged: {
+        if (visible) cacheSizeLabel = appSettings.cacheSizeText();
+    }
+    onPageChanged: {
+        if (page === 5) cacheSizeLabel = appSettings.cacheSizeText();
+    }
 
     component Page: Column {
         width: parent ? parent.width : 0
@@ -74,290 +98,50 @@ Item {
         }
     }
 
+    component KeyRow: Item {
+        id: krow
+        property string label
+        property string shortcut
+
+        width: parent ? parent.width : 0
+        height: 36
+
+        StyledText {
+            x: 12
+            anchors.verticalCenter: parent.verticalCenter
+            text: krow.label
+        }
+        Rectangle {
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            height: 24
+            width: keyText.implicitWidth + 16
+            radius: 6
+            color: Appearance.colors.surfaceContainerHighest
+            border.width: 1
+            border.color: Appearance.colors.outlineVariant
+
+            StyledText {
+                id: keyText
+                anchors.centerIn: parent
+                text: krow.shortcut
+                font.pixelSize: Appearance.fontSize.smaller
+                font.weight: Font.Medium
+                color: Appearance.colors.onSurface
+            }
+        }
+    }
+
     implicitHeight: pages.implicitHeight
 
     Column {
         id: pages
         width: parent.width
 
-        // 0: Визуализация
+        // 0: Оформление
         Page {
             visible: root.page === 0
-
-            ContentSection {
-                title: "Визуализатор"
-                symbol: "graphic_eq"
-
-                ConfigSwitch {
-                    text: "Включить аудиовизуализацию"
-                    checked: appSettings.visualizersEnabled
-                    onToggledTo: (checked) => appSettings.visualizersEnabled = checked
-                }
-                ConfigSwitch {
-                    text: "Индикатор в плеере и списке треков"
-                    enabled: appSettings.visualizersEnabled
-                    checked: appSettings.playerBarVisualizer
-                    onToggledTo: (checked) => appSettings.playerBarVisualizer = checked
-                }
-                ConfigSwitch {
-                    text: "Визуализатор на весь экран"
-                    enabled: appSettings.visualizersEnabled
-                    checked: appSettings.immersiveVisualizer
-                    onToggledTo: (checked) => appSettings.immersiveVisualizer = checked
-                }
-                ConfigSelection {
-                    text: "Стиль"
-                    enabled: appSettings.visualizersEnabled && appSettings.immersiveVisualizer
-                    currentIndex: appSettings.circularVisualizer ? 1 : 0
-                    segments: [
-                        Segment { text: "Полоса" },
-                        Segment { text: "Кольцо" }
-                    ]
-                    onActivated: (index) => appSettings.circularVisualizer = index === 1
-                }
-                ConfigSelection {
-                    text: "Симметрия"
-                    enabled: appSettings.visualizersEnabled && appSettings.immersiveVisualizer && !appSettings.circularVisualizer
-                    currentIndex: appSettings.continuousVisualizer ? 1 : 0
-                    segments: [
-                        Segment { text: "Зеркало" },
-                        Segment { text: "Сплошной" }
-                    ]
-                    onActivated: (index) => appSettings.continuousVisualizer = index === 1
-                }
-                ConfigSelection {
-                    text: "Форма"
-                    enabled: appSettings.visualizersEnabled && appSettings.immersiveVisualizer
-                    currentIndex: appSettings.visualizerShape === "wave" ? 1 : 0
-                    segments: [
-                        Segment { text: "Столбцы" },
-                        Segment { text: "Волна" }
-                    ]
-                    onActivated: (index) => appSettings.visualizerShape = index === 1 ? "wave" : "bars"
-                }
-                ConfigSwitch {
-                    text: "Круглая обложка в полном экране"
-                    enabled: !appSettings.visualizersEnabled || !appSettings.immersiveVisualizer
-                    checked: appSettings.roundArtwork || (appSettings.visualizersEnabled && appSettings.immersiveVisualizer && appSettings.circularVisualizer)
-                    onToggledTo: (checked) => appSettings.roundArtwork = checked
-                }
-                ConfigSwitch {
-                    text: "Ускоренная анимация перехода в иммерсивный плеер"
-                    enabled: appSettings.motionEnabled && !appSettings.performanceMode
-                    checked: appSettings.fastImmersiveTransition
-                    onToggledTo: (checked) => appSettings.fastImmersiveTransition = checked
-                }
-                ConfigSlider {
-                    text: "Чувствительность"
-                    enabled: appSettings.visualizersEnabled && (appSettings.playerBarVisualizer || appSettings.immersiveVisualizer)
-                    from: 0.6
-                    to: 1.8
-                    stepSize: 0.05
-                    value: appSettings.visualizerSensitivity
-                    valueText: Math.round(appSettings.visualizerSensitivity * 100) + "%"
-                    onMoved: (value) => appSettings.visualizerSensitivity = Number(value.toFixed(2))
-                }
-                NoteText {
-                    text: "Визуализация реагирует на частотный спектр аудиопотока. Отключите, если хотите снизить нагрузку на GPU."
-                }
-            }
-
-            ContentSection {
-                title: "Моя волна"
-                symbol: "my_wave"
-
-                ConfigSwitch {
-                    text: "Кольцевой визуализатор"
-                    enabled: appSettings.visualizersEnabled
-                    checked: appSettings.waveVisualizer
-                    onToggledTo: (checked) => appSettings.waveVisualizer = checked
-                }
-                ConfigSelection {
-                    text: "Форма визуализатора"
-                    enabled: appSettings.visualizersEnabled && appSettings.waveVisualizer
-                    currentIndex: appSettings.waveVisualizerShape === "wave" ? 1 : 0
-                    segments: [
-                        Segment { text: "Столбцы" },
-                        Segment { text: "Волна" }
-                    ]
-                    onActivated: (index) => appSettings.waveVisualizerShape = index === 1 ? "wave" : "bars"
-                }
-                ConfigSlider {
-                    text: "Чувствительность визуализатора"
-                    enabled: appSettings.visualizersEnabled && appSettings.waveVisualizer
-                    from: 0.6
-                    to: 1.8
-                    stepSize: 0.05
-                    value: appSettings.waveVisualizerSensitivity
-                    valueText: Math.round(appSettings.waveVisualizerSensitivity * 100) + "%"
-                    onMoved: (value) => appSettings.waveVisualizerSensitivity = Number(value.toFixed(2))
-                }
-                ConfigSwitch {
-                    text: "Обложка трека в сфере"
-                    checked: appSettings.waveOrbArtwork
-                    onToggledTo: (checked) => appSettings.waveOrbArtwork = checked
-                }
-                ConfigSwitch {
-                    text: "Волнистый контур сферы"
-                    enabled: !appSettings.noShapes
-                    checked: appSettings.waveOrbSquiggle
-                    onToggledTo: (checked) => appSettings.waveOrbSquiggle = checked
-                }
-                ConfigSlider {
-                    text: "Реакция сферы на звук"
-                    enabled: appSettings.motionEnabled && !appSettings.performanceMode
-                    from: 0
-                    to: 3
-                    stepSize: 0.1
-                    value: appSettings.waveReactivity
-                    valueText: Math.round(appSettings.waveReactivity * 100) + "%"
-                    onMoved: (value) => appSettings.waveReactivity = Number(value.toFixed(1))
-                }
-                NoteText {
-                    text: "Визуализатор и анимация сферы на экране «Моя волна» настраиваются отдельно от иммерсивного плеера."
-                }
-            }
-        }
-
-        // 1: Фон
-        Page {
-            visible: root.page === 1
-
-            ContentSection {
-                title: "Живой фон"
-                symbol: "wallpaper"
-
-                ConfigSwitch {
-                    text: "Живой фон по обложке"
-                    checked: appSettings.livingBackdrop
-                    onToggledTo: (checked) => appSettings.livingBackdrop = checked
-                }
-                ConfigSlider {
-                    text: "Размытие"
-                    from: 0
-                    to: 60
-                    stepSize: 1
-                    value: appSettings.backdropBlur
-                    onMoved: (value) => appSettings.backdropBlur = Math.round(value)
-                }
-                ConfigSlider {
-                    text: "Реактивность на звук"
-                    enabled: appSettings.livingBackdrop
-                    from: 0
-                    to: 3
-                    stepSize: 0.1
-                    value: appSettings.backdropReactivity
-                    valueText: Math.round(appSettings.backdropReactivity * 100) + "%"
-                    onMoved: (value) => appSettings.backdropReactivity = Number(value.toFixed(1))
-                }
-                NoteText {
-                    text: "Плавно переливает цвета текущей обложки на полном экране и реагирует на бас."
-                }
-            }
-        }
-
-        // 2: Воспроизведение и интеграции
-        Page {
-            visible: root.page === 2
-
-            ContentSection {
-                title: "Воспроизведение"
-                symbol: "play_circle"
-
-                ConfigSelection {
-                    text: "Качество звука"
-                    currentIndex: Math.max(0, root.qualities.indexOf(backend.audioQuality))
-                    segments: [
-                        Segment { text: "Обычное" },
-                        Segment { text: "Высокое (HQ)" },
-                        Segment { text: "Lossless (FLAC)" }
-                    ]
-                    onActivated: (index) => backend.feature({action: "set_audio_quality", quality: root.qualities[index]})
-                }
-                ConfigSwitch {
-                    text: "Выравнивание громкости (EBU R128)"
-                    checked: backend.normalizeVolume
-                    onToggledTo: (checked) => backend.feature({action: "set_normalize_volume", enabled: checked})
-                }
-                ConfigSlider {
-                    text: "Скорость воспроизведения"
-                    from: 0.5
-                    to: 2.0
-                    stepSize: 0.05
-                    value: backend.tempo
-                    valueText: backend.tempo.toFixed(2) + "×"
-                    onMoved: (value) => {
-                        const rounded = Number(value.toFixed(2));
-                        backend.setTempo(rounded);
-                        appSettings.playbackSpeed = rounded;
-                    }
-                }
-                ConfigSelection {
-                    text: "Затухание таймера сна"
-                    currentIndex: Math.max(0, root.fades.indexOf(appSettings.sleepTimerFade))
-                    segments: [
-                        Segment { text: "Нет" },
-                        Segment { text: "10 сек" },
-                        Segment { text: "Весь таймер" }
-                    ]
-                    onActivated: (index) => appSettings.sleepTimerFade = root.fades[index]
-                }
-                ConfigSwitch {
-                    text: "Загружать обложки треков"
-                    checked: appSettings.coversEnabled
-                    onToggledTo: (checked) => appSettings.coversEnabled = checked
-                }
-            }
-
-            ContentSection {
-                title: "Анти-ИИ (Slopless)"
-                symbol: "smart_toy"
-
-                ConfigSelection {
-                    text: "Действие при ИИ-треке"
-                    currentIndex: Math.max(0, root.aiBehaviors.indexOf(backend.aiMusicBehavior))
-                    segments: [
-                        Segment { text: "Пропуск (кроме ♥)" },
-                        Segment { text: "Дизлайк (кроме ♥)" },
-                        Segment { text: "Всегда пропуск" },
-                        Segment { text: "Всегда дизлайк" },
-                        Segment { text: "Только метка" }
-                    ]
-                    onActivated: (index) => backend.feature({action: "set_ai_music_behavior", behavior: root.aiBehaviors[index]})
-                }
-                ConfigSwitch {
-                    text: "Показывать метку AI рядом с треком"
-                    checked: backend.showAiLabels
-                    onToggledTo: (checked) => backend.feature({action: "set_show_ai_labels", enabled: checked})
-                }
-                ConfigSwitch {
-                    text: "Строго по трекам (не блокировать живые треки артиста)"
-                    checked: backend.aiStrictTracks
-                    onToggledTo: (checked) => backend.feature({action: "set_ai_strict_tracks", enabled: checked})
-                }
-                NoteText {
-                    text: "Использует встроенную базу Slopless (141 000+ ИИ-исполнителей Яндекс Музыки) и онлайн-проверку slopless.art."
-                }
-            }
-
-            ContentSection {
-                title: "Интеграции"
-                symbol: "extension"
-
-                ConfigSwitch {
-                    text: "Discord Rich Presence"
-                    checked: appSettings.discordRpcEnabled
-                    onToggledTo: (checked) => appSettings.discordRpcEnabled = checked
-                }
-                NoteText {
-                    text: "Показывает текущий трек и обложку в вашем профиле Discord."
-                }
-            }
-        }
-
-        // 3: Оформление
-        Page {
-            visible: root.page === 3
 
             ContentSection {
                 title: "Цвета и тема"
@@ -437,14 +221,29 @@ Item {
                             ? ("Системная схема: " + Theme.systemSchemePath + " (обновляется автоматически)")
                             : (appSettings.matugenColorsPath.length > 0
                                 ? ("Файл схемы не найден по пути: " + appSettings.matugenColorsPath)
-                                : "Автоматически берет цвета рабочего стола или системный акцент."))
+                                : "Автоматически подбирает цвета по обоям или системному акценту."))
                 }
             }
 
             ContentSection {
-                title: "Масштаб и прокрутка"
-                symbol: "zoom_in"
+                title: "Интерфейс и обложки"
+                symbol: "image"
 
+                ConfigSwitch {
+                    text: "Загружать обложки треков и коллекций"
+                    checked: appSettings.coversEnabled
+                    onToggledTo: (checked) => appSettings.coversEnabled = checked
+                }
+                ConfigSwitch {
+                    text: "Минимализм (без декоративных фигур и стикеров)"
+                    checked: appSettings.noShapes
+                    onToggledTo: (checked) => appSettings.noShapes = checked
+                }
+                ConfigSwitch {
+                    text: "Сглаживание иконок"
+                    checked: appSettings.iconAntialiasing
+                    onToggledTo: (checked) => appSettings.iconAntialiasing = checked
+                }
                 ConfigSlider {
                     text: "Масштаб интерфейса"
                     from: 0.8
@@ -454,24 +253,30 @@ Item {
                     valueText: Math.round(appSettings.zoom * 100) + "%"
                     onMoved: (value) => appSettings.zoom = Number(value.toFixed(2))
                 }
-                ConfigSlider {
-                    text: "Сила прокрутки колесом"
-                    from: 0.5
-                    to: 6.0
-                    stepSize: 0.25
-                    value: appSettings.scrollSpeed
-                    valueText: appSettings.scrollSpeed.toFixed(2) + "×"
-                    onMoved: (value) => appSettings.scrollSpeed = Number(value.toFixed(2))
+
+                Flow {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+                    visible: Math.abs(appSettings.zoom - 1.0) > 0.01
+
+                    TextButton {
+                        variant: TextButton.Tonal
+                        symbol: "restart_alt"
+                        text: "Сбросить масштаб (100%)"
+                        onClicked: appSettings.zoom = 1.0
+                    }
                 }
             }
 
             ContentSection {
-                visible: Qt.platform.os !== "osx"
-                title: "Окно"
+                visible: Qt.platform.os !== "osx" || trayAvailable
+                title: "Окно и трей"
                 symbol: "web_asset"
 
                 ConfigSelection {
-                    text: "Управление окном"
+                    visible: Qt.platform.os !== "osx"
+                    text: "Рамка окна"
                     currentIndex: appSettings.nativeTitleBar ? 0 : 1
                     segments: [
                         Segment { text: "Системная панель" },
@@ -480,47 +285,319 @@ Item {
                     onActivated: (index) => appSettings.nativeTitleBar = index === 0
                 }
                 ConfigSwitch {
-                    visible: !appSettings.nativeTitleBar && Qt.platform.os !== "windows"
+                    visible: Qt.platform.os !== "osx" && Qt.platform.os !== "windows" && !appSettings.nativeTitleBar
                     text: "Кнопки свернуть / развернуть / закрыть"
                     checked: appSettings.showWindowControls
                     onToggledTo: (checked) => appSettings.showWindowControls = checked
                 }
                 ConfigSwitch {
+                    visible: Qt.platform.os !== "osx"
                     text: "Кнопки управления справа"
                     enabled: !appSettings.nativeTitleBar && (Qt.platform.os === "windows" || appSettings.showWindowControls)
                     checked: appSettings.windowControlsOnRight
                     onToggledTo: (checked) => appSettings.windowControlsOnRight = checked
                 }
+                ConfigSwitch {
+                    visible: trayAvailable
+                    text: "Сворачивать в трей при закрытии окна"
+                    checked: appSettings.minimizeToTray
+                    onToggledTo: (checked) => appSettings.minimizeToTray = checked
+                }
             }
         }
 
-        // 4: Анимации и производительность
+        // 1: Плеер и фон
         Page {
-            visible: root.page === 4
+            visible: root.page === 1
 
             ContentSection {
-                title: "Движение"
+                title: "Иммерсивный плеер"
+                symbol: "open_in_full"
+
+                ConfigSelection {
+                    text: "Боковая панель по умолчанию"
+                    currentIndex: Math.max(0, root.immersivePanels.indexOf(appSettings.immersivePlayerPanel))
+                    segments: [
+                        Segment { text: "Обложка" },
+                        Segment { text: "Текст" },
+                        Segment { text: "Очередь" }
+                    ]
+                    onActivated: (index) => appSettings.immersivePlayerPanel = root.immersivePanels[index]
+                }
+                ConfigSwitch {
+                    text: "Круглая обложка в полном экране"
+                    enabled: !appSettings.visualizersEnabled || !appSettings.immersiveVisualizer
+                    checked: appSettings.roundArtwork || (appSettings.visualizersEnabled && appSettings.immersiveVisualizer && appSettings.circularVisualizer)
+                    onToggledTo: (checked) => appSettings.roundArtwork = checked
+                }
+                ConfigSwitch {
+                    text: "Живой фон по обложке"
+                    checked: appSettings.livingBackdrop
+                    onToggledTo: (checked) => appSettings.livingBackdrop = checked
+                }
+                ConfigSlider {
+                    text: "Размытие фона"
+                    enabled: appSettings.livingBackdrop
+                    from: 0
+                    to: 60
+                    stepSize: 1
+                    value: appSettings.backdropBlur
+                    onMoved: (value) => appSettings.backdropBlur = Math.round(value)
+                }
+                ConfigSlider {
+                    text: "Реакция фона на бас"
+                    enabled: appSettings.livingBackdrop
+                    from: 0
+                    to: 3
+                    stepSize: 0.1
+                    value: appSettings.backdropReactivity
+                    valueText: Math.round(appSettings.backdropReactivity * 100) + "%"
+                    onMoved: (value) => appSettings.backdropReactivity = Number(value.toFixed(1))
+                }
+            }
+
+            ContentSection {
+                title: "Аудиовизуализация"
+                symbol: "graphic_eq"
+
+                ConfigSwitch {
+                    text: "Включить аудиовизуализацию"
+                    checked: appSettings.visualizersEnabled
+                    onToggledTo: (checked) => appSettings.visualizersEnabled = checked
+                }
+                ConfigSwitch {
+                    text: "Индикатор ритма в нижнем плеере и списке"
+                    enabled: appSettings.visualizersEnabled
+                    checked: appSettings.playerBarVisualizer
+                    onToggledTo: (checked) => appSettings.playerBarVisualizer = checked
+                }
+                ConfigSwitch {
+                    text: "Визуализатор на весь экран"
+                    enabled: appSettings.visualizersEnabled
+                    checked: appSettings.immersiveVisualizer
+                    onToggledTo: (checked) => appSettings.immersiveVisualizer = checked
+                }
+                ConfigSelection {
+                    text: "Стиль"
+                    enabled: appSettings.visualizersEnabled && appSettings.immersiveVisualizer
+                    currentIndex: appSettings.circularVisualizer ? 1 : 0
+                    segments: [
+                        Segment { text: "Полоса" },
+                        Segment { text: "Кольцо" }
+                    ]
+                    onActivated: (index) => appSettings.circularVisualizer = index === 1
+                }
+                ConfigSelection {
+                    text: "Симметрия полосы"
+                    enabled: appSettings.visualizersEnabled && appSettings.immersiveVisualizer && !appSettings.circularVisualizer
+                    currentIndex: appSettings.continuousVisualizer ? 1 : 0
+                    segments: [
+                        Segment { text: "Зеркало" },
+                        Segment { text: "Сплошной" }
+                    ]
+                    onActivated: (index) => appSettings.continuousVisualizer = index === 1
+                }
+                ConfigSelection {
+                    text: "Форма"
+                    enabled: appSettings.visualizersEnabled && appSettings.immersiveVisualizer
+                    currentIndex: appSettings.visualizerShape === "wave" ? 1 : 0
+                    segments: [
+                        Segment { text: "Столбцы" },
+                        Segment { text: "Волна" }
+                    ]
+                    onActivated: (index) => appSettings.visualizerShape = index === 1 ? "wave" : "bars"
+                }
+                ConfigSlider {
+                    text: "Чувствительность"
+                    enabled: appSettings.visualizersEnabled && (appSettings.playerBarVisualizer || appSettings.immersiveVisualizer)
+                    from: 0.6
+                    to: 1.8
+                    stepSize: 0.05
+                    value: appSettings.visualizerSensitivity
+                    valueText: Math.round(appSettings.visualizerSensitivity * 100) + "%"
+                    onMoved: (value) => appSettings.visualizerSensitivity = Number(value.toFixed(2))
+                }
+                NoteText {
+                    text: "Реагирует на спектр аудиопотока в реальном времени. Отключение снижает нагрузку на GPU."
+                }
+            }
+
+            ContentSection {
+                title: "Экран «Моя волна»"
+                symbol: "my_wave"
+
+                ConfigSwitch {
+                    text: "Кольцевой визуализатор"
+                    enabled: appSettings.visualizersEnabled
+                    checked: appSettings.waveVisualizer
+                    onToggledTo: (checked) => appSettings.waveVisualizer = checked
+                }
+                ConfigSelection {
+                    text: "Форма визуализатора"
+                    enabled: appSettings.visualizersEnabled && appSettings.waveVisualizer
+                    currentIndex: appSettings.waveVisualizerShape === "wave" ? 1 : 0
+                    segments: [
+                        Segment { text: "Столбцы" },
+                        Segment { text: "Волна" }
+                    ]
+                    onActivated: (index) => appSettings.waveVisualizerShape = index === 1 ? "wave" : "bars"
+                }
+                ConfigSlider {
+                    text: "Чувствительность"
+                    enabled: appSettings.visualizersEnabled && appSettings.waveVisualizer
+                    from: 0.6
+                    to: 1.8
+                    stepSize: 0.05
+                    value: appSettings.waveVisualizerSensitivity
+                    valueText: Math.round(appSettings.waveVisualizerSensitivity * 100) + "%"
+                    onMoved: (value) => appSettings.waveVisualizerSensitivity = Number(value.toFixed(2))
+                }
+                ConfigSwitch {
+                    text: "Обложка трека внутри сферы"
+                    checked: appSettings.waveOrbArtwork
+                    onToggledTo: (checked) => appSettings.waveOrbArtwork = checked
+                }
+                ConfigSwitch {
+                    text: "Волнистый контур сферы"
+                    enabled: !appSettings.noShapes
+                    checked: appSettings.waveOrbSquiggle
+                    onToggledTo: (checked) => appSettings.waveOrbSquiggle = checked
+                }
+                ConfigSlider {
+                    text: "Пульсация сферы от баса"
+                    enabled: appSettings.motionEnabled && !appSettings.performanceMode
+                    from: 0
+                    to: 3
+                    stepSize: 0.1
+                    value: appSettings.waveReactivity
+                    valueText: Math.round(appSettings.waveReactivity * 100) + "%"
+                    onMoved: (value) => appSettings.waveReactivity = Number(value.toFixed(1))
+                }
+            }
+        }
+
+        // 2: Звук и Анти-ИИ
+        Page {
+            visible: root.page === 2
+
+            ContentSection {
+                title: "Аудиопоток и воспроизведение"
+                symbol: "play_circle"
+
+                ConfigSelection {
+                    text: "Качество звука"
+                    currentIndex: Math.max(0, root.qualities.indexOf(backend.audioQuality))
+                    segments: [
+                        Segment { text: "Обычное" },
+                        Segment { text: "Высокое (HQ)" },
+                        Segment { text: "Lossless (FLAC)" }
+                    ]
+                    onActivated: (index) => backend.feature({action: "set_audio_quality", quality: root.qualities[index]})
+                }
+                ConfigSwitch {
+                    text: "Выравнивание громкости (EBU R128)"
+                    checked: backend.normalizeVolume
+                    onToggledTo: (checked) => backend.feature({action: "set_normalize_volume", enabled: checked})
+                }
+                ConfigSlider {
+                    text: "Скорость воспроизведения"
+                    from: 0.5
+                    to: 2.0
+                    stepSize: 0.05
+                    value: backend.tempo
+                    valueText: backend.tempo.toFixed(2) + "×"
+                    onMoved: (value) => {
+                        const rounded = Number(value.toFixed(2));
+                        backend.setTempo(rounded);
+                        appSettings.playbackSpeed = rounded;
+                    }
+                }
+
+                Flow {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+                    visible: Math.abs(backend.tempo - 1.0) > 0.01
+
+                    TextButton {
+                        variant: TextButton.Tonal
+                        symbol: "restart_alt"
+                        text: "Обычная скорость (1.00×)"
+                        onClicked: {
+                            backend.setTempo(1.0);
+                            appSettings.playbackSpeed = 1.0;
+                        }
+                    }
+                }
+
+                ConfigSelection {
+                    text: "Затухание таймера сна"
+                    currentIndex: Math.max(0, root.fades.indexOf(appSettings.sleepTimerFade))
+                    segments: [
+                        Segment { text: "Нет" },
+                        Segment { text: "10 сек" },
+                        Segment { text: "Весь таймер" }
+                    ]
+                    onActivated: (index) => appSettings.sleepTimerFade = root.fades[index]
+                }
+            }
+
+            ContentSection {
+                title: "Анти-ИИ (Slopless)"
+                symbol: "smart_toy"
+
+                ConfigSelection {
+                    text: "Действие при ИИ-треке"
+                    currentIndex: Math.max(0, root.aiBehaviors.indexOf(backend.aiMusicBehavior))
+                    segments: [
+                        Segment { text: "Пропуск (кроме ♥)" },
+                        Segment { text: "Дизлайк (кроме ♥)" },
+                        Segment { text: "Всегда пропуск" },
+                        Segment { text: "Всегда дизлайк" },
+                        Segment { text: "Только метка" }
+                    ]
+                    onActivated: (index) => backend.feature({action: "set_ai_music_behavior", behavior: root.aiBehaviors[index]})
+                }
+                ConfigSwitch {
+                    text: "Показывать метку AI рядом с треком"
+                    checked: backend.showAiLabels
+                    onToggledTo: (checked) => backend.feature({action: "set_show_ai_labels", enabled: checked})
+                }
+                ConfigSwitch {
+                    text: "Строго по трекам (не блокировать живые треки артиста)"
+                    checked: backend.aiStrictTracks
+                    onToggledTo: (checked) => backend.feature({action: "set_ai_strict_tracks", enabled: checked})
+                }
+                NoteText {
+                    text: "Использует встроенную базу Slopless (141 000+ ИИ-исполнителей Яндекс Музыки) и онлайн-проверку slopless.art."
+                }
+            }
+        }
+
+        // 3: Анимации и ввод
+        Page {
+            visible: root.page === 3
+
+            ContentSection {
+                title: "Анимации и отклик"
                 symbol: "animation"
 
-                ConfigSlider {
-                    text: "Сила прокрутки колесом"
-                    from: 0.5
-                    to: 6.0
-                    stepSize: 0.25
-                    value: appSettings.scrollSpeed
-                    valueText: appSettings.scrollSpeed.toFixed(2) + "×"
-                    onMoved: (value) => appSettings.scrollSpeed = Number(value.toFixed(2))
-                }
                 ConfigSwitch {
                     text: "Анимации интерфейса"
                     checked: appSettings.motionEnabled
                     onToggledTo: (checked) => appSettings.motionEnabled = checked
                 }
                 ConfigSwitch {
-                    text: "Ускоренная анимация перехода в иммерсивный плеер"
+                    text: "Ускоренный переход в иммерсивный плеер"
                     enabled: appSettings.motionEnabled && !appSettings.performanceMode
                     checked: appSettings.fastImmersiveTransition
                     onToggledTo: (checked) => appSettings.fastImmersiveTransition = checked
+                }
+                ConfigSwitch {
+                    text: "Эффекты частиц при лайках и запуске"
+                    enabled: !appSettings.performanceMode
+                    checked: appSettings.burstsEnabled
+                    onToggledTo: (checked) => appSettings.burstsEnabled = checked
                 }
                 ConfigSwitch {
                     text: "Уменьшить фоновое движение"
@@ -534,26 +611,41 @@ Item {
                     onToggledTo: (checked) => appSettings.performanceMode = checked
                 }
                 NoteText {
-                    text: "Отключение фонового движения оставляет плавные переходы при нажатиях. Режим производительности отключает все анимации."
+                    text: "Уменьшение фонового движения сохраняет плавные отклики при нажатиях. Режим производительности отключает все анимации."
                 }
             }
 
             ContentSection {
-                title: "Фигуры и графика"
-                symbol: "category"
+                title: "Прокрутка и управление"
+                symbol: "mouse"
 
-                ConfigSwitch {
-                    text: "Минимализм (без органических фигур)"
-                    checked: appSettings.noShapes
-                    onToggledTo: (checked) => appSettings.noShapes = checked
-                }
-                ConfigSwitch {
-                    text: "Сглаживание иконок"
-                    checked: appSettings.iconAntialiasing
-                    onToggledTo: (checked) => appSettings.iconAntialiasing = checked
+                ConfigSlider {
+                    text: "Скорость прокрутки колесом"
+                    from: 0.5
+                    to: 6.0
+                    stepSize: 0.25
+                    value: appSettings.scrollSpeed
+                    valueText: appSettings.scrollSpeed.toFixed(2) + "×"
+                    onMoved: (value) => appSettings.scrollSpeed = Number(value.toFixed(2))
                 }
                 ConfigSelection {
-                    text: "Графический движок (перезапуск)"
+                    text: "Шаг громкости колесом и клавишами"
+                    currentIndex: root.nearestVolumeStepIndex()
+                    segments: [
+                        Segment { text: "2%" },
+                        Segment { text: "5%" },
+                        Segment { text: "10%" }
+                    ]
+                    onActivated: (index) => appSettings.volumeStep = root.volumeSteps[index]
+                }
+            }
+
+            ContentSection {
+                title: "Графический движок"
+                symbol: "memory"
+
+                ConfigSelection {
+                    text: "Рендерер (после перезапуска)"
                     currentIndex: Math.max(0, root.backends.indexOf(appSettings.graphicsBackend))
                     segments: [
                         Segment { text: "Авто" },
@@ -565,7 +657,48 @@ Item {
             }
         }
 
-        // 5: Аккаунт и файлы
+        // 4: Интеграции и горячие клавиши
+        Page {
+            visible: root.page === 4
+
+            ContentSection {
+                title: "Внешние интеграции"
+                symbol: "extension"
+
+                StatusRow {
+                    label: "Статус Discord RPC"
+                    value: appSettings.discordRpcEnabled
+                        ? (backend.discordStatus.length > 0 ? backend.discordStatus : "Ожидание трека")
+                        : "Отключено"
+                    good: !appSettings.discordRpcEnabled || backend.discordConnected
+                }
+                ConfigSwitch {
+                    text: "Discord Rich Presence"
+                    checked: appSettings.discordRpcEnabled
+                    onToggledTo: (checked) => appSettings.discordRpcEnabled = checked
+                }
+                NoteText {
+                    text: "Транслирует текущий трек, исполнителя и обложку в ваш статус Discord."
+                }
+            }
+
+            ContentSection {
+                title: "Горячие клавиши"
+                symbol: "keyboard"
+
+                KeyRow { label: "Пауза / Воспроизведение"; shortcut: "Пробел" }
+                KeyRow { label: "Следующий / Предыдущий трек"; shortcut: "Ctrl + → / ←" }
+                KeyRow { label: "Перемотка ±10 секунд"; shortcut: "Ctrl + Alt + → / ←" }
+                KeyRow { label: "Громкость"; shortcut: "Ctrl + ↑ / ↓" }
+                KeyRow { label: "Без звука"; shortcut: "Ctrl + Alt + M" }
+                KeyRow { label: "Перемешать / Повтор"; shortcut: "Ctrl + Alt + S / R" }
+                KeyRow { label: "Поиск музыки"; shortcut: "Ctrl + K" }
+                KeyRow { label: "Масштаб интерфейса"; shortcut: "Ctrl + + / - / 0" }
+                KeyRow { label: "Настройки"; shortcut: "Ctrl + ," }
+            }
+        }
+
+        // 5: Система и аккаунт
         Page {
             visible: root.page === 5
 
@@ -623,8 +756,14 @@ Item {
             }
 
             ContentSection {
-                title: "Локальные загрузки"
+                title: "Файлы и кэш"
                 symbol: "folder_open"
+
+                StatusRow {
+                    label: "Кэш обложек и изображений"
+                    value: root.cacheSizeLabel
+                    good: true
+                }
 
                 Flow {
                     x: 8
@@ -635,10 +774,23 @@ Item {
                     TextButton {
                         variant: TextButton.Tonal
                         symbol: "folder_open"
-                        text: "Открыть папку загрузок"
+                        text: "Папка загрузок"
                         onClicked: {
                             if (!appSettings.openOfflineFolder()) {
                                 UiState.showToast("Не удалось открыть папку загрузок.");
+                            }
+                        }
+                    }
+                    TextButton {
+                        variant: TextButton.Outlined
+                        symbol: "cleaning_services"
+                        text: "Очистить кэш"
+                        onClicked: {
+                            if (appSettings.clearCoverCache()) {
+                                root.cacheSizeLabel = appSettings.cacheSizeText();
+                                UiState.showToast("Кэш обложек очищен");
+                            } else {
+                                UiState.showToast("Не все файлы кэша удалось удалить");
                             }
                         }
                     }
@@ -700,13 +852,61 @@ Item {
             }
 
             ContentSection {
-                title: "Отладка"
+                title: "Обслуживание и отладка"
                 symbol: "bug_report"
 
                 ConfigSwitch {
                     text: "Отладочный циферблат (секунды в таймере сна)"
                     checked: appSettings.debuggingEnabled
                     onToggledTo: (checked) => appSettings.debuggingEnabled = checked
+                }
+
+                Flow {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+                    topPadding: 4
+
+                    TextButton {
+                        variant: TextButton.Tonal
+                        symbol: "description"
+                        text: "Папка логов"
+                        onClicked: {
+                            if (!appSettings.openLogsFolder()) {
+                                UiState.showToast("Не удалось открыть папку логов.");
+                            }
+                        }
+                    }
+                    TextButton {
+                        variant: TextButton.Outlined
+                        symbol: "restart_alt"
+                        text: "Сбросить настройки интерфейса"
+                        onClicked: resetUiDialog.open()
+                    }
+                }
+
+                StyledDialog {
+                    id: resetUiDialog
+                    headline: "Сбросить настройки интерфейса?"
+                    symbol: "restart_alt"
+                    iconShape: "clover4"
+                    body: "Все настройки оформления, визуализаторов, анимаций и окна вернутся к значениям по умолчанию. Аккаунт и загрузки не пострадают."
+                    buttons: [
+                        TextButton {
+                            text: "Отмена"
+                            variant: TextButton.Text
+                            onClicked: resetUiDialog.close()
+                        },
+                        TextButton {
+                            text: "Сбросить"
+                            variant: TextButton.Filled
+                            onClicked: {
+                                appSettings.resetUiSettings();
+                                resetUiDialog.accept();
+                                UiState.showToast("Настройки интерфейса сброшены");
+                            }
+                        }
+                    ]
                 }
             }
         }

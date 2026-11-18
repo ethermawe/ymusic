@@ -28,16 +28,16 @@ T.Popup {
 
     property int page: 0
     readonly property list<string> titles: [
-        "Визуализация", "Фон", "Воспроизведение",
-        "Оформление", "Анимации", "Аккаунт и файлы"
+        "Оформление", "Плеер и фон", "Звук",
+        "Анимации", "Интеграции", "Система"
     ]
     readonly property list<string> symbols: [
-        "graphic_eq", "wallpaper", "play_circle",
-        "palette", "speed", "account_circle"
+        "palette", "wallpaper", "play_circle",
+        "animation", "extension", "tune"
     ]
     readonly property list<string> shapes: [
-        "sunny", "flower", "cookie9",
-        "clover4", "gem", "cookie12"
+        "clover4", "flower", "cookie9",
+        "gem", "sunny", "cookie12"
     ]
 
     parent: T.Overlay.overlay
@@ -200,15 +200,15 @@ T.Popup {
 
                     onPageChanged: {
                         scroller.contentY = 0;
-                        if (!Appearance.performanceMode) {
+                        if (!Appearance.performanceMode && !Appearance.reduceMotion) {
                             arrive.restart();
                         }
                     }
 
                     ParallelAnimation {
                         id: arrive
-                        NumberAnimation { target: pages; property: "opacity"; from: 0; to: 1; duration: 220; easing.type: Easing.OutCubic }
-                        NumberAnimation { target: pages; property: "y"; from: 16; to: 0; duration: Appearance.motion(380); easing.type: Easing.BezierSpline; easing.bezierCurve: Appearance.curves.emphasizedDecel }
+                        NumberAnimation { target: pages; property: "opacity"; from: 0.4; to: 1; duration: Appearance.duration(180); easing.type: Easing.OutCubic }
+                        NumberAnimation { target: pages; property: "y"; from: 12; to: 0; duration: Appearance.motion(260); easing.type: Easing.BezierSpline; easing.bezierCurve: Appearance.curves.expressiveFastSpatial }
                     }
                 }
 

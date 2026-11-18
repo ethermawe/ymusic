@@ -29,6 +29,7 @@
 #include <QtQml/qqmlregistration.h>
 
 class AppSettings;
+class QAbstractNativeEventFilter;
 class QQmlEngine;
 class QJSEngine;
 
@@ -64,6 +65,7 @@ public:
     QString monoFontFamily() const;
 
     static MaterialScheme::Roles rolesFromSeed(QColor seed, bool dark, bool fidelity);
+    static std::optional<QColor> wallpaperSeedFromBytes(const QByteArray &encoded);
 
     Q_INVOKABLE QList<ymusic::ThemeOption> themeOptions(bool dark) const;
     Q_INVOKABLE void refreshSystemScheme();
@@ -73,6 +75,9 @@ public:
 
 signals:
     void schemeChanged();
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void reload();
@@ -89,6 +94,9 @@ private:
     std::optional<MaterialScheme::Roles> m_systemRoles;
     QStringList m_schemeDirectories;
     QStringList m_schemeFiles;
+#ifdef Q_OS_WIN
+    QAbstractNativeEventFilter *m_nativeFilter = nullptr;
+#endif
 };
 
 } // namespace ymusic
