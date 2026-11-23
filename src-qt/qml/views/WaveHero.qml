@@ -193,31 +193,58 @@ FocusScope {
 
     Image {
         id: waveBackdropSource
-        width: 64
-        height: 64
+        width: 32
+        height: 32
         source: appSettings.coversEnabled && root.inWave && backend.hasCover ? backend.nowCover : ""
-        sourceSize: Qt.size(64, 64)
+        sourceSize: Qt.size(32, 32)
         smooth: true
         asynchronous: true
     }
 
     ShaderEffectSource {
         id: waveBackdropTex
+        width: 32
+        height: 32
         sourceItem: waveBackdropSource
         hideSource: true
         visible: false
+        smooth: true
         live: true
     }
 
-    // Experimental ambient cover wash matching HomeView spotlight card
+    // Horizontal blur pass so artwork_backdrop's vertical blur does not leave vertical stripes
+    ShaderEffect {
+        id: waveBackdropHoriz
+        width: 32
+        height: 32
+        visible: !root.auroraActive && waveBackdropSource.status === Image.Ready
+        property variant source: waveBackdropTex
+        property vector2d texelStep: Qt.vector2d(1.0 / 32.0, 0.0)
+        property real sigma: 4.5
+        fragmentShader: "qrc:/shaders/backdrop_blur.frag.qsb"
+    }
+
+    ShaderEffectSource {
+        id: waveBackdropHorizTex
+        width: 32
+        height: 32
+        sourceItem: waveBackdropHoriz
+        hideSource: true
+        visible: false
+        smooth: true
+        textureSize: Qt.size(32, 32)
+        live: true
+    }
+
+    // Ambient cover wash matching HomeView spotlight card
     ShaderEffect {
         anchors.fill: parent
-        property variant source: waveBackdropTex
+        property variant source: waveBackdropHorizTex
         property size itemSize: Qt.size(width, height)
         property real radius: Appearance.rounding.large
         fragmentShader: "qrc:/shaders/artwork_backdrop.frag.qsb"
         visible: !root.auroraActive && waveBackdropSource.status === Image.Ready
-        opacity: 0.25
+        opacity: 0.24
     }
 
     // 3D silk-plasma sphere + acoustic wave fronts spanning behind the split stage
