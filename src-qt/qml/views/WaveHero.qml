@@ -193,22 +193,31 @@ FocusScope {
 
     Image {
         id: waveBackdropSource
-        visible: false
+        width: 64
+        height: 64
         source: appSettings.coversEnabled && root.inWave && backend.hasCover ? backend.nowCover : ""
         sourceSize: Qt.size(64, 64)
         smooth: true
         asynchronous: true
     }
 
+    ShaderEffectSource {
+        id: waveBackdropTex
+        sourceItem: waveBackdropSource
+        hideSource: true
+        visible: false
+        live: true
+    }
+
     // Experimental ambient cover wash matching HomeView spotlight card
     ShaderEffect {
         anchors.fill: parent
-        property variant source: waveBackdropSource
+        property variant source: waveBackdropTex
         property size itemSize: Qt.size(width, height)
         property real radius: Appearance.rounding.large
         fragmentShader: "qrc:/shaders/artwork_backdrop.frag.qsb"
         visible: !root.auroraActive && waveBackdropSource.status === Image.Ready
-        opacity: 0.14
+        opacity: 0.25
     }
 
     // 3D silk-plasma sphere + acoustic wave fronts spanning behind the split stage
@@ -243,16 +252,6 @@ FocusScope {
             enabled: !Appearance.reduceMotion
             NumberAnimation { duration: 280; easing.type: Easing.InOutQuad }
         }
-    }
-
-    Stickers {
-        anchors.fill: parent
-        key: "wave-hero"
-        count: 6
-        minimumSize: Math.max(110, Math.round(Math.min(root.width, root.height) * 0.14))
-        maximumSize: Math.max(220, Math.round(Math.min(root.width, root.height) * 0.30))
-        strength: 0.75
-        clipRadius: Appearance.rounding.large
     }
 
     component Chip: Button {
@@ -722,24 +721,67 @@ FocusScope {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
 
+            // Expressive M3 shapes framing the open right stage (kept cleanly in-bounds)
+            Item {
+                id: waveM3Backdrop
+                anchors.fill: parent
+                visible: !appSettings.noShapes
+
+                readonly property var shapeSpecs: [
+                    { nx: 0.12, ny: 0.16, sizeRatio: 0.19, shape: "clover4",    tone: 0, alpha: 0.22, angle: 18,  pace: 14 },
+                    { nx: 0.86, ny: 0.17, sizeRatio: 0.22, shape: "sunny",      tone: 1, alpha: 0.20, angle: 42,  pace: -16 },
+                    { nx: 0.90, ny: 0.56, sizeRatio: 0.16, shape: "cookie9",    tone: 2, alpha: 0.22, angle: 110, pace: 18 },
+                    { nx: 0.10, ny: 0.78, sizeRatio: 0.21, shape: "softBurst",  tone: 1, alpha: 0.20, angle: 205, pace: -13 },
+                    { nx: 0.82, ny: 0.86, sizeRatio: 0.24, shape: "flower",     tone: 0, alpha: 0.22, angle: 280, pace: 12 },
+                    { nx: 0.24, ny: 0.44, sizeRatio: 0.13, shape: "gem",        tone: 2, alpha: 0.18, angle: 65,  pace: 21 },
+                    { nx: 0.74, ny: 0.36, sizeRatio: 0.14, shape: "puffy",      tone: 0, alpha: 0.18, angle: 150, pace: -19 }
+                ]
+
+                function shapeTint(toneIdx: int, alphaVal: real): color {
+                    const c = toneIdx === 0
+                        ? root.accentPrimary
+                        : (toneIdx === 1 ? root.accentSecondary : Appearance.colors.tertiary);
+                    return Qt.alpha(c, alphaVal);
+                }
+
+                Repeater {
+                    model: appSettings.noShapes ? 0 : waveM3Backdrop.shapeSpecs.length
+
+                    MaterialShape {
+                        required property int index
+                        readonly property var spec: waveM3Backdrop.shapeSpecs[index]
+                        readonly property real baseDim: Math.min(rightStage.width, rightStage.height)
+
+                        width: Math.max(76, Math.round(baseDim * spec.sizeRatio))
+                        height: width
+                        x: spec.nx * rightStage.width - width * 0.5
+                        y: spec.ny * rightStage.height - height * 0.5
+                        shape: spec.shape
+                        color: waveM3Backdrop.shapeTint(spec.tone, spec.alpha)
+                        spinAngle: spec.angle
+                        spinRate: Appearance.reduceMotion ? 0 : spec.pace
+                    }
+                }
+            }
+
             // Outer ambient halo decoupled from orb scale: blooms lazily from vocal/lead bands
             ArtworkGlow {
                 id: outerWaveGlow
                 visible: !root.auroraActive
                 x: orbColumn.x + coreStage.x + (coreStage.width - width) * 0.5
                 y: orbColumn.y + coreStage.y + (coreStage.height - height) * 0.5
-                width: root.stageOrbDiameter * 1.18
+                width: root.stageOrbDiameter * 1.24
                 height: width
-                intensity: root.wavePlaying ? (0.42 + root.smoothOuterEnergy * 0.18) : 0.28
+                intensity: root.wavePlaying ? (0.34 + root.smoothOuterEnergy * 0.28) : 0.24
                 glowRadius: 96
                 cornerRadius: width / 2
                 circular: true
-                primary: root.accentPrimary
-                secondary: root.accentSecondary
+                primary: root.accentSecondary
+                secondary: Appearance.colors.tertiary
                 scale: root.wavePlaying && !Appearance.reduceMotion && !Appearance.performanceMode
-                    ? 1.0 + root.smoothOuterEnergy * 0.095 + 0.018 * Math.sin(clock.time * 1.1) : 1.0
+                    ? 1.0 + root.smoothOuterEnergy * 0.16 + 0.03 * Math.sin(clock.time * 1.2) : 1.0
                 rotation: root.wavePlaying && !Appearance.reduceMotion && !Appearance.performanceMode
-                    ? (clock.time * 6) % 360 : 0
+                    ? (clock.time * 8) % 360 : 0
             }
 
             // Mid halo: reacts smoothly to upper-bass / vocal with gentle counter-rotation
@@ -748,18 +790,18 @@ FocusScope {
                 visible: !root.auroraActive
                 x: orbColumn.x + coreStage.x + (coreStage.width - width) * 0.5
                 y: orbColumn.y + coreStage.y + (coreStage.height - height) * 0.5
-                width: root.innerOrbSize * 1.06
+                width: root.innerOrbSize * 1.08
                 height: width
-                intensity: root.wavePlaying ? (0.60 + root.smoothMidEnergy * 0.20) : 0.40
+                intensity: root.wavePlaying ? (0.56 + root.smoothMidEnergy * 0.24) : 0.38
                 glowRadius: 54
                 cornerRadius: width / 2
                 circular: true
                 primary: root.accentPrimary
                 secondary: root.accentSecondary
                 scale: root.wavePlaying && !Appearance.reduceMotion && !Appearance.performanceMode
-                    ? 1.0 + root.smoothMidEnergy * 0.06 : 1.0
+                    ? 1.0 + root.smoothMidEnergy * 0.08 : 1.0
                 rotation: root.wavePlaying && !Appearance.reduceMotion && !Appearance.performanceMode
-                    ? (clock.time * -9) % 360 : 0
+                    ? (clock.time * -12) % 360 : 0
             }
 
             Column {
