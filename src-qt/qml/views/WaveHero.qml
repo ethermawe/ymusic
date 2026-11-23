@@ -66,7 +66,23 @@ FocusScope {
     property real auroraIdleTime: 0
     readonly property real innerOrbSize: showsRing ? stageOrbDiameter * ring.innerRadiusRatio : stageOrbDiameter * 0.76
     readonly property real beatEnergy: root.wavePlaying && !Appearance.reduceMotion && !Appearance.performanceMode
-        ? Math.min(1.5, clock.energy.x * 0.45 + clock.energy.y * 0.55) : 0
+        ? Math.min(1.5, clock.energy.x * 0.65 + clock.energy.y * 0.35) : 0
+    property real smoothMidEnergy: 0
+    property real smoothOuterEnergy: 0
+    Behavior on smoothMidEnergy {
+        enabled: !root.wavePlaying && !Appearance.performanceMode
+        NumberAnimation { duration: 260; easing.type: Easing.OutQuad }
+    }
+    Behavior on smoothOuterEnergy {
+        enabled: !root.wavePlaying && !Appearance.performanceMode
+        NumberAnimation { duration: 420; easing.type: Easing.OutQuad }
+    }
+    onWavePlayingChanged: {
+        if (!wavePlaying) {
+            smoothMidEnergy = 0;
+            smoothOuterEnergy = 0;
+        }
+    }
     readonly property real orbBeatScale: 1.0 + root.beatEnergy * 0.048
     property real orbVisualScale: coreMouse.pressed ? 0.93 : (coreHover.hovered ? 1.05 : 1.0)
     Behavior on orbVisualScale { enabled: !Appearance.performanceMode; Bounce {} }
@@ -153,6 +169,13 @@ FocusScope {
         running: root.wavePlaying && root.visible && !Appearance.reduceMotion && !Appearance.performanceMode
         playing: root.wavePlaying
         reactivity: appSettings.waveReactivity
+        onFrame: {
+            if (!root.wavePlaying || Appearance.reduceMotion || Appearance.performanceMode) return;
+            const targetMid = Math.min(1.5, clock.energy.z * 0.45 + clock.energy.w * 0.55);
+            const targetOuter = Math.min(1.5, clock.lead * 0.55 + clock.energy.w * 0.45);
+            root.smoothMidEnergy += (targetMid - root.smoothMidEnergy) * 0.22;
+            root.smoothOuterEnergy += (targetOuter - root.smoothOuterEnergy) * 0.09;
+        }
     }
 
     FrameAnimation {
@@ -188,16 +211,6 @@ FocusScope {
         opacity: 0.14
     }
 
-    Stickers {
-        anchors.fill: parent
-        key: "wave-hero"
-        count: 6
-        minimumSize: 80
-        maximumSize: 220
-        strength: 0.72
-        clipRadius: Appearance.rounding.large
-    }
-
     // 3D silk-plasma sphere + acoustic wave fronts spanning behind the split stage
     ShaderEffect {
         id: waveAurora
@@ -230,6 +243,16 @@ FocusScope {
             enabled: !Appearance.reduceMotion
             NumberAnimation { duration: 280; easing.type: Easing.InOutQuad }
         }
+    }
+
+    Stickers {
+        anchors.fill: parent
+        key: "wave-hero"
+        count: 6
+        minimumSize: Math.max(110, Math.round(Math.min(root.width, root.height) * 0.14))
+        maximumSize: Math.max(220, Math.round(Math.min(root.width, root.height) * 0.30))
+        strength: 0.75
+        clipRadius: Appearance.rounding.large
     }
 
     component Chip: Button {
@@ -699,6 +722,46 @@ FocusScope {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
 
+            // Outer ambient halo decoupled from orb scale: blooms lazily from vocal/lead bands
+            ArtworkGlow {
+                id: outerWaveGlow
+                visible: !root.auroraActive
+                x: orbColumn.x + coreStage.x + (coreStage.width - width) * 0.5
+                y: orbColumn.y + coreStage.y + (coreStage.height - height) * 0.5
+                width: root.stageOrbDiameter * 1.18
+                height: width
+                intensity: root.wavePlaying ? (0.42 + root.smoothOuterEnergy * 0.18) : 0.28
+                glowRadius: 96
+                cornerRadius: width / 2
+                circular: true
+                primary: root.accentPrimary
+                secondary: root.accentSecondary
+                scale: root.wavePlaying && !Appearance.reduceMotion && !Appearance.performanceMode
+                    ? 1.0 + root.smoothOuterEnergy * 0.095 + 0.018 * Math.sin(clock.time * 1.1) : 1.0
+                rotation: root.wavePlaying && !Appearance.reduceMotion && !Appearance.performanceMode
+                    ? (clock.time * 6) % 360 : 0
+            }
+
+            // Mid halo: reacts smoothly to upper-bass / vocal with gentle counter-rotation
+            ArtworkGlow {
+                id: innerWaveGlow
+                visible: !root.auroraActive
+                x: orbColumn.x + coreStage.x + (coreStage.width - width) * 0.5
+                y: orbColumn.y + coreStage.y + (coreStage.height - height) * 0.5
+                width: root.innerOrbSize * 1.06
+                height: width
+                intensity: root.wavePlaying ? (0.60 + root.smoothMidEnergy * 0.20) : 0.40
+                glowRadius: 54
+                cornerRadius: width / 2
+                circular: true
+                primary: root.accentPrimary
+                secondary: root.accentSecondary
+                scale: root.wavePlaying && !Appearance.reduceMotion && !Appearance.performanceMode
+                    ? 1.0 + root.smoothMidEnergy * 0.06 : 1.0
+                rotation: root.wavePlaying && !Appearance.reduceMotion && !Appearance.performanceMode
+                    ? (clock.time * -9) % 360 : 0
+            }
+
             Column {
                 id: orbColumn
                 anchors.centerIn: parent
@@ -737,33 +800,6 @@ FocusScope {
                         duration: 640
                         easing.type: Easing.OutBack
                         easing.overshoot: 2
-                    }
-
-                    // Wide ambient aura so the right stage feels full and atmospheric (fallback when Aurora is off)
-                    ArtworkGlow {
-                        visible: !root.auroraActive
-                        anchors.centerIn: parent
-                        width: root.stageOrbDiameter * 1.18
-                        height: width
-                        intensity: root.wavePlaying ? (0.44 + root.beatEnergy * 0.16) : 0.28
-                        glowRadius: 96
-                        cornerRadius: width / 2
-                        circular: true
-                        primary: root.accentPrimary
-                        secondary: root.accentSecondary
-                    }
-
-                    ArtworkGlow {
-                        visible: !root.auroraActive
-                        anchors.centerIn: parent
-                        width: root.innerOrbSize * 1.04
-                        height: width
-                        intensity: root.wavePlaying ? (0.64 + root.beatEnergy * 0.18) : 0.40
-                        glowRadius: 54
-                        cornerRadius: width / 2
-                        circular: true
-                        primary: root.accentPrimary
-                        secondary: root.accentSecondary
                     }
 
                     SpectrumView {
