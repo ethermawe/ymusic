@@ -619,8 +619,6 @@ ApplicationWindow {
                                 ListView {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 268
-                                    topMargin: 8
-                                    bottomMargin: 8
                                     leftMargin: 12
                                     rightMargin: 12
                                     orientation: ListView.Horizontal
@@ -628,12 +626,19 @@ ApplicationWindow {
                                     clip: true
                                     reuseItems: true
                                     model: trackListView.shown && backend.isArtistView ? backend.cards : null
-                                    delegate: CardItem {
+                                    delegate: Item {
+                                        id: artistAlbumSlot
                                         required property int index
                                         required property var model
-                                        cardIndex: index
-                                        cardData: model
                                         width: 174
+                                        height: artistAlbumCard.implicitHeight + 16
+                                        CardItem {
+                                            id: artistAlbumCard
+                                            y: 8
+                                            cardIndex: artistAlbumSlot.index
+                                            cardData: artistAlbumSlot.model
+                                            width: 174
+                                        }
                                     }
                                 }
                             }

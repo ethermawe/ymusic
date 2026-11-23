@@ -390,8 +390,6 @@ Flickable {
                 ListView {
                     anchors.fill: parent
                     anchors.margins: -8
-                    topMargin: 8
-                    bottomMargin: 8
                     leftMargin: 8
                     rightMargin: 8
                     orientation: ListView.Horizontal
@@ -399,69 +397,76 @@ Flickable {
                     clip: true
                     model: backend.history
 
-                delegate: Rectangle {
-                    id: historyTile
+                delegate: Item {
+                    id: historySlot
                     required property var model
                     width: 246
-                    height: 88
-                    radius: Appearance.rounding.normal
-                    color: tileHover.hovered ? Appearance.colors.surfaceContainerHigh : Appearance.colors.surfaceContainerLow
-                    border.width: 1
-                    border.color: Appearance.colors.outlineVariant
-                    scale: tileTap.pressed ? 0.96 : (tileHover.hovered ? 1.02 : 1)
+                    height: 104
 
-                    Behavior on color { ElementMoveFastColor {} }
-                    Behavior on scale {
-                        enabled: !Appearance.performanceMode
-                        Bounce {}
-                    }
+                    Rectangle {
+                        id: historyTile
+                        y: 8
+                        width: 246
+                        height: 88
+                        radius: Appearance.rounding.normal
+                        color: tileHover.hovered ? Appearance.colors.surfaceContainerHigh : Appearance.colors.surfaceContainerLow
+                        border.width: 1
+                        border.color: Appearance.colors.outlineVariant
+                        scale: tileTap.pressed ? 0.96 : (tileHover.hovered ? 1.02 : 1)
 
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 12
+                        Behavior on color { ElementMoveFastColor {} }
+                        Behavior on scale {
+                            enabled: !Appearance.performanceMode
+                            Bounce {}
+                        }
 
-                        ArtworkImage {
-                            Layout.preferredWidth: 64
-                            Layout.preferredHeight: 64
-                            radius: Appearance.rounding.small
-                            source: historyTile.model.coverUrl
-                            placeholderSymbol: "music_note"
-                            fallbackKey: historyTile.model.title
-                            scale: tileHover.hovered ? 1.06 : 1
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            spacing: 12
 
-                            Behavior on scale {
-                                enabled: !Appearance.performanceMode
-                                Bounce {}
+                            ArtworkImage {
+                                Layout.preferredWidth: 64
+                                Layout.preferredHeight: 64
+                                radius: Appearance.rounding.small
+                                source: historySlot.model.coverUrl
+                                placeholderSymbol: "music_note"
+                                fallbackKey: historySlot.model.title
+                                scale: tileHover.hovered ? 1.06 : 1
+
+                                Behavior on scale {
+                                    enabled: !Appearance.performanceMode
+                                    Bounce {}
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                StyledText {
+                                    Layout.fillWidth: true
+                                    text: historySlot.model.title
+                                    elide: Text.ElideRight
+                                    font.weight: Font.DemiBold
+                                }
+                                StyledText {
+                                    Layout.fillWidth: true
+                                    text: historySlot.model.artists
+                                    elide: Text.ElideRight
+                                    font.pixelSize: Appearance.fontSize.smaller
+                                    color: Appearance.colors.onSurfaceVariant
+                                }
                             }
                         }
 
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 2
-                            StyledText {
-                                Layout.fillWidth: true
-                                text: historyTile.model.title
-                                elide: Text.ElideRight
-                                font.weight: Font.DemiBold
-                            }
-                            StyledText {
-                                Layout.fillWidth: true
-                                text: historyTile.model.artists
-                                elide: Text.ElideRight
-                                font.pixelSize: Appearance.fontSize.smaller
-                                color: Appearance.colors.onSurfaceVariant
-                            }
+                        HoverHandler {
+                            id: tileHover
+                            cursorShape: Qt.PointingHandCursor
                         }
-                    }
-
-                    HoverHandler {
-                        id: tileHover
-                        cursorShape: Qt.PointingHandCursor
-                    }
-                    TapHandler {
-                        id: tileTap
-                        onTapped: backend.feature({action: "play_history", id: historyTile.model.id})
+                        TapHandler {
+                            id: tileTap
+                            onTapped: backend.feature({action: "play_history", id: historySlot.model.id})
+                        }
                     }
                 }
             }
