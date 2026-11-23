@@ -101,10 +101,7 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    list.manualBrowsing = false
-                    list.follow(true)
-                }
+                onClicked: list.resumeFollowing()
             }
         }
     }
@@ -157,6 +154,61 @@ Item {
         property bool manualBrowsing: false
         property bool scrolledAway: false
 
+        HoverHandler {
+            id: pointerActivity
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            property real lastX: -1
+            property real lastY: -1
+            onHoveredChanged: {
+                if (hovered && list.manualBrowsing) {
+                    lastX = point.position.x
+                    lastY = point.position.y
+                    list.scheduleAutoReturn()
+                }
+            }
+            onPointChanged: {
+                if (!hovered || !list.manualBrowsing) {
+                    return
+                }
+                const dx = point.position.x - lastX
+                const dy = point.position.y - lastY
+                if (dx * dx + dy * dy >= 4) {
+                    lastX = point.position.x
+                    lastY = point.position.y
+                    list.scheduleAutoReturn()
+                }
+            }
+        }
+
+        Timer {
+            id: autoReturnTimer
+            interval: 5000
+            repeat: false
+            onTriggered: {
+                if (!list.manualBrowsing || root.suspended || !root.visible || !UiState.lyricsSynced || !root.hasLyrics) {
+                    return
+                }
+                if (list.dragging || list.moving || vbar.pressed || lyricsWheel.activeFlick === list
+                        || pointerActivity.point.pressedButtons !== Qt.NoButton) {
+                    autoReturnTimer.restart()
+                    return
+                }
+                list.resumeFollowing()
+            }
+        }
+
+        function scheduleAutoReturn() {
+            if (manualBrowsing && !root.suspended && root.visible && UiState.lyricsSynced && root.hasLyrics && !dragging && !vbar.pressed) {
+                autoReturnTimer.restart()
+            }
+        }
+
+        function resumeFollowing() {
+            autoReturnTimer.stop()
+            manualBrowsing = false
+            follow(true)
+        }
+
         function updateScrolledAway() {
             const index = UiState.activeLyricIndex
             if (!UiState.lyricsSynced || index < 0) {
@@ -179,25 +231,43 @@ Item {
             if (dragging) {
                 scroll.stop()
                 manualBrowsing = true
+                autoReturnTimer.stop()
+            } else {
+                scheduleAutoReturn()
             }
         }
 
         onContentYChanged: {
-            if (!autoScrolling && !scroll.running && (moving || dragging || lyricsWheel.activeFlick === list)) {
+            if (!autoScrolling && !scroll.running && (moving || dragging || vbar.pressed || lyricsWheel.activeFlick === list)) {
                 manualBrowsing = true
+                if (!dragging && !vbar.pressed) {
+                    scheduleAutoReturn()
+                }
             }
             updateScrolledAway()
         }
 
         onHeightChanged: Qt.callLater(list.follow, false)
 
-        ScrollBar.vertical: StyledScrollBar {}
+        ScrollBar.vertical: StyledScrollBar {
+            id: vbar
+            onPressedChanged: {
+                if (pressed) {
+                    scroll.stop()
+                    list.manualBrowsing = true
+                    autoReturnTimer.stop()
+                } else {
+                    list.scheduleAutoReturn()
+                }
+            }
+        }
         FastWheel {
             id: lyricsWheel
             target: list
             onWheelScrolled: {
                 scroll.stop()
                 list.manualBrowsing = true
+                list.scheduleAutoReturn()
             }
         }
 
@@ -235,7 +305,9 @@ Item {
                                     Math.min(item.y + item.height / 2 - list.height / 2, maxY))
             const delta = target - list.contentY
             scroll.stop()
-            if (animated && Appearance.reduceMotion && !Appearance.performanceMode) {
+            if (animated && !Appearance.performanceMode
+                    && (Appearance.reduceMotion || Math.abs(delta) > Math.min(260, list.height * 0.45))) {
+                scroll.from = list.contentY
                 scroll.to = target
                 scroll.start()
                 return
@@ -243,7 +315,7 @@ Item {
             autoScrolling = true
             list.contentY = target
             autoScrolling = false
-            if (animated && !Appearance.reduceMotion) {
+            if (animated && !Appearance.reduceMotion && Math.abs(delta) >= 1) {
                 list.stepped(delta)
             }
             updateScrolledAway()
@@ -268,6 +340,7 @@ Item {
                 }
             }
             function onLyricsLinesChanged() {
+                autoReturnTimer.stop()
                 lyricsWheel.stopSmooth()
                 list.manualBrowsing = false
                 Qt.callLater(list.follow, false)
@@ -277,6 +350,7 @@ Item {
             target: root
             function onSuspendedChanged() {
                 if (root.suspended) {
+                    autoReturnTimer.stop()
                     lyricsWheel.stopSmooth()
                     list.manualBrowsing = false
                 } else {
@@ -335,7 +409,9 @@ Item {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.leftMargin: 18
-                anchors.rightMargin: timeBadge.visible ? timeBadge.implicitWidth + 24 : 14
+                anchors.rightMargin: UiState.lyricsSynced && line.hasTime
+                    ? Math.max(48, timeBadge.implicitWidth + 22)
+                    : 14
                 height: text.implicitHeight
                 transformOrigin: Item.Left
 
@@ -399,11 +475,17 @@ Item {
                 anchors.right: parent.right
                 anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
-                visible: UiState.lyricsSynced && line.hasTime && line.isHovered
+                visible: UiState.lyricsSynced && line.hasTime
+                opacity: line.isHovered ? 1 : 0
                 text: UiState.formatLyricTime(line.timeSecs)
                 font.pixelSize: 11
                 font.weight: Font.Medium
                 color: root.scheme.onSurfaceVariant
+
+                Behavior on opacity {
+                    enabled: !root.suspended && !Appearance.performanceMode
+                    NumberAnimation { duration: Appearance.duration(140); easing.type: Easing.OutCubic }
+                }
             }
 
             MouseArea {
@@ -413,6 +495,7 @@ Item {
                 enabled: UiState.lyricsSynced && line.hasTime && backend.durationSecs > 0
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: {
+                    autoReturnTimer.stop()
                     list.manualBrowsing = false
                     backend.seek(Math.max(0.0, Math.min(1.0, line.timeSecs / backend.durationSecs)))
                 }

@@ -346,6 +346,8 @@ pub struct SavedWaveState {
     pub tracks: Vec<Track>,
     #[serde(default)]
     pub filters: Vec<String>,
+    #[serde(default)]
+    pub selected: std::collections::HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -395,6 +397,8 @@ pub struct UserSettings {
     pub ai_strict_tracks: bool,
     #[serde(default = "default_show_ai_labels")]
     pub show_ai_labels: bool,
+    #[serde(default)]
+    pub wave_selected: std::collections::HashMap<String, String>,
 }
 
 fn default_volume() -> f32 {
@@ -433,6 +437,7 @@ impl Default for UserSettings {
             ai_music_behavior: default_ai_music_behavior(),
             ai_strict_tracks: false,
             show_ai_labels: default_show_ai_labels(),
+            wave_selected: std::collections::HashMap::new(),
         }
     }
 }

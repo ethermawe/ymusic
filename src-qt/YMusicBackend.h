@@ -99,6 +99,12 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(bool discordConnected READ discordConnected NOTIFY featuresChanged)
     Q_PROPERTY(QString discordStatus READ discordStatus NOTIFY featuresChanged)
     Q_PROPERTY(QVariantList searchSuggestions READ searchSuggestions NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantList searchQuickTracks READ searchQuickTracks NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantMap searchSuggestBest READ searchSuggestBest NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantMap searchBest READ searchBest NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantList searchHistory READ searchHistory NOTIFY featuresChanged)
+    Q_PROPERTY(bool searchHasMore READ searchHasMore NOTIFY featuresChanged)
+    Q_PROPERTY(bool searchLoadingMore READ searchLoadingMore NOTIFY featuresChanged)
 
 public:
     explicit YMusicBackend(QObject *parent = nullptr);
@@ -184,6 +190,12 @@ public:
     bool discordConnected() const { return m_discordConnected; }
     QString discordStatus() const { return m_discordStatus; }
     QVariantList searchSuggestions() const { return m_searchSuggestions; }
+    QVariantList searchQuickTracks() const { return m_searchQuickTracks; }
+    QVariantMap searchSuggestBest() const { return m_searchSuggestBest; }
+    QVariantMap searchBest() const { return m_searchBest; }
+    QVariantList searchHistory() const { return m_searchHistory; }
+    bool searchHasMore() const { return m_searchHasMore; }
+    bool searchLoadingMore() const { return m_searchLoadingMore; }
     Q_INVOKABLE void feature(const QVariantMap &command);
 
     // Q_INVOKABLE Actions
@@ -288,6 +300,12 @@ private:
     bool m_discordConnected = false;
     QString m_discordStatus = QStringLiteral("Ожидание трека");
     QVariantList m_searchSuggestions;
+    QVariantList m_searchQuickTracks;
+    QVariantMap m_searchSuggestBest;
+    QVariantMap m_searchBest;
+    QVariantList m_searchHistory;
+    bool m_searchHasMore = false;
+    bool m_searchLoadingMore = false;
 
     bool m_loggedIn = false;
     bool m_authReady = false;

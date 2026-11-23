@@ -29,6 +29,16 @@ Item {
     readonly property color glow: Qt.rgba(PlayerStyle.primary.r, PlayerStyle.primary.g, PlayerStyle.primary.b, 0.5)
     readonly property bool hasLyrics: UiState.lyricsLines && UiState.lyricsLines.length > 0
 
+    onVisibleChanged: {
+        if (!visible) {
+            autoReturnTimer.stop()
+            lyricsWheel.stopSmooth()
+            list.manualBrowsing = false
+        } else {
+            Qt.callLater(list.follow, false)
+        }
+    }
+
     Column {
         anchors.centerIn: parent
         Reveal.shown: UiState.lyricsLoading
@@ -99,10 +109,7 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    list.manualBrowsing = false
-                    list.follow(true)
-                }
+                onClicked: list.resumeFollowing()
             }
         }
     }
@@ -155,6 +162,33 @@ Item {
             onWheelScrolled: {
                 scroll.stop()
                 list.manualBrowsing = true
+                list.scheduleAutoReturn()
+            }
+        }
+
+        HoverHandler {
+            id: pointerActivity
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            property real lastX: -1
+            property real lastY: -1
+            onHoveredChanged: {
+                if (hovered && list.manualBrowsing) {
+                    lastX = point.position.x
+                    lastY = point.position.y
+                    list.scheduleAutoReturn()
+                }
+            }
+            onPointChanged: {
+                if (!hovered || !list.manualBrowsing) {
+                    return
+                }
+                const dx = point.position.x - lastX
+                const dy = point.position.y - lastY
+                if (dx * dx + dy * dy >= 4) {
+                    lastX = point.position.x
+                    lastY = point.position.y
+                    list.scheduleAutoReturn()
+                }
             }
         }
 
@@ -163,6 +197,35 @@ Item {
         property bool autoScrolling: false
         property bool manualBrowsing: false
         property bool scrolledAway: false
+
+        Timer {
+            id: autoReturnTimer
+            interval: 5000
+            repeat: false
+            onTriggered: {
+                if (!list.manualBrowsing || !UiState.lyricsSynced || !root.hasLyrics || !root.visible) {
+                    return
+                }
+                if (list.dragging || list.moving || lyricsWheel.activeFlick === list
+                        || pointerActivity.point.pressedButtons !== Qt.NoButton) {
+                    autoReturnTimer.restart()
+                    return
+                }
+                list.resumeFollowing()
+            }
+        }
+
+        function scheduleAutoReturn() {
+            if (manualBrowsing && UiState.lyricsSynced && root.hasLyrics && root.visible && !dragging) {
+                autoReturnTimer.restart()
+            }
+        }
+
+        function resumeFollowing() {
+            autoReturnTimer.stop()
+            manualBrowsing = false
+            follow(true)
+        }
 
         function updateScrolledAway() {
             const index = UiState.activeLyricIndex
@@ -184,12 +247,18 @@ Item {
             if (dragging) {
                 scroll.stop()
                 manualBrowsing = true
+                autoReturnTimer.stop()
+            } else {
+                scheduleAutoReturn()
             }
         }
 
         onContentYChanged: {
             if (!autoScrolling && !scroll.running && (moving || dragging || lyricsWheel.activeFlick === list)) {
                 manualBrowsing = true
+                if (!dragging) {
+                    scheduleAutoReturn()
+                }
             }
             updateScrolledAway()
         }
@@ -234,7 +303,9 @@ Item {
                                     Math.min(item.y + item.height / 2 - list.height / 2, maxY));
             const delta = target - list.contentY;
             scroll.stop();
-            if (animated && Appearance.reduceMotion && !Appearance.performanceMode) {
+            if (animated && !Appearance.performanceMode
+                    && (Appearance.reduceMotion || Math.abs(delta) > Math.min(260, list.height * 0.45))) {
+                scroll.from = list.contentY;
                 scroll.to = target;
                 scroll.start();
                 return;
@@ -242,7 +313,7 @@ Item {
             autoScrolling = true;
             list.contentY = target;
             autoScrolling = false;
-            if (animated && !Appearance.reduceMotion) {
+            if (animated && !Appearance.reduceMotion && Math.abs(delta) >= 1) {
                 list.stepped(delta);
             }
             updateScrolledAway();
@@ -267,6 +338,7 @@ Item {
                 }
             }
             function onLyricsLinesChanged() {
+                autoReturnTimer.stop();
                 lyricsWheel.stopSmooth();
                 list.manualBrowsing = false;
                 Qt.callLater(list.follow, false);
@@ -441,6 +513,7 @@ Item {
                 onClicked: {
                     line.highlighted = true;
                     flash.restart();
+                    autoReturnTimer.stop();
                     list.manualBrowsing = false;
                     backend.seek(Math.max(0, Math.min(1, line.timeSecs / backend.durationSecs)));
                 }

@@ -453,6 +453,12 @@ Item {
                     onMoved: (value) => appSettings.waveVisualizerSensitivity = Number(value.toFixed(2))
                 }
                 ConfigSwitch {
+                    text: "Живая плазма (Аврора)"
+                    enabled: !appSettings.performanceMode
+                    checked: appSettings.waveAurora
+                    onToggledTo: (checked) => appSettings.waveAurora = checked
+                }
+                ConfigSwitch {
                     text: "Обложка трека внутри сферы"
                     checked: appSettings.waveOrbArtwork
                     onToggledTo: (checked) => appSettings.waveOrbArtwork = checked
@@ -543,7 +549,7 @@ Item {
             }
 
             ContentSection {
-                title: "Анти-ИИ (Slopless)"
+                title: "AI треки"
                 symbol: "smart_toy"
 
                 ConfigSelection {
@@ -569,7 +575,7 @@ Item {
                     onToggledTo: (checked) => backend.feature({action: "set_ai_strict_tracks", enabled: checked})
                 }
                 NoteText {
-                    text: "Использует встроенную базу Slopless (141 000+ ИИ-исполнителей Яндекс Музыки) и онлайн-проверку slopless.art."
+                    text: "Использует встроенную базу Slopless и онлайн проверку slopless.art."
                 }
             }
         }

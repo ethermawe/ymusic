@@ -76,8 +76,18 @@ impl Track {
 }
 
 pub fn cover_url(uri: Option<&str>, size: u32) -> Option<String> {
-    uri.filter(|s| !s.is_empty())
-        .map(|u| format!("https://{}", u.replace("%%", &format!("{size}x{size}"))))
+    uri.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|u| {
+            let sized = u.replace("%%", &format!("{size}x{size}"));
+            if sized.starts_with("https://") || sized.starts_with("http://") {
+                sized
+            } else if sized.starts_with("//") {
+                format!("https:{sized}")
+            } else {
+                format!("https://{}", sized.trim_start_matches('/'))
+            }
+        })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,12 +161,28 @@ pub struct RotorTracksBatch {
     pub unknown_session: bool,
 }
 
+#[derive(Clone, Debug)]
+pub enum SearchBest {
+    Track(Track),
+    Album(AlbumCard),
+    Artist(ArtistCard),
+    Playlist(PlaylistCard),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SearchSuggestResult {
+    pub suggestions: Vec<String>,
+    pub best: Option<SearchBest>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SearchResults {
     pub tracks: Vec<Track>,
     pub albums: Vec<AlbumCard>,
     pub artists: Vec<ArtistCard>,
     pub playlists: Vec<PlaylistCard>,
+    pub best: Option<SearchBest>,
+    pub has_more: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -505,20 +531,26 @@ impl Api {
     }
 
     pub async fn search_suggest(&self, part: &str) -> Result<Vec<String>> {
+        Ok(self.search_suggest_rich(part).await?.suggestions)
+    }
+
+    pub async fn search_suggest_rich(&self, part: &str) -> Result<SearchSuggestResult> {
         let trimmed = part.trim();
         if trimmed.is_empty() {
-            return Ok(Vec::new());
+            return Ok(SearchSuggestResult::default());
         }
         let r = self.get("/search/suggest", &[("part", trimmed)]).await?;
-        Ok(r["suggestions"]
+        let suggestions = r["suggestions"]
             .as_array()
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|v| v.as_str().map(str::to_string))
-                    .take(10)
+                    .filter_map(|v| v.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string))
+                    .take(8)
                     .collect()
             })
-            .unwrap_or_default())
+            .unwrap_or_default();
+        let best = parse_search_best(&r["best"]);
+        Ok(SearchSuggestResult { suggestions, best })
     }
 
     pub async fn landing_home(&self) -> Result<LandingHome> {
@@ -605,39 +637,106 @@ impl Api {
     }
 
     pub async fn search_filtered(&self, text: &str, filter: &str) -> Result<SearchResults> {
+        self.search_filtered_page(text, filter, 0).await
+    }
+
+    pub async fn search_filtered_page(&self, text: &str, filter: &str, page: u32) -> Result<SearchResults> {
         anyhow::ensure!(["all", "track", "album", "artist", "playlist"].contains(&filter), "неизвестный фильтр поиска");
+        let page_str = page.to_string();
         let r = self
             .get(
                 "/search",
                 &[
                     ("text", text),
                     ("type", filter),
-                    ("page", "0"),
+                    ("page", page_str.as_str()),
                     ("nocorrect", "false"),
                 ],
             )
             .await?;
-        let tracks = r["tracks"]["results"]
+        let mut tracks: Vec<Track> = r["tracks"]["results"]
             .as_array()
             .map(|a| a.iter().filter_map(parse_track).collect())
             .unwrap_or_default();
-        let albums = r["albums"]["results"]
+        let albums: Vec<AlbumCard> = r["albums"]["results"]
             .as_array()
             .map(|a| a.iter().filter_map(parse_album).collect())
             .unwrap_or_default();
-        let artists = r["artists"]["results"]
+        let artists: Vec<ArtistCard> = r["artists"]["results"]
             .as_array()
             .map(|a| a.iter().filter_map(parse_artist).collect())
             .unwrap_or_default();
-        let playlists = r["playlists"]["results"]
+        let playlists: Vec<PlaylistCard> = r["playlists"]["results"]
             .as_array()
             .map(|a| a.iter().filter_map(parse_playlist).collect())
             .unwrap_or_default();
+        let mut best = parse_search_best(&r["best"]);
+
+        // Догружаем полные метаданные треков без обложек, т.к. /search иногда отдаёт сокращённые объекты без coverUri.
+        let mut missing_ids: Vec<String> = tracks
+            .iter()
+            .filter(|t| t.cover_uri.is_none())
+            .map(Track::composite_id)
+            .collect();
+        if let Some(SearchBest::Track(ref bt)) = best
+            && bt.cover_uri.is_none()
+        {
+            missing_ids.push(bt.composite_id());
+        }
+        if !missing_ids.is_empty()
+            && let Ok(full_tracks) = self.tracks(&missing_ids).await
+        {
+            let by_id: std::collections::HashMap<String, Track> =
+                full_tracks.into_iter().map(|t| (t.id.clone(), t)).collect();
+            for t in &mut tracks {
+                if t.cover_uri.is_none()
+                    && let Some(full) = by_id.get(&t.id)
+                {
+                    if full.cover_uri.is_some() {
+                        t.cover_uri = full.cover_uri.clone();
+                    }
+                    if t.album_id.is_none() {
+                        t.album_id = full.album_id.clone();
+                    }
+                    if t.album_title.is_empty() {
+                        t.album_title = full.album_title.clone();
+                    }
+                }
+            }
+            if let Some(SearchBest::Track(ref mut bt)) = best
+                && bt.cover_uri.is_none()
+                && let Some(full) = by_id.get(&bt.id)
+                && full.cover_uri.is_some()
+            {
+                bt.cover_uri = full.cover_uri.clone();
+            }
+        }
+
+        let section_has_more = |sec: &Value, len: usize| -> bool {
+            let total = sec["total"].as_u64().unwrap_or(0);
+            let per_page = sec["perPage"].as_u64().unwrap_or(len as u64).max(1);
+            len > 0 && ((page as u64 + 1) * per_page < total)
+        };
+        let has_more = match filter {
+            "track" => section_has_more(&r["tracks"], tracks.len()),
+            "album" => section_has_more(&r["albums"], albums.len()),
+            "artist" => section_has_more(&r["artists"], artists.len()),
+            "playlist" => section_has_more(&r["playlists"], playlists.len()),
+            _ => {
+                section_has_more(&r["tracks"], tracks.len())
+                    || section_has_more(&r["albums"], albums.len())
+                    || section_has_more(&r["artists"], artists.len())
+                    || section_has_more(&r["playlists"], playlists.len())
+            }
+        };
+
         Ok(SearchResults {
             tracks,
             albums,
             artists,
             playlists,
+            best,
+            has_more,
         })
     }
 
@@ -1490,6 +1589,22 @@ fn parse_rotor_sequence(seq: &Value) -> Vec<Track> {
         .unwrap_or_default()
 }
 
+fn non_empty_str<'a>(v: &'a Value) -> Option<&'a str> {
+    v.as_str().map(str::trim).filter(|s| !s.is_empty())
+}
+
+fn parse_search_best(v: &Value) -> Option<SearchBest> {
+    let kind = non_empty_str(&v["type"])?;
+    let res = &v["result"];
+    match kind {
+        "track" => parse_track(res).map(SearchBest::Track),
+        "album" => parse_album(res).map(SearchBest::Album),
+        "artist" => parse_artist(res).map(SearchBest::Artist),
+        "playlist" => parse_playlist(res).map(SearchBest::Playlist),
+        _ => None,
+    }
+}
+
 fn parse_track(v: &Value) -> Option<Track> {
     let id = id_str(&v["id"])?;
     let mut title = v["title"].as_str().unwrap_or("Без названия").to_string();
@@ -1530,6 +1645,16 @@ fn parse_track(v: &Value) -> Option<Track> {
         || artist_links
             .iter()
             .any(|(aid, _)| crate::slopless::is_builtin_ai_artist_str(aid));
+    let cover_uri = non_empty_str(&v["coverUri"])
+        .or_else(|| {
+            v["albums"].as_array().and_then(|arr| {
+                arr.iter().find_map(|a| {
+                    non_empty_str(&a["coverUri"]).or_else(|| non_empty_str(&a["ogImage"]))
+                })
+            })
+        })
+        .or_else(|| non_empty_str(&v["ogImage"]))
+        .map(str::to_string);
     Some(Track {
         id,
         album_id,
@@ -1539,11 +1664,7 @@ fn parse_track(v: &Value) -> Option<Track> {
         title,
         artists,
         duration_ms: v["durationMs"].as_u64().unwrap_or(0),
-        cover_uri: v["coverUri"]
-            .as_str()
-            .or(album["coverUri"].as_str())
-            .or(v["ogImage"].as_str())
-            .map(str::to_string),
+        cover_uri,
         available: v["available"].as_bool().unwrap_or(true),
         has_sync_lyrics,
         has_text_lyrics,
@@ -1567,15 +1688,15 @@ fn parse_playlist(v: &Value) -> Option<PlaylistCard> {
     } else {
         format!("{owner} • {count} тр.")
     };
-    let cover_uri = v["cover"]["uri"]
-        .as_str()
+    let cover_uri = non_empty_str(&v["cover"]["uri"])
+        .or_else(|| non_empty_str(&v["coverUri"]))
         .or_else(|| {
             v["cover"]["itemsUri"]
                 .as_array()
                 .and_then(|a| a.first())
-                .and_then(|u| u.as_str())
+                .and_then(non_empty_str)
         })
-        .or(v["ogImage"].as_str())
+        .or_else(|| non_empty_str(&v["ogImage"]))
         .map(str::to_string);
     Some(PlaylistCard {
         uid,
@@ -1603,9 +1724,8 @@ fn parse_album(v: &Value) -> Option<AlbumCard> {
         .unwrap_or_default();
     let year = v["year"].as_u64();
     let track_count = v["trackCount"].as_u64().unwrap_or(0);
-    let cover_uri = v["coverUri"]
-        .as_str()
-        .or(v["ogImage"].as_str())
+    let cover_uri = non_empty_str(&v["coverUri"])
+        .or_else(|| non_empty_str(&v["ogImage"]))
         .map(str::to_string);
     Some(AlbumCard {
         id,
@@ -1631,9 +1751,8 @@ fn parse_artist(v: &Value) -> Option<ArtistCard> {
                 .join(", ")
         })
         .unwrap_or_default();
-    let cover_uri = v["cover"]["uri"]
-        .as_str()
-        .or(v["ogImage"].as_str())
+    let cover_uri = non_empty_str(&v["cover"]["uri"])
+        .or_else(|| non_empty_str(&v["ogImage"]))
         .map(str::to_string);
     let stats = format_artist_stats(&v["stats"], v["likesCount"].as_u64());
     Some(ArtistCard {
@@ -2175,5 +2294,43 @@ mod tests {
             format_artist_page_stats(&Value::Null, Some(42_000)),
             "42 тыс. лайков"
         );
+    }
+
+    #[test]
+    fn cover_url_normalizes_schemes_and_track_falls_back_to_album_cover() {
+        assert_eq!(
+            cover_url(Some("avatars.yandex.net/get-music-content/1/2/%%"), 200).as_deref(),
+            Some("https://avatars.yandex.net/get-music-content/1/2/200x200")
+        );
+        assert_eq!(
+            cover_url(Some("https://avatars.yandex.net/get-music-content/1/2/%%"), 400).as_deref(),
+            Some("https://avatars.yandex.net/get-music-content/1/2/400x400")
+        );
+        assert_eq!(
+            cover_url(Some("//avatars.yandex.net/get-music-content/1/2/%%"), 100).as_deref(),
+            Some("https://avatars.yandex.net/get-music-content/1/2/100x100")
+        );
+
+        let track = parse_track(&serde_json::json!({
+            "id": 99,
+            "title": "Search Track",
+            "coverUri": "",
+            "albums": [
+                { "id": 10, "title": "Single", "coverUri": "" },
+                { "id": 11, "title": "Main Album", "coverUri": "avatars.yandex.net/get-music-content/a/b/%%" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(track.cover_uri.as_deref(), Some("avatars.yandex.net/get-music-content/a/b/%%"));
+
+        let best = parse_search_best(&serde_json::json!({
+            "type": "track",
+            "result": {
+                "id": 77,
+                "title": "Best Track",
+                "albums": [{ "id": 5, "title": "LP", "coverUri": "avatars.yandex.net/x/y/%%" }]
+            }
+        }));
+        assert!(matches!(best, Some(SearchBest::Track(t)) if t.id == "77" && t.cover_uri.is_some()));
     }
 }

@@ -195,6 +195,15 @@ Item {
                 suggestTimer.restart()
             } else {
                 suggestTimer.stop()
+                if (editing && backend.loggedIn) {
+                    backend.feature({action: "search_suggest", part: ""})
+                }
+            }
+        }
+        onEditingChanged: {
+            if (editing && backend.loggedIn) {
+                if (text.trim().length > 0) suggestTimer.restart()
+                else backend.feature({action: "search_suggest", part: ""})
             }
         }
         onAccepted: {
@@ -212,11 +221,16 @@ Item {
 
     Rectangle {
         id: suggestionsPopup
-        readonly property bool suggestionsOpen: search.editing && search.text.trim().length > 0 && backend.searchSuggestions.length > 0
-        x: search.x
+        readonly property string trimmedPart: search.text.trim()
+        readonly property bool hasBest: Boolean(backend.searchSuggestBest && backend.searchSuggestBest.title)
+        readonly property bool hasSuggestData: backend.searchQuickTracks.length > 0 || hasBest || backend.searchSuggestions.length > 0
+        readonly property bool showingHistory: search.editing && trimmedPart.length === 0 && backend.searchHistory.length > 0
+        readonly property bool suggestionsOpen: search.editing && ((trimmedPart.length > 0 && hasSuggestData) || showingHistory)
+
+        x: Math.max(12, Math.min(search.x, root.width - width - 12))
         y: search.y + search.height + (suggestionsOpen ? 6 : 0)
-        width: search.width
-        height: suggestColumn.implicitHeight + 12
+        width: Math.max(search.width, Math.min(420, root.width - 24))
+        height: Math.min(440, suggestColumn.implicitHeight + 14)
         z: 30
         radius: Appearance.rounding.normal
         color: Appearance.colors.surfaceContainerHigh
@@ -237,66 +251,330 @@ Item {
             ElementMoveSmall {}
         }
 
-        Column {
-            id: suggestColumn
-            x: 6
-            y: 6
-            width: parent.width - 12
-            spacing: 2
+        Flickable {
+            id: suggestScroll
+            anchors.fill: parent
+            anchors.margins: 7
+            contentHeight: suggestColumn.implicitHeight
+            boundsBehavior: Flickable.StopAtBounds
+            clip: true
+            FastWheel { target: suggestScroll }
 
-            Repeater {
-                model: backend.searchSuggestions
-                delegate: Rectangle {
-                    id: suggestItem
-                    required property string modelData
+            Column {
+                id: suggestColumn
+                width: suggestScroll.width
+                spacing: 4
+
+                // История поиска (когда поле пустое)
+                Item {
+                    visible: suggestionsPopup.showingHistory
                     width: suggestColumn.width
-                    height: 34
-                    radius: Appearance.rounding.small
-                    color: suggestHover.hovered ? Appearance.colors.surfaceContainerHighest : "transparent"
+                    height: 24
 
-                    Behavior on color {
-                        ElementMoveFastColor {}
+                    StyledText {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Недавние запросы")
+                        font.pixelSize: Appearance.fontSize.smallest
+                        font.weight: Font.DemiBold
+                        color: Appearance.colors.onSurfaceVariant
                     }
+
+                    StyledText {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Очистить")
+                        font.pixelSize: Appearance.fontSize.smallest
+                        color: clearHistHover.hovered ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
+
+                        HoverHandler { id: clearHistHover; cursorShape: Qt.PointingHandCursor }
+                        TapHandler { onTapped: backend.feature({action: "clear_search_history"}) }
+                    }
+                }
+
+                Repeater {
+                    model: suggestionsPopup.showingHistory ? backend.searchHistory : []
+                    delegate: Rectangle {
+                        id: histItem
+                        required property string modelData
+                        width: suggestColumn.width
+                        height: 34
+                        radius: Appearance.rounding.small
+                        color: histHover.hovered ? Appearance.colors.surfaceContainerHighest : "transparent"
+
+                        Behavior on color { ElementMoveFastColor {} }
+
+                        Row {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 8
+
+                            MaterialSymbol {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "history"
+                                iconSize: 16
+                                color: histHover.hovered ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
+                            }
+                            StyledText {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - 28
+                                text: histItem.modelData
+                                elide: Text.ElideRight
+                                font.pixelSize: Appearance.fontSize.small
+                            }
+                        }
+
+                        HoverHandler { id: histHover; cursorShape: Qt.PointingHandCursor }
+                        TapHandler {
+                            onTapped: {
+                                search.text = histItem.modelData
+                                root.dismissSearch()
+                                backend.search(histItem.modelData)
+                            }
+                        }
+                    }
+                }
+
+                // Лучший артист / альбом / плейлист с обложкой
+                Rectangle {
+                    id: bestSuggestCard
+                    visible: suggestionsPopup.trimmedPart.length > 0 && suggestionsPopup.hasBest
+                    width: suggestColumn.width
+                    height: 52
+                    radius: Appearance.rounding.small
+                    color: bestSuggestHover.hovered ? Appearance.colors.surfaceContainerHighest : Qt.alpha(Appearance.colors.primary, 0.06)
+
+                    Behavior on color { ElementMoveFastColor {} }
 
                     Row {
                         anchors.fill: parent
-                        anchors.leftMargin: suggestHover.hovered ? 13 : 10
+                        anchors.leftMargin: 8
                         anchors.rightMargin: 10
-                        spacing: 8
+                        spacing: 10
 
-                        Behavior on anchors.leftMargin {
-                            enabled: !Appearance.performanceMode
-                            ElementMoveSmall {}
+                        ArtworkImage {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 38
+                            height: 38
+                            radius: (backend.searchSuggestBest?.circular ?? false) ? 19 : 7
+                            circular: Boolean(backend.searchSuggestBest?.circular ?? false)
+                            source: (backend.searchSuggestBest?.has_cover ?? false) ? (backend.searchSuggestBest?.cover_url ?? "") : ""
+                            placeholderSymbol: (backend.searchSuggestBest?.kind ?? "") === "artist" ? "artists" : "album"
+                            fallbackKey: backend.searchSuggestBest?.title ?? ""
+                        }
+
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width - 68
+                            spacing: 1
+
+                            StyledText {
+                                width: parent.width
+                                text: backend.searchSuggestBest?.title ?? ""
+                                elide: Text.ElideRight
+                                font.pixelSize: Appearance.fontSize.small
+                                font.weight: Font.DemiBold
+                            }
+                            StyledText {
+                                width: parent.width
+                                text: {
+                                    const k = backend.searchSuggestBest?.kind ?? ""
+                                    const prefix = k === "artist" ? qsTr("Исполнитель") : (k === "album" ? qsTr("Альбом") : qsTr("Плейлист"))
+                                    const sub = backend.searchSuggestBest?.subtitle ?? ""
+                                    return sub.length > 0 ? (prefix + " • " + sub) : prefix
+                                }
+                                elide: Text.ElideRight
+                                font.pixelSize: Appearance.fontSize.smallest
+                                color: Appearance.colors.onSurfaceVariant
+                            }
                         }
 
                         MaterialSymbol {
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "search"
+                            text: "arrow_forward"
                             iconSize: 16
-                            color: suggestHover.hovered ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
-
-                            Behavior on color {
-                                ElementMoveFastColor {}
-                            }
-                        }
-                        StyledText {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width - 28
-                            text: suggestItem.modelData
-                            elide: Text.ElideRight
-                            font.pixelSize: Appearance.fontSize.small
+                            color: bestSuggestHover.hovered ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
                         }
                     }
 
-                    HoverHandler {
-                        id: suggestHover
-                        cursorShape: Qt.PointingHandCursor
-                    }
+                    HoverHandler { id: bestSuggestHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler {
                         onTapped: {
-                            search.text = suggestItem.modelData
                             root.dismissSearch()
-                            backend.search(suggestItem.modelData)
+                            backend.feature({action: "open_search_best", source: "suggest"})
+                        }
+                    }
+                }
+
+                // Быстрые треки с обложками прямо в поиске
+                StyledText {
+                    visible: suggestionsPopup.trimmedPart.length > 0 && backend.searchQuickTracks.length > 0
+                    leftPadding: 8
+                    topPadding: 2
+                    text: qsTr("Треки")
+                    font.pixelSize: Appearance.fontSize.smallest
+                    font.weight: Font.DemiBold
+                    color: Appearance.colors.onSurfaceVariant
+                }
+
+                Repeater {
+                    model: suggestionsPopup.trimmedPart.length > 0 ? backend.searchQuickTracks : []
+                    delegate: Rectangle {
+                        id: quickTrackItem
+                        required property var modelData
+                        width: suggestColumn.width
+                        height: 48
+                        radius: Appearance.rounding.small
+                        color: quickHover.hovered ? Appearance.colors.surfaceContainerHighest : "transparent"
+
+                        Behavior on color { ElementMoveFastColor {} }
+
+                        Row {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 10
+                            spacing: 10
+
+                            Item {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 36
+                                height: 36
+
+                                ArtworkImage {
+                                    anchors.fill: parent
+                                    radius: 6
+                                    source: (quickTrackItem.modelData?.has_cover ?? false) ? (quickTrackItem.modelData?.cover_url ?? "") : ""
+                                    placeholderSymbol: "music_note"
+                                    fallbackKey: quickTrackItem.modelData?.title ?? ""
+                                }
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 6
+                                    color: Qt.rgba(0, 0, 0, 0.45)
+                                    opacity: quickHover.hovered ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 120 } }
+
+                                    MaterialSymbol {
+                                        anchors.centerIn: parent
+                                        text: "play_arrow"
+                                        iconSize: 20
+                                        fill: 1
+                                        color: "white"
+                                    }
+                                }
+                            }
+
+                            Column {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Math.max(0, parent.width - 90)
+                                spacing: 1
+
+                                StyledText {
+                                    width: parent.width
+                                    text: quickTrackItem.modelData?.title ?? ""
+                                    elide: Text.ElideRight
+                                    font.pixelSize: Appearance.fontSize.small
+                                    font.weight: Font.Medium
+                                }
+                                StyledText {
+                                    width: parent.width
+                                    text: quickTrackItem.modelData?.artists ?? ""
+                                    elide: Text.ElideRight
+                                    font.pixelSize: Appearance.fontSize.smallest
+                                    color: Appearance.colors.onSurfaceVariant
+                                }
+                            }
+
+                            StyledText {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 34
+                                horizontalAlignment: Text.AlignRight
+                                text: quickTrackItem.modelData?.duration ?? ""
+                                tabularNumbers: true
+                                font.pixelSize: Appearance.fontSize.smallest
+                                color: Appearance.colors.onSurfaceVariant
+                            }
+                        }
+
+                        HoverHandler { id: quickHover; cursorShape: Qt.PointingHandCursor }
+                        TapHandler {
+                            onTapped: {
+                                root.dismissSearch()
+                                backend.feature({action: "play_quick_track", id: quickTrackItem.modelData.id})
+                            }
+                        }
+                    }
+                }
+
+                // Текстовые подсказки
+                StyledText {
+                    visible: suggestionsPopup.trimmedPart.length > 0 && backend.searchSuggestions.length > 0 && (backend.searchQuickTracks.length > 0 || suggestionsPopup.hasBest)
+                    leftPadding: 8
+                    topPadding: 2
+                    text: qsTr("Запросы")
+                    font.pixelSize: Appearance.fontSize.smallest
+                    font.weight: Font.DemiBold
+                    color: Appearance.colors.onSurfaceVariant
+                }
+
+                Repeater {
+                    model: suggestionsPopup.trimmedPart.length > 0 ? backend.searchSuggestions.slice(0, 5) : []
+                    delegate: Rectangle {
+                        id: suggestItem
+                        required property string modelData
+                        width: suggestColumn.width
+                        height: 34
+                        radius: Appearance.rounding.small
+                        color: suggestHover.hovered ? Appearance.colors.surfaceContainerHighest : "transparent"
+
+                        Behavior on color {
+                            ElementMoveFastColor {}
+                        }
+
+                        Row {
+                            anchors.fill: parent
+                            anchors.leftMargin: suggestHover.hovered ? 13 : 10
+                            anchors.rightMargin: 10
+                            spacing: 8
+
+                            Behavior on anchors.leftMargin {
+                                enabled: !Appearance.performanceMode
+                                ElementMoveSmall {}
+                            }
+
+                            MaterialSymbol {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "search"
+                                iconSize: 16
+                                color: suggestHover.hovered ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
+
+                                Behavior on color {
+                                    ElementMoveFastColor {}
+                                }
+                            }
+                            StyledText {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - 28
+                                text: suggestItem.modelData
+                                elide: Text.ElideRight
+                                font.pixelSize: Appearance.fontSize.small
+                            }
+                        }
+
+                        HoverHandler {
+                            id: suggestHover
+                            cursorShape: Qt.PointingHandCursor
+                        }
+                        TapHandler {
+                            onTapped: {
+                                search.text = suggestItem.modelData
+                                root.dismissSearch()
+                                backend.search(suggestItem.modelData)
+                            }
                         }
                     }
                 }

@@ -47,10 +47,14 @@ class AppSettings : public QObject {
     Q_PROPERTY(double waveVisualizerSensitivity READ waveVisualizerSensitivity WRITE setWaveVisualizerSensitivity NOTIFY waveSettingsChanged)
     Q_PROPERTY(bool waveOrbArtwork READ waveOrbArtwork WRITE setWaveOrbArtwork NOTIFY waveSettingsChanged)
     Q_PROPERTY(bool waveOrbSquiggle READ waveOrbSquiggle WRITE setWaveOrbSquiggle NOTIFY waveSettingsChanged)
+    Q_PROPERTY(bool waveAurora READ waveAurora WRITE setWaveAurora NOTIFY waveSettingsChanged)
     Q_PROPERTY(double waveReactivity READ waveReactivity WRITE setWaveReactivity NOTIFY waveSettingsChanged)
 
     Q_PROPERTY(double zoom READ zoom WRITE setZoom NOTIFY zoomChanged)
     Q_PROPERTY(double scrollSpeed READ scrollSpeed WRITE setScrollSpeed NOTIFY scrollSpeedChanged)
+    Q_PROPERTY(bool sidebarCollapsed READ sidebarCollapsed WRITE setSidebarCollapsed NOTIFY layoutChanged)
+    Q_PROPERTY(double sidebarWidth READ sidebarWidth WRITE setSidebarWidth NOTIFY layoutChanged)
+    Q_PROPERTY(double rightPanelWidth READ rightPanelWidth WRITE setRightPanelWidth NOTIFY layoutChanged)
     Q_PROPERTY(bool pinnedPlaylistsExpanded READ pinnedPlaylistsExpanded WRITE setPinnedPlaylistsExpanded NOTIFY changed)
     Q_PROPERTY(bool allPlaylistsExpanded READ allPlaylistsExpanded WRITE setAllPlaylistsExpanded NOTIFY changed)
     Q_PROPERTY(QString immersivePlayerPanel READ immersivePlayerPanel WRITE setImmersivePlayerPanel NOTIFY changed)
@@ -109,10 +113,14 @@ public:
     double waveVisualizerSensitivity() const { return std::clamp(m_store.value("ui/waveVisualizerSensitivity", 1.0).toDouble(), 0.2, 2.5); }
     bool waveOrbArtwork() const { return m_store.value("ui/waveOrbArtwork", true).toBool(); }
     bool waveOrbSquiggle() const { return m_store.value("ui/waveOrbSquiggle", true).toBool(); }
+    bool waveAurora() const { return m_store.value("ui/waveAurora", false).toBool(); }
     double waveReactivity() const { return std::clamp(m_store.value("ui/waveReactivity", 1.0).toDouble(), 0.0, 3.0); }
 
     double zoom() const { return std::clamp(m_store.value("ui/zoom", 1.0).toDouble(), 0.75, 1.4); }
     double scrollSpeed() const { return std::clamp(m_store.value("ui/scrollSpeed", 1.8).toDouble(), 0.5, 6.0); }
+    bool sidebarCollapsed() const { return m_store.value("ui/sidebarCollapsed", false).toBool(); }
+    double sidebarWidth() const { return std::clamp(m_store.value("ui/sidebarWidth", 220.0).toDouble(), 160.0, 340.0); }
+    double rightPanelWidth() const { return std::clamp(m_store.value("ui/rightPanelWidth", 320.0).toDouble(), 200.0, 520.0); }
     bool pinnedPlaylistsExpanded() const { return m_store.value("ui/pinnedPlaylistsExpanded", true).toBool(); }
     bool allPlaylistsExpanded() const { return m_store.value("ui/allPlaylistsExpanded", true).toBool(); }
     QString immersivePlayerPanel() const { return m_store.value("ui/immersivePlayerPanel", "lyrics").toString(); }
@@ -282,6 +290,12 @@ public:
             emit waveSettingsChanged();
         }
     }
+    void setWaveAurora(bool value) {
+        if (value != waveAurora()) {
+            save("ui/waveAurora", value);
+            emit waveSettingsChanged();
+        }
+    }
     void setWaveReactivity(double value) {
         const double clamped = std::clamp(value, 0.0, 3.0);
         if (!qFuzzyCompare(clamped, waveReactivity())) {
@@ -302,6 +316,26 @@ public:
         if (!qFuzzyCompare(clamped, scrollSpeed())) {
             save("ui/scrollSpeed", clamped);
             emit scrollSpeedChanged();
+        }
+    }
+    void setSidebarCollapsed(bool value) {
+        if (value != sidebarCollapsed()) {
+            save("ui/sidebarCollapsed", value);
+            emit layoutChanged();
+        }
+    }
+    void setSidebarWidth(double value) {
+        const double clamped = std::clamp(value, 160.0, 340.0);
+        if (!qFuzzyCompare(clamped, sidebarWidth())) {
+            save("ui/sidebarWidth", clamped);
+            emit layoutChanged();
+        }
+    }
+    void setRightPanelWidth(double value) {
+        const double clamped = std::clamp(value, 200.0, 520.0);
+        if (!qFuzzyCompare(clamped, rightPanelWidth())) {
+            save("ui/rightPanelWidth", clamped);
+            emit layoutChanged();
         }
     }
     void setPinnedPlaylistsExpanded(bool value) { if (value != pinnedPlaylistsExpanded()) save("ui/pinnedPlaylistsExpanded", value); }
@@ -428,6 +462,7 @@ public:
         emit waveSettingsChanged();
         emit zoomChanged();
         emit scrollSpeedChanged();
+        emit layoutChanged();
         emit debuggingEnabledChanged();
         emit windowControlsChanged();
         emit minimizeToTrayChanged();
@@ -454,6 +489,7 @@ signals:
     void waveSettingsChanged();
     void zoomChanged();
     void scrollSpeedChanged();
+    void layoutChanged();
     void debuggingEnabledChanged();
     void windowControlsChanged();
     void minimizeToTrayChanged();

@@ -149,11 +149,23 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         }
         else if (type == "search_suggest") {
             m_searchSuggestions = obj["suggestions"].toArray().toVariantList();
+            m_searchQuickTracks = obj["tracks"].toArray().toVariantList();
+            m_searchSuggestBest = obj["best"].isObject() ? obj["best"].toObject().toVariantMap() : QVariantMap();
+            if (obj.contains("history")) m_searchHistory = obj["history"].toArray().toVariantList();
+        }
+        else if (type == "search_history") {
+            m_searchHistory = obj["history"].toArray().toVariantList();
         }
         else if (type == "pinned_playlists") m_pinnedPlaylists = obj["playlists"].toArray().toVariantList();
         else if (type == "search") {
             m_searchQuery = obj["query"].toString();
             m_searchFilter = obj["filter"].toString("all");
+            if (obj.contains("best")) {
+                m_searchBest = obj["best"].isObject() ? obj["best"].toObject().toVariantMap() : QVariantMap();
+            }
+            if (obj.contains("has_more")) m_searchHasMore = obj["has_more"].toBool(false);
+            if (obj.contains("loading_more")) m_searchLoadingMore = obj["loading_more"].toBool(false);
+            if (obj.contains("history")) m_searchHistory = obj["history"].toArray().toVariantList();
         } else if (type == "batch") m_batch = obj.toVariantMap();
         else if (type == "wave_settings") m_waveSettings = obj.toVariantMap();
         else if (type == "wave_applied") m_waveSettings["selected"] = obj["selected"].toObject().toVariantMap();

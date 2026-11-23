@@ -30,7 +30,16 @@ ApplicationWindow {
     readonly property real layoutWidth: width / zoom
     readonly property real layoutHeight: height / zoom
     readonly property bool compactWindow: layoutWidth < 920
-    readonly property bool rightPanelFits: layoutWidth - sidebar.width - Appearance.sizes.sideSheetWidth - 32 >= 404
+    property bool sidebarResizing: false
+    property bool sidebarDragCompact: false
+    property real liveSidebarWidth: appSettings.sidebarWidth
+    property bool inspectorResizing: false
+    property real liveRightPanelWidth: appSettings.rightPanelWidth
+    readonly property real maxSidebarWidth: Math.max(160, Math.min(340, layoutWidth - 650))
+    readonly property real desiredRightPanelWidth: inspectorResizing ? liveRightPanelWidth : appSettings.rightPanelWidth
+    readonly property real maxRightPanelWidth: Math.max(200, Math.min(520, layoutWidth - sidebar.width - 436))
+    readonly property real activeRightPanelWidth: Math.max(200, Math.min(desiredRightPanelWidth, maxRightPanelWidth))
+    readonly property bool rightPanelFits: layoutWidth - sidebar.width - 200 - 32 >= 404
 
     readonly property bool isHome: backend.page === 0
     readonly property bool isWavePage: backend.page === 1
@@ -338,7 +347,13 @@ ApplicationWindow {
             anchors.topMargin: 8 + window.titleBarInset
             anchors.leftMargin: 8
             anchors.bottomMargin: 8
-            compact: window.compactWindow
+            compact: window.compactWindow || (window.sidebarResizing ? window.sidebarDragCompact : appSettings.sidebarCollapsed)
+            expandedWidth: window.sidebarResizing
+                ? window.liveSidebarWidth
+                : Math.max(160, Math.min(appSettings.sidebarWidth, window.maxSidebarWidth))
+            resizing: window.sidebarResizing
+            toggleVisible: !window.compactWindow
+            onToggleCompactRequested: appSettings.sidebarCollapsed = !appSettings.sidebarCollapsed
             onSettingsRequested: window.openSettings()
         }
 
@@ -848,17 +863,17 @@ ApplicationWindow {
             anchors.topMargin: 8 + (window.inAppWindowControls && appSettings.windowControlsOnRight ? 36 : 0)
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 8
-            width: shown ? Appearance.sizes.sideSheetWidth : 0
+            width: shown ? window.activeRightPanelWidth : 0
             clip: true
             visible: width > 0.5
 
             Behavior on width {
-                enabled: !Appearance.performanceMode && window.rightPanelFits
+                enabled: !Appearance.performanceMode && window.rightPanelFits && !window.inspectorResizing
                 SpringAnimation { spring: 4; damping: 0.32; epsilon: 0.5 }
             }
 
             Rectangle {
-                width: Appearance.sizes.sideSheetWidth
+                width: window.activeRightPanelWidth
                 height: parent.height
                 radius: Appearance.rounding.large
                 color: Appearance.colors.layer1
@@ -871,6 +886,135 @@ ApplicationWindow {
                 QueuePanel {
                     anchors.fill: parent
                     Reveal.shown: UiState.showingQueue
+                }
+            }
+        }
+
+        // Left sidebar mouse resize handle (with drag-to-collapse threshold)
+        Item {
+            id: sidebarHandle
+            visible: !window.compactWindow && sidebar.visible
+            x: sidebar.x + sidebar.width - 2
+            y: sidebar.y
+            width: 12
+            height: sidebar.height
+            z: 20
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: sidebarDrag.pressed ? 3 : 2
+                height: sidebarDrag.pressed ? Math.min(84, parent.height * 0.20) : 44
+                radius: width / 2
+                color: sidebarDrag.pressed ? Appearance.colors.primary : Appearance.colors.outlineVariant
+                opacity: (sidebarDrag.containsMouse || sidebarDrag.pressed) ? 0.92 : 0
+
+                Behavior on opacity {
+                    NumberAnimation { duration: Appearance.duration(140) }
+                }
+                Behavior on height {
+                    enabled: !Appearance.performanceMode
+                    ElementMoveFast {}
+                }
+            }
+
+            MouseArea {
+                id: sidebarDrag
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.SizeHorCursor
+                property real startMouseX: 0
+                property real startWidth: 220
+
+                onPressed: (mouse) => {
+                    startMouseX = mapToItem(shell, mouse.x, mouse.y).x;
+                    startWidth = sidebar.width;
+                    window.sidebarDragCompact = sidebar.isCompact;
+                    window.liveSidebarWidth = startWidth;
+                    window.sidebarResizing = true;
+                }
+                onPositionChanged: (mouse) => {
+                    if (!pressed) return;
+                    const curX = mapToItem(shell, mouse.x, mouse.y).x;
+                    const raw = startWidth + (curX - startMouseX);
+                    if (raw <= 122) {
+                        window.sidebarDragCompact = true;
+                        window.liveSidebarWidth = 72;
+                    } else {
+                        window.sidebarDragCompact = false;
+                        window.liveSidebarWidth = Math.max(160, Math.min(window.maxSidebarWidth, raw));
+                    }
+                }
+                onReleased: {
+                    appSettings.sidebarCollapsed = window.sidebarDragCompact;
+                    if (!window.sidebarDragCompact) {
+                        appSettings.sidebarWidth = window.liveSidebarWidth;
+                    }
+                    window.sidebarResizing = false;
+                }
+                onCanceled: window.sidebarResizing = false
+                onDoubleClicked: {
+                    window.sidebarResizing = false;
+                    appSettings.sidebarCollapsed = false;
+                    appSettings.sidebarWidth = 220;
+                }
+            }
+        }
+
+        // Right lyrics/queue panel mouse resize handle (no collapse button)
+        Item {
+            id: inspectorHandle
+            visible: inspector.shown && inspector.width > 1
+            x: inspector.x - 10
+            y: inspector.y
+            width: 12
+            height: inspector.height
+            z: 20
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: inspectorDrag.pressed ? 3 : 2
+                height: inspectorDrag.pressed ? Math.min(84, parent.height * 0.20) : 44
+                radius: width / 2
+                color: inspectorDrag.pressed ? Appearance.colors.primary : Appearance.colors.outlineVariant
+                opacity: (inspectorDrag.containsMouse || inspectorDrag.pressed) ? 0.92 : 0
+
+                Behavior on opacity {
+                    NumberAnimation { duration: Appearance.duration(140) }
+                }
+                Behavior on height {
+                    enabled: !Appearance.performanceMode
+                    ElementMoveFast {}
+                }
+            }
+
+            MouseArea {
+                id: inspectorDrag
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.SizeHorCursor
+                property real startMouseX: 0
+                property real startWidth: 320
+
+                onPressed: (mouse) => {
+                    startMouseX = mapToItem(shell, mouse.x, mouse.y).x;
+                    startWidth = inspector.width;
+                    window.liveRightPanelWidth = startWidth;
+                    window.inspectorResizing = true;
+                }
+                onPositionChanged: (mouse) => {
+                    if (!pressed) return;
+                    const curX = mapToItem(shell, mouse.x, mouse.y).x;
+                    const raw = startWidth - (curX - startMouseX);
+                    window.liveRightPanelWidth = Math.max(200, Math.min(window.maxRightPanelWidth, raw));
+                }
+                onReleased: {
+                    appSettings.rightPanelWidth = window.liveRightPanelWidth;
+                    window.inspectorResizing = false;
+                }
+                onCanceled: window.inspectorResizing = false
+                onDoubleClicked: {
+                    window.inspectorResizing = false;
+                    appSettings.rightPanelWidth = 320;
                 }
             }
         }

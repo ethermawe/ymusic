@@ -200,6 +200,7 @@ jobs:
           $setupName = "ymusic-$tag-windows-x86_64-setup.exe"
           $setupPath = "$root\out\$setupName"
           & "C:\Program Files (x86)\NSIS\makensis.exe" `
+            "/INPUTCHARSET" "UTF8" `
             "/DAPP_VERSION=$ver" `
             "/DDIST_DIR=$root\dist" `
             "/DOUT_FILE=$setupPath" `

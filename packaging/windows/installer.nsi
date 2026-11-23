@@ -1,4 +1,4 @@
-Unicode True
+﻿Unicode True
 
 !ifndef APP_VERSION
   !define APP_VERSION "0.2.6"
@@ -34,7 +34,7 @@ ShowUnInstDetails show
 !define MUI_UNICON "${ICON_FILE}"
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"
-!define MUI_FINISHPAGE_RUN_TEXT "Запустить ${APP_NAME}"
+!define MUI_FINISHPAGE_RUN_TEXT "$(FINISH_RUN_TEXT)"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -47,6 +47,15 @@ ShowUnInstDetails show
 
 !insertmacro MUI_LANGUAGE "Russian"
 !insertmacro MUI_LANGUAGE "English"
+
+LangString FINISH_RUN_TEXT ${LANG_RUSSIAN} "Запустить ${APP_NAME}"
+LangString FINISH_RUN_TEXT ${LANG_ENGLISH} "Launch ${APP_NAME}"
+LangString SEC_DESKTOP_NAME ${LANG_RUSSIAN} "Ярлык на рабочем столе"
+LangString SEC_DESKTOP_NAME ${LANG_ENGLISH} "Desktop shortcut"
+LangString DESC_SEC_APP ${LANG_RUSSIAN} "Основные файлы ${APP_NAME} и ярлыки в меню «Пуск»."
+LangString DESC_SEC_APP ${LANG_ENGLISH} "Core ${APP_NAME} files and Start Menu shortcuts."
+LangString DESC_SEC_DESKTOP ${LANG_RUSSIAN} "Создать ярлык ${APP_NAME} на рабочем столе."
+LangString DESC_SEC_DESKTOP ${LANG_ENGLISH} "Create a ${APP_NAME} shortcut on the Desktop."
 
 Section "${APP_NAME}" SecApp
   SectionIn RO
@@ -93,13 +102,18 @@ Section "${APP_NAME}" SecApp
   WriteRegDWORD HKCU "${UNINSTALL_REG_KEY}" "EstimatedSize" "$0"
 SectionEnd
 
-Section "Ярлык на рабочем столе" SecDesktop
+Section "$(SEC_DESKTOP_NAME)" SecDesktop
   ; Avoid recreating a desktop shortcut the user deleted when applying a silent update.
   ${IfNot} ${Silent}
   ${OrIf} ${FileExists} "$DESKTOP\${APP_NAME}.lnk"
     CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
   ${EndIf}
 SectionEnd
+
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecApp} $(DESC_SEC_APP)
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecDesktop} $(DESC_SEC_DESKTOP)
+!insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 Function .onInstSuccess
   ${GetParameters} $R0

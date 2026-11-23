@@ -248,6 +248,14 @@ pub struct State {
     pub wave_selected: HashMap<String, String>,
     pub search_query: String,
     pub search_filter: String,
+    pub search_suggest_seq: u64,
+    pub quick_search_tracks: Vec<Track>,
+    pub quick_search_best: Option<api::SearchBest>,
+    pub search_best: Option<api::SearchBest>,
+    pub search_page: u32,
+    pub search_has_more: bool,
+    pub search_loading_more: bool,
+    pub search_history: Vec<String>,
     pub collection_downloadable: bool,
     pub active_playlist: Option<config::PinnedPlaylist>,
     pub active_album_id: Option<String>,
@@ -373,6 +381,104 @@ fn strip_legacy_playlist_title(title: &str) -> &str {
 
 fn is_playlist_pinned(pinned: &[config::PinnedPlaylist], uid: u64, kind: u64) -> bool {
     pinned.iter().any(|p| p.uid == uid && p.kind == kind)
+}
+
+fn quick_tracks_payload(tracks: &[Track], liked_ids: &HashSet<String>) -> Vec<serde_json::Value> {
+    tracks
+        .iter()
+        .map(|t| {
+            let cover_url = cache::resolve_track_cover_url(t, 200);
+            serde_json::json!({
+                "id": t.id,
+                "title": t.title,
+                "artists": t.artists,
+                "duration": fmt_time(t.duration_ms as f64 / 1000.0),
+                "cover_url": cover_url,
+                "has_cover": !cover_url.is_empty(),
+                "available": t.available,
+                "liked": liked_ids.contains(&t.id),
+                "is_ai": t.is_ai,
+            })
+        })
+        .collect()
+}
+
+fn search_best_payload(best: &api::SearchBest, liked_ids: &HashSet<String>) -> serde_json::Value {
+    match best {
+        api::SearchBest::Track(t) => {
+            let cover_url = cache::resolve_track_cover_url(t, 200);
+            serde_json::json!({
+                "kind": "track",
+                "id": t.id,
+                "title": t.title,
+                "subtitle": t.artists,
+                "duration": fmt_time(t.duration_ms as f64 / 1000.0),
+                "cover_url": cover_url,
+                "has_cover": !cover_url.is_empty(),
+                "circular": false,
+                "available": t.available,
+                "liked": liked_ids.contains(&t.id),
+                "is_ai": t.is_ai,
+            })
+        }
+        api::SearchBest::Artist(a) => {
+            let cover_url = api::cover_url(a.cover_uri.as_deref(), 200).unwrap_or_default();
+            let subtitle = if !a.stats.is_empty() {
+                a.stats.clone()
+            } else if !a.genres.is_empty() {
+                a.genres.clone()
+            } else {
+                "Исполнитель".to_string()
+            };
+            serde_json::json!({
+                "kind": "artist",
+                "id": a.id,
+                "title": a.name,
+                "subtitle": subtitle,
+                "cover_url": cover_url,
+                "has_cover": !cover_url.is_empty(),
+                "circular": true,
+            })
+        }
+        api::SearchBest::Album(a) => {
+            let cover_url = api::cover_url(a.cover_uri.as_deref(), 200).unwrap_or_default();
+            let subtitle = match a.year {
+                Some(y) if !a.artists.is_empty() => format!("{} • {y}", a.artists),
+                _ if !a.artists.is_empty() => a.artists.clone(),
+                _ => "Альбом".to_string(),
+            };
+            serde_json::json!({
+                "kind": "album",
+                "id": a.id,
+                "title": a.title,
+                "subtitle": subtitle,
+                "cover_url": cover_url,
+                "has_cover": !cover_url.is_empty(),
+                "circular": false,
+            })
+        }
+        api::SearchBest::Playlist(p) => {
+            let cover_url = api::cover_url(p.cover_uri.as_deref(), 200).unwrap_or_default();
+            serde_json::json!({
+                "kind": "playlist",
+                "uid": p.uid,
+                "playlist_kind": p.kind,
+                "title": p.title,
+                "subtitle": p.subtitle,
+                "cover_url": cover_url,
+                "has_cover": !cover_url.is_empty(),
+                "circular": false,
+            })
+        }
+    }
+}
+
+fn card_dedup_key(c: &CardTarget) -> String {
+    match c {
+        CardTarget::Playlist { uid, kind, .. } => format!("playlist:{uid}:{kind}"),
+        CardTarget::Album(a) => format!("album:{}", a.id),
+        CardTarget::Artist(ar) => format!("artist:{}", ar.id),
+    }
 }
 
 fn card_payload(c: &CardTarget, pinned: &[config::PinnedPlaylist]) -> CardItemPayload {
@@ -589,6 +695,17 @@ mod queue_tests {
                 current: Some(1),
                 position_secs: 42.5,
                 duration_secs: 180.0,
+                wave: Some(WaveState {
+                    seed: "user:onyourwave".into(),
+                    title: "Моя волна".into(),
+                    session_id: "sid-1".into(),
+                    batch_id: "bid-1".into(),
+                    tracks: vec![track("t1")],
+                    filters: vec!["settingMood:energetic".into()],
+                    fetching_more: false,
+                    resume_on_load: false,
+                }),
+                wave_selected: HashMap::from([("mood".into(), "settingMood:energetic".into())]),
                 ..State::default()
             })),
             cover_sem: Arc::new(Semaphore::new(4)),
@@ -639,6 +756,7 @@ mod queue_tests {
             assert_eq!(st2.queue[1].id, "t2");
             assert_eq!(st2.unshuffled_queue.as_ref().unwrap()[0].id, "t2");
             assert!(!st2.audio_started);
+            assert_eq!(st2.wave_selected.get("mood").map(String::as_str), Some("settingMood:energetic"));
         }
         let captured = events2.lock().unwrap();
         assert!(captured.iter().any(|(t, json)| *t == EVENT_NOW_PLAYING && json.contains("\"t2\"")));
@@ -1090,20 +1208,141 @@ impl YMusicCore {
             }
             "search_suggest" => {
                 let part = cmd["part"].as_str().unwrap_or("").trim().to_string();
+                let (seq, history) = {
+                    let mut st = self.state.lock().unwrap();
+                    st.search_suggest_seq = st.search_suggest_seq.wrapping_add(1);
+                    if part.is_empty() {
+                        st.quick_search_tracks.clear();
+                        st.quick_search_best = None;
+                    }
+                    (st.search_suggest_seq, st.search_history.clone())
+                };
                 if part.is_empty() {
-                    self.send_feature("search_suggest", serde_json::json!({"part": "", "suggestions": []}));
+                    self.send_feature("search_suggest", serde_json::json!({
+                        "part": "",
+                        "suggestions": [],
+                        "tracks": [],
+                        "best": serde_json::Value::Null,
+                        "history": history,
+                    }));
                     return;
                 }
                 let Some(api) = self.api() else { return };
                 let this = self.clone();
                 self.rt_handle.spawn(async move {
-                    if let Ok(suggestions) = api.search_suggest(&part).await {
-                        this.send_feature("search_suggest", serde_json::json!({
-                            "part": part,
-                            "suggestions": suggestions,
-                        }));
+                    let (suggest_res, tracks_res) = tokio::join!(
+                        api.search_suggest_rich(&part),
+                        api.search_filtered_page(&part, "track", 0)
+                    );
+                    let suggestions = suggest_res.as_ref().map(|r| r.suggestions.clone()).unwrap_or_default();
+                    let best_raw = suggest_res
+                        .as_ref()
+                        .ok()
+                        .and_then(|r| r.best.clone())
+                        .or_else(|| tracks_res.as_ref().ok().and_then(|r| r.best.clone()));
+
+                    let mut quick_tracks: Vec<Track> = Vec::new();
+                    let mut seen_ids = HashSet::new();
+                    if let Some(api::SearchBest::Track(ref bt)) = best_raw {
+                        seen_ids.insert(bt.id.clone());
+                        quick_tracks.push(bt.clone());
                     }
+                    if let Ok(ref tr) = tracks_res {
+                        for t in &tr.tracks {
+                            if quick_tracks.len() >= 5 {
+                                break;
+                            }
+                            if seen_ids.insert(t.id.clone()) {
+                                quick_tracks.push(t.clone());
+                            }
+                        }
+                    }
+
+                    let quick_best = best_raw.filter(|b| !matches!(b, api::SearchBest::Track(_)));
+                    let (payload_tracks, payload_best, history) = {
+                        let mut st = this.state.lock().unwrap();
+                        if st.search_suggest_seq != seq {
+                            return;
+                        }
+                        st.quick_search_tracks = quick_tracks.clone();
+                        st.quick_search_best = quick_best.clone();
+                        let pt = quick_tracks_payload(&quick_tracks, &st.liked_ids);
+                        let pb = quick_best
+                            .as_ref()
+                            .map(|b| search_best_payload(b, &st.liked_ids))
+                            .unwrap_or(serde_json::Value::Null);
+                        (pt, pb, st.search_history.clone())
+                    };
+                    this.send_feature("search_suggest", serde_json::json!({
+                        "part": part,
+                        "suggestions": suggestions,
+                        "tracks": payload_tracks,
+                        "best": payload_best,
+                        "history": history,
+                    }));
                 });
+            }
+            "play_quick_track" => {
+                let Some(id) = cmd["id"].as_str().filter(|s| !s.is_empty()) else { return };
+                let idx_found = {
+                    let mut st = self.state.lock().unwrap();
+                    if let Some(pos) = st.quick_search_tracks.iter().position(|t| t.id == id) {
+                        st.queue = st.quick_search_tracks.clone();
+                        st.wave = None;
+                        st.unshuffled_queue = None;
+                        Some(pos)
+                    } else if let Some(api::SearchBest::Track(ref bt)) = st.search_best
+                        && bt.id == id
+                    {
+                        st.queue = vec![bt.clone()];
+                        st.wave = None;
+                        st.unshuffled_queue = None;
+                        Some(0)
+                    } else if let Some(pos) = st.list.iter().position(|t| t.id == id) {
+                        st.queue = st.list.clone();
+                        st.wave = None;
+                        st.unshuffled_queue = None;
+                        Some(pos)
+                    } else {
+                        None
+                    }
+                };
+                if let Some(index) = idx_found {
+                    self.play_index(index, true);
+                }
+            }
+            "open_search_best" => {
+                let source = cmd["source"].as_str().unwrap_or("search");
+                let best = {
+                    let st = self.state.lock().unwrap();
+                    if source == "suggest" {
+                        st.quick_search_best.clone()
+                    } else {
+                        st.search_best.clone()
+                    }
+                };
+                let Some(best) = best else { return };
+                match best {
+                    api::SearchBest::Track(t) => {
+                        {
+                            let mut st = self.state.lock().unwrap();
+                            st.queue = vec![t];
+                            st.wave = None;
+                            st.unshuffled_queue = None;
+                        }
+                        self.play_index(0, true);
+                    }
+                    api::SearchBest::Artist(a) => self.clone().open_artist(a.id),
+                    api::SearchBest::Album(a) => self.clone().open_album(a.id),
+                    api::SearchBest::Playlist(p) => self.clone().open_playlist(p.uid, p.kind, p.title),
+                }
+            }
+            "clear_search_history" => {
+                self.state.lock().unwrap().search_history.clear();
+                self.send_feature("search_history", serde_json::json!({ "history": [] }));
+            }
+            "search_more" => {
+                self.search_more();
             }
             "open_chart" => {
                 self.open_chart();
@@ -1391,11 +1630,13 @@ impl YMusicCore {
             };
             st.ai_strict_tracks = settings.ai_strict_tracks;
             st.show_ai_labels = settings.show_ai_labels;
+            st.wave_selected = settings.wave_selected.clone();
         }
 
         core.send_playback_state(false);
         core.send_pinned_playlists();
         core.send_view_feature();
+        core.send_feature("wave_applied", serde_json::json!({"selected": settings.wave_selected}));
         if let Some(session) = settings.session {
             core.apply_saved_session(session);
         }
@@ -1805,6 +2046,7 @@ impl YMusicCore {
             s.user_name = None;
             s.user_avatar_url = None;
             s.session = None;
+            s.wave_selected.clear();
         });
         {
             let mut st = self.state.lock().unwrap();
@@ -2761,6 +3003,19 @@ impl YMusicCore {
                         st.wave_groups = groups.clone();
                         st.wave_selected.retain(|key, seed| groups.iter().any(|g|
                             &g.key == key && g.choices.iter().any(|c| &c.seed == seed)));
+                        let legacy_filters = st
+                            .wave
+                            .as_ref()
+                            .filter(|w| w.seed == "user:onyourwave")
+                            .map(|w| w.filters.clone())
+                            .unwrap_or_default();
+                        if st.wave_selected.is_empty() && !legacy_filters.is_empty() {
+                            for g in &groups {
+                                if let Some(choice) = g.choices.iter().find(|c| legacy_filters.contains(&c.seed)) {
+                                    st.wave_selected.insert(g.key.clone(), choice.seed.clone());
+                                }
+                            }
+                        }
                         st.wave_selected.clone()
                     };
                     this.send_feature("wave_settings", serde_json::json!({"groups": groups, "selected": selected}));
@@ -2808,10 +3063,18 @@ impl YMusicCore {
                     fetching_more: false,
                     resume_on_load: false,
                 });
+                let persist_selected = selected.is_some();
                 if let Some(selected) = selected { st.wave_selected = selected; }
+                let selected_snapshot = if persist_selected { Some(st.wave_selected.clone()) } else { None };
                 st.unshuffled_queue = None;
                 st.queue = session.tracks.clone();
                 st.current = None;
+                drop(st);
+                if let Some(sel) = selected_snapshot {
+                    tokio::task::spawn_blocking(move || {
+                        config::update_settings(|s| s.wave_selected = sel);
+                    });
+                }
             }
             let (sid, bid) = (session.session_id.clone(), session.batch_id.clone());
             let api_fb = api.clone();
@@ -2969,13 +3232,33 @@ impl YMusicCore {
 
     pub fn search_with_filter(self: Arc<Self>, query: String, filter: String) {
         if !["all", "track", "album", "artist", "playlist"].contains(&filter.as_str()) { return; }
-        {
+        let history = {
             let mut st = self.state.lock().unwrap();
             st.search_query = query.clone();
             st.search_filter = filter.clone();
-        }
-        self.send_feature("search", serde_json::json!({"query": query, "filter": filter}));
+            st.search_page = 0;
+            st.search_has_more = false;
+            st.search_loading_more = false;
+            st.search_best = None;
+            if !query.trim().is_empty() {
+                let trimmed = query.trim().to_string();
+                st.search_history.retain(|item| !item.eq_ignore_ascii_case(&trimmed));
+                st.search_history.insert(0, trimmed);
+                st.search_history.truncate(8);
+            }
+            st.search_history.clone()
+        };
+        self.send_feature("search", serde_json::json!({
+            "query": query,
+            "filter": filter,
+            "best": serde_json::Value::Null,
+            "has_more": false,
+            "loading_more": false,
+            "history": history,
+        }));
         if query.is_empty() {
+            let view = self.begin_cached_view(None, 8, "Поиск музыки".into(), String::new());
+            self.apply_cached_view(view, None, Some("Поиск музыки".into()), Some(String::new()), Vec::new(), Vec::new(), None, None);
             return;
         }
         let Some(api) = self.api() else { return };
@@ -2989,13 +3272,15 @@ impl YMusicCore {
         );
         let this = self.clone();
         self.rt_handle.spawn(async move {
-            match api.search_filtered(&query, &filter).await {
+            match api.search_filtered_page(&query, &filter, 0).await {
                 Ok(res) => {
                     let mut cards = Vec::new();
                     cards.extend(res.artists.into_iter().map(CardTarget::Artist));
                     cards.extend(res.albums.into_iter().map(CardTarget::Album));
                     cards.extend(res.playlists.into_iter().map(playlist_target));
-                    this.apply_cached_view(
+                    let best = res.best;
+                    let has_more = res.has_more;
+                    let applied = this.apply_cached_view(
                         view,
                         Some(&key),
                         Some(title),
@@ -3005,8 +3290,118 @@ impl YMusicCore {
                         None,
                         None,
                     );
+                    if applied {
+                        let (best_json, history) = {
+                            let mut st = this.state.lock().unwrap();
+                            st.search_best = best.clone();
+                            st.search_page = 0;
+                            st.search_has_more = has_more;
+                            st.search_loading_more = false;
+                            let bj = best
+                                .as_ref()
+                                .map(|b| search_best_payload(b, &st.liked_ids))
+                                .unwrap_or(serde_json::Value::Null);
+                            (bj, st.search_history.clone())
+                        };
+                        this.send_feature("search", serde_json::json!({
+                            "query": query,
+                            "filter": filter,
+                            "best": best_json,
+                            "has_more": has_more,
+                            "loading_more": false,
+                            "history": history,
+                        }));
+                    }
                 }
                 Err(e) => this.view_failed(view, "Поиск", e),
+            }
+        });
+    }
+
+    pub fn search_more(self: Arc<Self>) {
+        let (query, filter, next_page, view, history) = {
+            let mut st = self.state.lock().unwrap();
+            if st.search_query.trim().is_empty() || !st.search_has_more || st.search_loading_more || st.page != 8 {
+                return;
+            }
+            st.search_loading_more = true;
+            (st.search_query.clone(), st.search_filter.clone(), st.search_page + 1, st.view_id, st.search_history.clone())
+        };
+        let Some(api) = self.api() else {
+            self.state.lock().unwrap().search_loading_more = false;
+            return;
+        };
+        self.send_feature("search", serde_json::json!({
+            "query": query,
+            "filter": filter,
+            "has_more": true,
+            "loading_more": true,
+            "history": history,
+        }));
+        let this = self.clone();
+        self.rt_handle.spawn(async move {
+            match api.search_filtered_page(&query, &filter, next_page).await {
+                Ok(res) => {
+                    let mut new_cards = Vec::new();
+                    new_cards.extend(res.artists.into_iter().map(CardTarget::Artist));
+                    new_cards.extend(res.albums.into_iter().map(CardTarget::Album));
+                    new_cards.extend(res.playlists.into_iter().map(playlist_target));
+                    let has_more = res.has_more;
+
+                    let update = {
+                        let mut st = this.state.lock().unwrap();
+                        if st.view_id != view || st.page != 8 || st.search_query != query || st.search_filter != filter {
+                            st.search_loading_more = false;
+                            None
+                        } else {
+                            let existing_track_ids: HashSet<String> = st.list.iter().map(|t| t.id.clone()).collect();
+                            for t in res.tracks {
+                                if !existing_track_ids.contains(&t.id) {
+                                    st.list.push(t);
+                                }
+                            }
+                            let existing_card_keys: HashSet<String> = st.cards.iter().map(card_dedup_key).collect();
+                            for c in new_cards {
+                                if !existing_card_keys.contains(&card_dedup_key(&c)) {
+                                    st.cards.push(c);
+                                }
+                            }
+                            st.search_page = next_page;
+                            st.search_has_more = has_more;
+                            st.search_loading_more = false;
+                            let cards_p: Vec<CardItemPayload> = st.cards.iter().map(|c| card_payload(c, &st.pinned_playlists)).collect();
+                            let tracks_p: Vec<TrackItemPayload> = st.list.iter().map(|t| track_payload(t, &st.liked_ids)).collect();
+                            let cur = current_list_index(&st);
+                            let best_json = st.search_best
+                                .as_ref()
+                                .map(|b| search_best_payload(b, &st.liked_ids))
+                                .unwrap_or(serde_json::Value::Null);
+                            Some((cards_p, tracks_p, cur, best_json, st.search_history.clone()))
+                        }
+                    };
+                    if let Some((cards_p, tracks_p, cur, best_json, history)) = update {
+                        this.send_event(EVENT_CARDS_LOADED, &CardsPayload { cards: cards_p });
+                        this.send_event(EVENT_TRACKS_LOADED, &TracksPayload { tracks: tracks_p, current_index: cur });
+                        this.send_feature("search", serde_json::json!({
+                            "query": query,
+                            "filter": filter,
+                            "best": best_json,
+                            "has_more": has_more,
+                            "loading_more": false,
+                            "history": history,
+                        }));
+                    }
+                }
+                Err(e) => {
+                    this.state.lock().unwrap().search_loading_more = false;
+                    this.send_feature("search", serde_json::json!({
+                        "query": query,
+                        "filter": filter,
+                        "has_more": true,
+                        "loading_more": false,
+                    }));
+                    this.error(format!("Догрузка поиска: {e}"));
+                }
             }
         });
     }
@@ -4353,6 +4748,7 @@ impl YMusicCore {
         let wave = st.wave.as_ref().map(|w| config::SavedWaveState {
             seed: w.seed.clone(),
             filters: w.filters.clone(),
+            selected: st.wave_selected.clone(),
             title: w.title.clone(),
             session_id: w.session_id.clone(),
             batch_id: w.batch_id.clone(),
@@ -4399,7 +4795,7 @@ impl YMusicCore {
         let pos_text = fmt_time(pos_secs);
         let dur_text = fmt_time(duration_secs);
 
-        let liked = {
+        let (liked, restored_wave_selected) = {
             let mut st = self.state.lock().unwrap();
             if st.current.is_some() || st.audio_started {
                 return;
@@ -4412,6 +4808,21 @@ impl YMusicCore {
             st.duration_secs = duration_secs;
             st.audio_started = false;
             if let Some(w) = session.wave {
+                if !w.selected.is_empty() {
+                    st.wave_selected = w.selected.clone();
+                } else if !w.filters.is_empty() && !st.wave_groups.is_empty() {
+                    let restored: Vec<(String, String)> = st
+                        .wave_groups
+                        .iter()
+                        .filter_map(|g| {
+                            g.choices
+                                .iter()
+                                .find(|c| w.filters.contains(&c.seed))
+                                .map(|c| (g.key.clone(), c.seed.clone()))
+                        })
+                        .collect();
+                    st.wave_selected.extend(restored);
+                }
                 st.wave = Some(WaveState {
                     seed: w.seed,
                     filters: w.filters,
@@ -4423,7 +4834,7 @@ impl YMusicCore {
                     resume_on_load: false,
                 });
             }
-            st.liked_ids.contains(&track.id)
+            (st.liked_ids.contains(&track.id), st.wave_selected.clone())
         };
 
         let cover_url = cache::resolve_track_cover_url(&track, 400);
@@ -4466,6 +4877,9 @@ impl YMusicCore {
         );
         self.discord.set_track(&track, MprisStatus::Paused);
         self.send_queue();
+        if !restored_wave_selected.is_empty() {
+            self.send_feature("wave_applied", serde_json::json!({"selected": restored_wave_selected}));
+        }
     }
 
     pub fn restore_session(self: Arc<Self>) {

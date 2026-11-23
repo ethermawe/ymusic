@@ -7,7 +7,7 @@ Item {
 
     property MaterialScheme scheme: Appearance.colors
     property bool compact: false
-    property string tooltip: qsTr("Сгенерировано ИИ (Slopless)")
+    property string tooltip: qsTr("Сгенерировано ИИ")
     readonly property bool hovered: hover.hovered
 
     implicitWidth: pill.implicitWidth

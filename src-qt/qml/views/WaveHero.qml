@@ -36,7 +36,19 @@ FocusScope {
         if (settingsOpen && !settingsPopup.opened) settingsPopup.open();
         else if (!settingsOpen && settingsPopup.opened) settingsPopup.close();
     }
-    onVisibleChanged: if (!visible && settingsOpen) settingsOpen = false
+    onVisibleChanged: {
+        if (!visible) {
+            if (settingsOpen) settingsOpen = false;
+            waveAutoReturnTimer.stop();
+            waveWheel.stopSmooth();
+            waveTrackList.manualBrowsing = false;
+        } else {
+            if (root.groups.length === 0 && !root.fetching && backend.loggedIn) {
+                root.reload();
+            }
+            Qt.callLater(waveTrackList.follow, false);
+        }
+    }
 
     readonly property var groups: backend.waveSettings.groups || []
     readonly property bool inWave: backend.tracks.currentIndex >= 0
@@ -49,10 +61,13 @@ FocusScope {
         ? Math.min(350, Math.max(240, usableHeight * 0.56))
         : Math.min(540, Math.max(360, Math.min(usableHeight - 108, rightStage.width * 0.80)))
     readonly property bool showsRing: appSettings.visualizersEnabled && appSettings.waveVisualizer && !Appearance.performanceMode
+    readonly property bool auroraActive: appSettings.waveAurora && !Appearance.performanceMode
+    readonly property bool showsOrbCover: appSettings.waveOrbArtwork && root.inWave && backend.hasCover
+    property real auroraIdleTime: 0
     readonly property real innerOrbSize: showsRing ? stageOrbDiameter * ring.innerRadiusRatio : stageOrbDiameter * 0.76
     readonly property real beatEnergy: root.wavePlaying && !Appearance.reduceMotion && !Appearance.performanceMode
         ? Math.min(1.5, clock.energy.x * 0.45 + clock.energy.y * 0.55) : 0
-    readonly property real orbBeatScale: 1.0 + root.beatEnergy * 0.055
+    readonly property real orbBeatScale: 1.0 + root.beatEnergy * 0.048
     property real orbVisualScale: coreMouse.pressed ? 0.93 : (coreHover.hovered ? 1.05 : 1.0)
     Behavior on orbVisualScale { enabled: !Appearance.performanceMode; Bounce {} }
 
@@ -138,6 +153,53 @@ FocusScope {
         running: root.wavePlaying && root.visible && !Appearance.reduceMotion && !Appearance.performanceMode
         playing: root.wavePlaying
         reactivity: appSettings.waveReactivity
+    }
+
+    FrameAnimation {
+        running: root.visible && root.auroraActive && !root.wavePlaying && !Appearance.reduceMotion
+        onTriggered: root.auroraIdleTime += frameTime * 0.65
+    }
+
+    function paletteShade(index: int, fallback: color): color {
+        const pal = PlayerStyle.palette;
+        if (root.inWave && pal && pal.length > 0) {
+            return pal[index % pal.length];
+        }
+        return fallback;
+    }
+
+    // 3D silk-plasma sphere + acoustic wave fronts spanning behind the split stage
+    ShaderEffect {
+        id: waveAurora
+        anchors.fill: parent
+        visible: root.auroraActive
+        fragmentShader: "qrc:/shaders/wave_aurora.frag.qsb"
+
+        property size itemSize: Qt.size(width, height)
+        property point orbCenter: Qt.point(
+            splitContainer.x + rightStage.x + orbColumn.x + coreStage.x + coreStage.width * 0.5,
+            splitContainer.y + rightStage.y + orbColumn.y + coreStage.y + coreStage.height * 0.5
+        )
+        property real radius: 0
+        property real time: Appearance.reduceMotion ? 0 : (clock.time + root.auroraIdleTime)
+        property vector4d energy: root.wavePlaying ? clock.energy : Qt.vector4d(0, 0, 0, 0)
+        property real lead: root.wavePlaying ? clock.lead : 0
+        property real waveActive: root.wavePlaying ? 1.0 : 0.0
+        Behavior on waveActive {
+            enabled: !Appearance.reduceMotion
+            NumberAnimation { duration: 480; easing.type: Easing.InOutQuad }
+        }
+        property color bgColor: Appearance.colors.layer1
+        property color c0: root.paletteShade(0, Appearance.colors.primary)
+        property color c1: root.paletteShade(1, Appearance.colors.tertiary)
+        property color c2: root.paletteShade(2, Appearance.colors.secondary)
+        property real orbSize: (coreButton.width * 0.5) * root.orbVisualScale
+        property real tintStrength: appSettings.visualizersEnabled ? 0.95 : 0.72
+        property real hasCover: root.showsOrbCover ? 1.0 : 0.0
+        Behavior on hasCover {
+            enabled: !Appearance.reduceMotion
+            NumberAnimation { duration: 280; easing.type: Easing.InOutQuad }
+        }
     }
 
     component Chip: Button {
@@ -336,8 +398,190 @@ FocusScope {
                     flickDeceleration: 2400
                     model: root.visible ? backend.tracks : null
 
-                    FastWheel { target: waveTrackList }
-                    ScrollBar.vertical: StyledScrollBar {}
+                    property bool autoScrolling: false
+                    property bool manualBrowsing: false
+                    property bool scrolledAway: false
+
+                    FastWheel {
+                        id: waveWheel
+                        target: waveTrackList
+                        onWheelScrolled: {
+                            waveScroll.stop();
+                            waveTrackList.manualBrowsing = true;
+                            waveTrackList.scheduleAutoReturn();
+                        }
+                    }
+
+                    HoverHandler {
+                        id: wavePointerActivity
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        property real lastX: -1
+                        property real lastY: -1
+                        onHoveredChanged: {
+                            if (hovered && waveTrackList.manualBrowsing) {
+                                lastX = point.position.x;
+                                lastY = point.position.y;
+                                waveTrackList.scheduleAutoReturn();
+                            }
+                        }
+                        onPointChanged: {
+                            if (!hovered || !waveTrackList.manualBrowsing) return;
+                            const dx = point.position.x - lastX;
+                            const dy = point.position.y - lastY;
+                            if (dx * dx + dy * dy >= 4) {
+                                lastX = point.position.x;
+                                lastY = point.position.y;
+                                waveTrackList.scheduleAutoReturn();
+                            }
+                        }
+                    }
+
+                    Timer {
+                        id: waveAutoReturnTimer
+                        interval: 5000
+                        repeat: false
+                        onTriggered: {
+                            if (!waveTrackList.manualBrowsing || !root.inWave || !root.visible || backend.tracks.count === 0) {
+                                return;
+                            }
+                            if (waveTrackList.dragging || waveTrackList.moving || waveBar.pressed
+                                    || waveWheel.activeFlick === waveTrackList
+                                    || wavePointerActivity.point.pressedButtons !== Qt.NoButton) {
+                                waveAutoReturnTimer.restart();
+                                return;
+                            }
+                            waveTrackList.resumeFollowing();
+                        }
+                    }
+
+                    function scheduleAutoReturn() {
+                        if (manualBrowsing && root.inWave && root.visible && backend.tracks.count > 0 && !dragging && !waveBar.pressed) {
+                            waveAutoReturnTimer.restart();
+                        }
+                    }
+
+                    function resumeFollowing() {
+                        waveAutoReturnTimer.stop();
+                        manualBrowsing = false;
+                        follow(true);
+                    }
+
+                    function updateScrolledAway() {
+                        const index = backend.tracks.currentIndex;
+                        if (!root.inWave || index < 0 || index >= backend.tracks.count) {
+                            scrolledAway = false;
+                            return;
+                        }
+                        const item = waveTrackList.itemAtIndex(index);
+                        if (!item) {
+                            scrolledAway = true;
+                            return;
+                        }
+                        const viewTop = waveTrackList.contentY + 8;
+                        const viewBottom = waveTrackList.contentY + waveTrackList.height - 8;
+                        scrolledAway = (item.y + item.height) < viewTop || item.y > viewBottom;
+                    }
+
+                    function follow(animated: bool) {
+                        if (manualBrowsing || !root.visible) {
+                            updateScrolledAway();
+                            return;
+                        }
+                        waveWheel.stopSmooth();
+                        const index = backend.tracks.currentIndex;
+                        if (!root.inWave || index < 0 || index >= backend.tracks.count) {
+                            updateScrolledAway();
+                            return;
+                        }
+                        let item = waveTrackList.itemAtIndex(index);
+                        if (!item) {
+                            waveScroll.stop();
+                            autoScrolling = true;
+                            waveTrackList.positionViewAtIndex(index, ListView.Beginning);
+                            autoScrolling = false;
+                            item = waveTrackList.itemAtIndex(index);
+                            if (!item) {
+                                updateScrolledAway();
+                                return;
+                            }
+                        }
+                        const minY = waveTrackList.originY - waveTrackList.topMargin;
+                        const maxY = Math.max(minY,
+                            waveTrackList.contentHeight + waveTrackList.originY - waveTrackList.height + waveTrackList.bottomMargin);
+                        const anchorOffset = Math.min(72, Math.max(0, waveTrackList.height * 0.22));
+                        const target = Math.max(minY, Math.min(item.y - anchorOffset, maxY));
+                        waveScroll.stop();
+                        if (animated && !Appearance.performanceMode && !Appearance.reduceMotion
+                                && Math.abs(target - waveTrackList.contentY) >= 2) {
+                            waveScroll.from = waveTrackList.contentY;
+                            waveScroll.to = target;
+                            waveScroll.start();
+                            return;
+                        }
+                        autoScrolling = true;
+                        waveTrackList.contentY = target;
+                        autoScrolling = false;
+                        updateScrolledAway();
+                    }
+
+                    NumberAnimation {
+                        id: waveScroll
+                        target: waveTrackList
+                        property: "contentY"
+                        duration: 380
+                        easing.type: Easing.OutCubic
+                        onStopped: waveTrackList.updateScrolledAway()
+                    }
+
+                    onDraggingChanged: {
+                        if (dragging) {
+                            waveScroll.stop();
+                            manualBrowsing = true;
+                            waveAutoReturnTimer.stop();
+                        } else {
+                            scheduleAutoReturn();
+                        }
+                    }
+
+                    onContentYChanged: {
+                        if (!autoScrolling && !waveScroll.running
+                                && (moving || dragging || waveBar.pressed || waveWheel.activeFlick === waveTrackList)) {
+                            manualBrowsing = true;
+                            if (!dragging && !waveBar.pressed) {
+                                scheduleAutoReturn();
+                            }
+                        }
+                        updateScrolledAway();
+                    }
+
+                    onHeightChanged: Qt.callLater(waveTrackList.follow, false)
+
+                    Connections {
+                        target: backend.tracks
+                        function onCurrentIndexChanged() {
+                            if (!waveTrackList.manualBrowsing) {
+                                Qt.callLater(waveTrackList.follow, true);
+                            } else {
+                                waveTrackList.updateScrolledAway();
+                            }
+                        }
+                        function onCountChanged() {
+                            Qt.callLater(waveTrackList.updateScrolledAway);
+                        }
+                    }
+
+                    ScrollBar.vertical: StyledScrollBar {
+                        id: waveBar
+                        onPressedChanged: {
+                            if (pressed) {
+                                waveScroll.stop();
+                                waveTrackList.manualBrowsing = true;
+                                waveAutoReturnTimer.stop();
+                            } else {
+                                waveTrackList.scheduleAutoReturn();
+                            }
+                        }
+                    }
 
                     layer.enabled: true
                     layer.effect: ShaderEffect {
@@ -348,6 +592,46 @@ FocusScope {
 
                     delegate: TrackRow {
                         width: waveTrackList.width
+                    }
+                }
+
+                Rectangle {
+                    id: waveJumpPill
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.rightMargin: 12
+                    anchors.bottomMargin: 10
+                    z: 5
+                    height: 28
+                    radius: 14
+                    width: waveJumpText.implicitWidth + 22
+                    visible: root.inWave && waveTrackList.scrolledAway && backend.tracks.count > 0
+                    color: waveJumpMouse.containsMouse
+                        ? Appearance.colors.primary
+                        : Appearance.colors.surfaceContainerHighest
+                    border.width: 1
+                    border.color: waveJumpMouse.containsMouse
+                        ? Appearance.colors.primary
+                        : Appearance.colors.outlineVariant
+
+                    Behavior on color { ElementMoveFastColor {} }
+                    Behavior on border.color { ElementMoveFastColor {} }
+
+                    StyledText {
+                        id: waveJumpText
+                        anchors.centerIn: parent
+                        text: "К текущему"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        color: waveJumpMouse.containsMouse ? Appearance.colors.onPrimary : Appearance.colors.onSurface
+                    }
+
+                    MouseArea {
+                        id: waveJumpMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: waveTrackList.resumeFollowing()
                     }
                 }
 
@@ -425,8 +709,9 @@ FocusScope {
                         easing.overshoot: 2
                     }
 
-                    // Wide ambient aura so the right stage feels full and atmospheric
+                    // Wide ambient aura so the right stage feels full and atmospheric (fallback when Aurora is off)
                     ArtworkGlow {
+                        visible: !root.auroraActive
                         anchors.centerIn: parent
                         width: root.stageOrbDiameter * 1.18
                         height: width
@@ -439,6 +724,7 @@ FocusScope {
                     }
 
                     ArtworkGlow {
+                        visible: !root.auroraActive
                         anchors.centerIn: parent
                         width: root.innerOrbSize * 1.04
                         height: width
@@ -453,7 +739,7 @@ FocusScope {
                     SpectrumView {
                         id: ring
                         anchors.fill: parent
-                        Reveal.shown: root.showsRing
+                        Reveal.shown: root.showsRing && (root.wavePlaying || !root.auroraActive)
                         kind: SpectrumView.Ring
                         wave: appSettings.waveVisualizerShape === "wave"
                         sensitivity: appSettings.waveVisualizerSensitivity
@@ -475,9 +761,16 @@ FocusScope {
                             anchors.fill: parent
                             circular: true
                             showArtwork: appSettings.waveOrbArtwork
+                            borderWidth: root.auroraActive && root.showsOrbCover ? 1.5 : 0
+                            borderColor: Qt.rgba(1, 1, 1, 0.22)
+                            opacity: root.showsOrbCover ? 1.0 : (root.auroraActive ? 0.0 : 1.0)
+                            Behavior on opacity {
+                                enabled: !Appearance.reduceMotion
+                                NumberAnimation { duration: 300; easing.type: Easing.InOutQuad }
+                            }
                             blankTopColor: Qt.rgba(root.accentPrimary.r * 0.28 + 0.06, root.accentPrimary.g * 0.28 + 0.06, root.accentPrimary.b * 0.28 + 0.08, 1)
                             blankBottomColor: Qt.rgba(root.accentSecondary.r * 0.22 + 0.04, root.accentSecondary.g * 0.22 + 0.04, root.accentSecondary.b * 0.22 + 0.06, 1)
-                            squiggly: appSettings.waveOrbSquiggle
+                            squiggly: appSettings.waveOrbSquiggle && !root.auroraActive
                             squiggleFollowsPlayback: true
                             squiggleAmplitudeBoost: 1.25 + root.beatEnergy * 1.15
                             squiggleColor: root.accentPrimary
@@ -865,6 +1158,11 @@ FocusScope {
 
     Connections {
         target: backend
+        function onLoggedInChanged() {
+            if (backend.loggedIn && root.groups.length === 0 && !root.fetching) {
+                root.reload();
+            }
+        }
         function onFeatureResult(result) {
             if (result.type === "wave_settings") {
                 root.fetching = false;

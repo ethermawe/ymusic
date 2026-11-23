@@ -35,12 +35,31 @@ Item {
     property real horizontalPadding: 14
     property real iconSize: 20
     property real segmentWidth: 0
+    property bool wrap: false
+    property real maxWidth: 0
+    property real naturalWidth: 0
     readonly property real inset: 4
 
     signal activated(int index)
 
-    implicitWidth: row.implicitWidth + 2 * inset
-    implicitHeight: segmentHeight + 2 * inset
+    function updateNaturalWidth() {
+        let sum = 2 * inset
+        for (let i = 0; i < repeater.count; ++i) {
+            const item = repeater.itemAt(i) as RippleButton
+            if (item) {
+                sum += segmentWidth > 0 ? segmentWidth : item.implicitWidth
+            }
+        }
+        naturalWidth = sum
+    }
+
+    onHorizontalPaddingChanged: updateNaturalWidth()
+    onSegmentWidthChanged: updateNaturalWidth()
+
+    implicitWidth: (wrap && maxWidth > 0)
+        ? Math.min(maxWidth, flow.implicitWidth + 2 * inset)
+        : Math.max(naturalWidth, flow.implicitWidth + 2 * inset)
+    implicitHeight: Math.max(segmentHeight, flow.implicitHeight) + 2 * inset
 
     property Item selectedSegment: null
     property bool built: false
@@ -59,7 +78,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: height / 2
+        radius: (root.wrap && flow.implicitHeight > root.segmentHeight + 4) ? 18 : height / 2
         color: root.trackColor
     }
 
@@ -73,8 +92,8 @@ Item {
             required property int index
             readonly property RippleButton segment: repeater.count > index ? repeater.itemAt(index) as RippleButton : null
 
-            x: segment ? row.x + segment.x : 0
-            y: root.inset
+            x: segment ? flow.x + segment.x : 0
+            y: segment ? flow.y + segment.y : root.inset
             width: segment ? segment.width : 0
             height: root.segmentHeight
             radius: height / 2
@@ -131,8 +150,8 @@ Item {
         readonly property Item target: root.selectedSegment
 
         visible: target !== null
-        x: target ? row.x + target.x : 0
-        y: root.inset
+        x: target ? flow.x + target.x : 0
+        y: target ? flow.y + target.y : root.inset
         width: target ? target.width : 0
         height: root.segmentHeight
         radius: height / 2
@@ -142,25 +161,35 @@ Item {
             enabled: root.sliding
             ElementMove {}
         }
+        Behavior on y {
+            enabled: root.sliding
+            ElementMove {}
+        }
         Behavior on width {
             enabled: root.sliding
             ElementMove {}
         }
     }
 
-    Row {
-        id: row
+    Flow {
+        id: flow
         x: root.inset
         y: root.inset
+        spacing: root.wrap ? 4 : 0
+        width: (root.wrap && root.maxWidth > 0)
+            ? Math.max(1, root.maxWidth - 2 * root.inset)
+            : Math.max(0, root.naturalWidth - 2 * root.inset)
 
         Repeater {
             id: repeater
             model: root.segments
             onItemAdded: (index, item) => {
                 if (index === root.currentIndex) root.selectedSegment = item
+                root.updateNaturalWidth()
             }
             onItemRemoved: (index, item) => {
                 if (root.selectedSegment === item) root.selectedSegment = null
+                root.updateNaturalWidth()
             }
 
             delegate: RippleButton {
@@ -170,6 +199,8 @@ Item {
                 required property Segment modelData
                 readonly property bool selected: index === root.currentIndex
                 readonly property color foreground: selected ? root.selectedContentColor : root.contentColor
+
+                onImplicitWidthChanged: root.updateNaturalWidth()
 
                 width: root.segmentWidth > 0 ? root.segmentWidth : implicitWidth
                 height: root.segmentHeight

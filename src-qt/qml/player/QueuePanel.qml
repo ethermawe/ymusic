@@ -20,6 +20,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Layouts
 import ymusic.ui
 
 Item {
@@ -27,7 +28,7 @@ Item {
 
     property MaterialScheme scheme: Appearance.colors
 
-    Row {
+    RowLayout {
         id: headerRow
         anchors.left: parent.left
         anchors.right: parent.right
@@ -36,14 +37,13 @@ Item {
         spacing: 8
 
         StyledText {
-            anchors.verticalCenter: parent.verticalCenter
+            Layout.fillWidth: true
             text: qsTr("Очередь")
+            elide: Text.ElideRight
             font.pixelSize: Appearance.fontSize.normal
             font.weight: Font.DemiBold
             color: root.scheme.onSurfaceVariant
         }
-
-        Item { width: Math.max(0, parent.width - 140); height: 1 }
 
         IconButton {
             visible: backend.queue.count > 0

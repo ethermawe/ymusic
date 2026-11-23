@@ -8,13 +8,17 @@ Item {
 
     readonly property int activePage: backend.page
     property bool compact: false
+    property real expandedWidth: 220
+    property bool resizing: false
+    property bool toggleVisible: true
     readonly property bool isCompact: compact
     signal settingsRequested()
+    signal toggleCompactRequested()
 
-    implicitWidth: isCompact ? 72 : 220
+    implicitWidth: isCompact ? 72 : Math.max(160, Math.min(340, expandedWidth))
 
     Behavior on implicitWidth {
-        enabled: !Appearance.performanceMode
+        enabled: !Appearance.performanceMode && !root.resizing
         ElementMove {}
     }
 
@@ -22,6 +26,37 @@ Item {
         anchors.fill: parent
         anchors.margins: root.isCompact ? 10 : 12
         spacing: 10
+
+        Item {
+            visible: root.toggleVisible
+            Layout.fillWidth: true
+            Layout.preferredHeight: 30
+
+            StyledText {
+                visible: !root.isCompact
+                anchors.left: parent.left
+                anchors.leftMargin: 6
+                anchors.right: collapseToggle.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Навигация")
+                elide: Text.ElideRight
+                font.pixelSize: Appearance.fontSize.smaller
+                font.weight: Font.DemiBold
+                color: Appearance.colors.onSurfaceVariant
+            }
+
+            IconButton {
+                id: collapseToggle
+                x: root.isCompact ? Math.round((parent.width - width) / 2) : (parent.width - width)
+                anchors.verticalCenter: parent.verticalCenter
+                symbol: root.isCompact ? "chevron_right" : "chevron_left"
+                size: 28
+                iconSize: 18
+                tooltip: root.isCompact ? qsTr("Развернуть меню") : qsTr("Свернуть меню")
+                onClicked: root.toggleCompactRequested()
+            }
+        }
 
         // User Profile Header
         Rectangle {

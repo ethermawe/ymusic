@@ -27,27 +27,38 @@ Item {
     property string text
     property alias segments: choices.segments
     property alias currentIndex: choices.currentIndex
+    readonly property real choicesFullWidth: choices.naturalWidth > 0 ? choices.naturalWidth : choices.implicitWidth
+    readonly property bool stacked: width > 0 && (label.implicitWidth + choicesFullWidth + 40) > width
+    readonly property bool wrapped: stacked && width > 0 && choicesFullWidth > (width - 24)
     signal activated(int index)
 
     width: parent ? parent.width : 0
-    implicitHeight: Math.max(52, choices.implicitHeight + 12)
+    implicitHeight: stacked
+        ? Math.max(84, 10 + label.implicitHeight + 8 + choices.implicitHeight + 10)
+        : Math.max(52, choices.implicitHeight + 12)
     opacity: enabled ? 1 : 0.38
 
     StyledText {
+        id: label
         x: 12
-        anchors.right: choices.left
-        anchors.rightMargin: 12
-        anchors.verticalCenter: parent.verticalCenter
+        y: root.stacked ? 10 : Math.round((root.height - height) / 2)
+        width: root.stacked
+            ? Math.max(0, root.width - 24)
+            : Math.max(0, choices.x - 24)
         text: root.text
         elide: Text.ElideRight
     }
 
     SegmentedControl {
         id: choices
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
+        x: root.stacked ? 12 : Math.max(6, root.width - width - 6)
+        y: root.stacked
+            ? (10 + label.implicitHeight + 8)
+            : Math.round((root.height - height) / 2)
+        wrap: root.wrapped
+        maxWidth: root.wrapped ? Math.max(120, root.width - 24) : 0
         segmentHeight: 32
+        horizontalPadding: segments.length >= 4 ? 12 : 14
         enabled: root.enabled
         onActivated: (index) => root.activated(index)
     }
