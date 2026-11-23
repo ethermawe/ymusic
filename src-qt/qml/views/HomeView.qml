@@ -52,13 +52,31 @@ Flickable {
         GridView {
             id: secGrid
             width: parent.width
-            height: Math.ceil(Math.max(1, count) / Math.max(1, Math.floor(width / cellWidth))) * cellHeight
+            property real maxCardHeight: 205
+            function updateMaxCardHeight() {
+                let m = 0;
+                const kids = contentItem ? contentItem.children : [];
+                for (let i = 0; i < kids.length; ++i) {
+                    const c = kids[i];
+                    if (c && c.visible && c.implicitHeight > 0) {
+                        m = Math.max(m, c.implicitHeight);
+                    }
+                }
+                if (m > 0 && Math.abs(m - maxCardHeight) > 0.5) {
+                    maxCardHeight = m;
+                }
+            }
+            height: count > 0
+                ? Math.max(0, Math.ceil(count / Math.max(1, Math.floor(width / cellWidth))) * cellHeight - 12)
+                : 0
             clip: false
             interactive: false
             cellWidth: 194
-            cellHeight: 264
+            cellHeight: Math.ceil(maxCardHeight) + 12
             reuseItems: true
             model: secBlock.items
+            onCountChanged: Qt.callLater(updateMaxCardHeight)
+            onModelChanged: Qt.callLater(updateMaxCardHeight)
 
             displaced: Transition {
                 enabled: !Appearance.performanceMode
@@ -75,6 +93,8 @@ Flickable {
                 cardIndex: modelData.cardIndex
                 cardData: modelData
                 width: 178
+                onImplicitHeightChanged: Qt.callLater(secGrid.updateMaxCardHeight)
+                Component.onCompleted: Qt.callLater(secGrid.updateMaxCardHeight)
             }
         }
     }
