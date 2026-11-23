@@ -75,7 +75,6 @@ Flickable {
                 cardIndex: modelData.cardIndex
                 cardData: modelData
                 width: 178
-                height: 252
             }
         }
     }
@@ -384,13 +383,21 @@ Flickable {
                 onSeeAll: clearHistory.open()
             }
 
-            ListView {
+            Item {
                 width: parent.width
-                height: 92
-                orientation: ListView.Horizontal
-                spacing: 12
-                clip: true
-                model: backend.history
+                height: 88
+
+                ListView {
+                    anchors.fill: parent
+                    anchors.margins: -8
+                    topMargin: 8
+                    bottomMargin: 8
+                    leftMargin: 8
+                    rightMargin: 8
+                    orientation: ListView.Horizontal
+                    spacing: 12
+                    clip: true
+                    model: backend.history
 
                 delegate: Rectangle {
                     id: historyTile
@@ -457,6 +464,7 @@ Flickable {
                         onTapped: backend.feature({action: "play_history", id: historyTile.model.id})
                     }
                 }
+            }
             }
         }
 

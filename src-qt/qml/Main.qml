@@ -526,7 +526,6 @@ ApplicationWindow {
                             cardIndex: index
                             cardData: model
                             width: 178
-                            height: 252
                         }
                     }
 
@@ -619,7 +618,9 @@ ApplicationWindow {
 
                                 ListView {
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: 256
+                                    Layout.preferredHeight: 268
+                                    topMargin: 8
+                                    bottomMargin: 8
                                     leftMargin: 12
                                     rightMargin: 12
                                     orientation: ListView.Horizontal
@@ -633,7 +634,6 @@ ApplicationWindow {
                                         cardIndex: index
                                         cardData: model
                                         width: 174
-                                        height: 234
                                     }
                                 }
                             }

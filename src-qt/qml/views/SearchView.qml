@@ -282,7 +282,6 @@ Flickable {
                     cardIndex: index
                     cardData: model
                     width: 178
-                    height: 252
                 }
             }
         }
