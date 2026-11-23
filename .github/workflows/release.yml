@@ -56,6 +56,8 @@ jobs:
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
 
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
@@ -138,6 +140,10 @@ jobs:
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            packaging/windows/setup
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
@@ -190,22 +196,22 @@ jobs:
             throw "Missing required MSVC CRT DLLs in dist/"
           }
 
-      - name: Build Windows installer (NSIS) and update manifest
+      - name: Build Windows installer (custom Rust setup) and update manifest
         shell: pwsh
         run: |
           $tag = "${{ needs.meta.outputs.tag }}"
           $ver = $tag.TrimStart('v')
           $root = (Get-Location).Path
+          cargo build --release --locked --manifest-path packaging/windows/setup/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $stubExe = "$root\packaging\windows\setup\target\release\ymusic-setup.exe"
+          $packerExe = "$root\packaging\windows\setup\target\release\ymusic-packer.exe"
           New-Item -ItemType Directory -Force -Path "$root\out" | Out-Null
           $setupName = "ymusic-$tag-windows-x86_64-setup.exe"
           $setupPath = "$root\out\$setupName"
-          & "C:\Program Files (x86)\NSIS\makensis.exe" `
-            "/INPUTCHARSET" "UTF8" `
-            "/DAPP_VERSION=$ver" `
-            "/DDIST_DIR=$root\dist" `
-            "/DOUT_FILE=$setupPath" `
-            "/DICON_FILE=$root\icons\ymusic.ico" `
-            "packaging\windows\installer.nsi"
+
+          & $packerExe --input "$root\dist" --stub $stubExe --output $setupPath --version $ver
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $hash = (Get-FileHash -Path $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
