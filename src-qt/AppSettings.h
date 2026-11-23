@@ -24,6 +24,13 @@ class AppSettings : public QObject {
     Q_PROPERTY(bool iconAntialiasing READ iconAntialiasing WRITE setIconAntialiasing NOTIFY changed)
     Q_PROPERTY(bool coversEnabled READ coversEnabled WRITE setCoversEnabled NOTIFY changed)
     Q_PROPERTY(bool discordRpcEnabled READ discordRpcEnabled WRITE setDiscordRpcEnabled NOTIFY changed)
+    Q_PROPERTY(QString discordRpcDisplay READ discordRpcDisplay WRITE setDiscordRpcDisplay NOTIFY changed)
+    Q_PROPERTY(QString discordRpcType READ discordRpcType WRITE setDiscordRpcType NOTIFY changed)
+    Q_PROPERTY(bool discordRpcShowPaused READ discordRpcShowPaused WRITE setDiscordRpcShowPaused NOTIFY changed)
+    Q_PROPERTY(bool discordRpcShowCover READ discordRpcShowCover WRITE setDiscordRpcShowCover NOTIFY changed)
+    Q_PROPERTY(bool discordRpcShowAlbum READ discordRpcShowAlbum WRITE setDiscordRpcShowAlbum NOTIFY changed)
+    Q_PROPERTY(bool discordRpcShowTimestamps READ discordRpcShowTimestamps WRITE setDiscordRpcShowTimestamps NOTIFY changed)
+    Q_PROPERTY(bool discordRpcShowButton READ discordRpcShowButton WRITE setDiscordRpcShowButton NOTIFY changed)
     Q_PROPERTY(QString themePreset READ themePreset WRITE setThemePreset NOTIFY themeChanged)
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY themeChanged)
     Q_PROPERTY(QString matugenColorsPath READ matugenColorsPath WRITE setMatugenColorsPath NOTIFY themeChanged)
@@ -84,6 +91,19 @@ public:
     bool iconAntialiasing() const { return m_store.value("ui/iconAntialiasing", true).toBool(); }
     bool coversEnabled() const { return m_store.value("ui/coversEnabled", true).toBool(); }
     bool discordRpcEnabled() const { return m_store.value("ui/discordRpcEnabled", true).toBool(); }
+    QString discordRpcDisplay() const {
+        const QString v = m_store.value("discord/statusDisplay", "track").toString();
+        return (v == "artist" || v == "app") ? v : QStringLiteral("track");
+    }
+    QString discordRpcType() const {
+        const QString v = m_store.value("discord/activityType", "listening").toString();
+        return v == "playing" ? v : QStringLiteral("listening");
+    }
+    bool discordRpcShowPaused() const { return m_store.value("discord/showWhenPaused", true).toBool(); }
+    bool discordRpcShowCover() const { return m_store.value("discord/showCover", true).toBool(); }
+    bool discordRpcShowAlbum() const { return m_store.value("discord/showAlbum", true).toBool(); }
+    bool discordRpcShowTimestamps() const { return m_store.value("discord/showTimestamps", true).toBool(); }
+    bool discordRpcShowButton() const { return m_store.value("discord/showButton", true).toBool(); }
     QString themePreset() const { return m_store.value("ui/themePreset", "auto").toString(); }
     QString themeMode() const { return m_store.value("ui/themeMode", "auto").toString(); }
     QString matugenColorsPath() const { return m_store.value("ui/matugenColorsPath", "").toString(); }
@@ -163,6 +183,19 @@ public:
     void setIconAntialiasing(bool value) { if (value != iconAntialiasing()) save("ui/iconAntialiasing", value); }
     void setCoversEnabled(bool value) { if (value != coversEnabled()) save("ui/coversEnabled", value); }
     void setDiscordRpcEnabled(bool value) { if (value != discordRpcEnabled()) save("ui/discordRpcEnabled", value); }
+    void setDiscordRpcDisplay(const QString &value) {
+        if (value != "track" && value != "artist" && value != "app") return;
+        if (value != discordRpcDisplay()) save("discord/statusDisplay", value);
+    }
+    void setDiscordRpcType(const QString &value) {
+        if (value != "listening" && value != "playing") return;
+        if (value != discordRpcType()) save("discord/activityType", value);
+    }
+    void setDiscordRpcShowPaused(bool value) { if (value != discordRpcShowPaused()) save("discord/showWhenPaused", value); }
+    void setDiscordRpcShowCover(bool value) { if (value != discordRpcShowCover()) save("discord/showCover", value); }
+    void setDiscordRpcShowAlbum(bool value) { if (value != discordRpcShowAlbum()) save("discord/showAlbum", value); }
+    void setDiscordRpcShowTimestamps(bool value) { if (value != discordRpcShowTimestamps()) save("discord/showTimestamps", value); }
+    void setDiscordRpcShowButton(bool value) { if (value != discordRpcShowButton()) save("discord/showButton", value); }
     void setThemePreset(const QString &value) {
         if (value != themePreset()) {
             save("ui/themePreset", value);

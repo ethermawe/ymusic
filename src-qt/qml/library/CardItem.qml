@@ -90,15 +90,29 @@ T.AbstractButton {
     }
 
     property real tiltAcross: pointer.hovered && !Appearance.performanceMode
-                              ? (pointer.point.position.x / Math.max(1, width) - 0.5) * 12 : 0
+                              ? (Math.max(0, Math.min(1, pointer.point.position.x / Math.max(1, width))) - 0.5) * 12 : 0
     property real tiltDown: pointer.hovered && !Appearance.performanceMode
-                            ? (0.5 - pointer.point.position.y / Math.max(1, root.artworkSize)) * 10 : 0
+                            ? (0.5 - Math.max(0, Math.min(1, pointer.point.position.y / Math.max(1, root.artworkSize)))) * 10 : 0
+    readonly property bool tiltSmoothing: !pointer.hovered || enterTiltTimer.running
+
+    Timer {
+        id: enterTiltTimer
+        interval: 110
+    }
 
     Behavior on tiltAcross {
-        SpringAnimation { spring: 4; damping: 0.3; epsilon: 0.01 }
+        enabled: root.tiltSmoothing && !Appearance.performanceMode
+        NumberAnimation {
+            duration: Appearance.duration(140)
+            easing.type: Easing.OutCubic
+        }
     }
     Behavior on tiltDown {
-        SpringAnimation { spring: 4; damping: 0.3; epsilon: 0.01 }
+        enabled: root.tiltSmoothing && !Appearance.performanceMode
+        NumberAnimation {
+            duration: Appearance.duration(140)
+            easing.type: Easing.OutCubic
+        }
     }
 
     transform: [
@@ -119,6 +133,7 @@ T.AbstractButton {
     HoverHandler {
         id: pointer
         cursorShape: Qt.PointingHandCursor
+        onHoveredChanged: if (hovered) enterTiltTimer.restart()
     }
     TapHandler {
         acceptedButtons: Qt.RightButton

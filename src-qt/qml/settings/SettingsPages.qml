@@ -33,6 +33,8 @@ Item {
     readonly property list<string> aiBehaviors: ["skip_if_not_liked", "dislike_if_not_liked", "skip", "dislike", "nothing"]
     readonly property list<string> themeModes: ["auto", "light", "dark"]
     readonly property list<string> backends: ["auto", "vulkan", "opengl"]
+    readonly property list<string> discordDisplayModes: ["track", "artist", "app"]
+    readonly property list<string> discordActivityTypes: ["listening", "playing"]
     readonly property list<string> immersivePanels: ["artwork", "lyrics", "queue"]
     readonly property list<real> volumeSteps: [0.02, 0.05, 0.10]
     readonly property string normalizedPreset: (appSettings.themePreset === "" || appSettings.themePreset === "system")
@@ -668,7 +670,7 @@ Item {
             visible: root.page === 4
 
             ContentSection {
-                title: "Внешние интеграции"
+                title: "Discord Rich Presence"
                 symbol: "extension"
 
                 StatusRow {
@@ -679,12 +681,63 @@ Item {
                     good: !appSettings.discordRpcEnabled || backend.discordConnected
                 }
                 ConfigSwitch {
-                    text: "Discord Rich Presence"
+                    text: "Включить Discord Rich Presence"
                     checked: appSettings.discordRpcEnabled
                     onToggledTo: (checked) => appSettings.discordRpcEnabled = checked
                 }
+                ConfigSelection {
+                    text: "Режим активности"
+                    enabled: appSettings.discordRpcEnabled
+                    currentIndex: Math.max(0, root.discordActivityTypes.indexOf(appSettings.discordRpcType))
+                    segments: [
+                        Segment { text: "Слушает" },
+                        Segment { text: "Играет в" }
+                    ]
+                    onActivated: (index) => appSettings.discordRpcType = root.discordActivityTypes[index]
+                }
+                ConfigSelection {
+                    text: "В строке статуса"
+                    enabled: appSettings.discordRpcEnabled && appSettings.discordRpcType === "listening"
+                    currentIndex: Math.max(0, root.discordDisplayModes.indexOf(appSettings.discordRpcDisplay))
+                    segments: [
+                        Segment { text: "Трек" },
+                        Segment { text: "Исполнитель" },
+                        Segment { text: "Приложение" }
+                    ]
+                    onActivated: (index) => appSettings.discordRpcDisplay = root.discordDisplayModes[index]
+                }
+                ConfigSwitch {
+                    text: "Показывать трек на паузе"
+                    enabled: appSettings.discordRpcEnabled
+                    checked: appSettings.discordRpcShowPaused
+                    onToggledTo: (checked) => appSettings.discordRpcShowPaused = checked
+                }
+                ConfigSwitch {
+                    text: "Показывать обложку трека"
+                    enabled: appSettings.discordRpcEnabled
+                    checked: appSettings.discordRpcShowCover
+                    onToggledTo: (checked) => appSettings.discordRpcShowCover = checked
+                }
+                ConfigSwitch {
+                    text: "Название альбома на обложке"
+                    enabled: appSettings.discordRpcEnabled && appSettings.discordRpcShowCover
+                    checked: appSettings.discordRpcShowAlbum
+                    onToggledTo: (checked) => appSettings.discordRpcShowAlbum = checked
+                }
+                ConfigSwitch {
+                    text: "Показывать прогресс трека"
+                    enabled: appSettings.discordRpcEnabled
+                    checked: appSettings.discordRpcShowTimestamps
+                    onToggledTo: (checked) => appSettings.discordRpcShowTimestamps = checked
+                }
+                ConfigSwitch {
+                    text: "Кнопка «Открыть трек»"
+                    enabled: appSettings.discordRpcEnabled
+                    checked: appSettings.discordRpcShowButton
+                    onToggledTo: (checked) => appSettings.discordRpcShowButton = checked
+                }
                 NoteText {
-                    text: "Транслирует текущий трек, исполнителя и обложку в ваш статус Discord."
+                    text: "Пункт «В строке статуса» управляет текстом рядом с ником в списке друзей: название трека, исполнитель или «Яндекс Музыка»."
                 }
             }
 

@@ -55,6 +55,7 @@ void ymusic_core_open_now_artist(CoreHandle *handle);
 void ymusic_core_open_artist(CoreHandle *handle, const char *artist_id);
 void ymusic_core_open_now_album(CoreHandle *handle);
 void ymusic_core_set_discord_enabled(CoreHandle *handle, bool enabled);
+void ymusic_core_set_discord_config(CoreHandle *handle, const char *config_json);
 
 void ymusic_core_play(CoreHandle *handle, uintptr_t index);
 void ymusic_core_track_action(CoreHandle *handle, const char *id, int32_t action);

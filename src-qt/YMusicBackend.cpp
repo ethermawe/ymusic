@@ -363,6 +363,23 @@ void YMusicBackend::setDiscordRpcEnabled(bool enabled) {
     if (m_core) ymusic_core_set_discord_enabled(m_core, enabled);
 }
 
+void YMusicBackend::setDiscordRpcConfig(bool enabled, const QString &display, const QString &activityType,
+                                        bool showWhenPaused, bool showCover, bool showAlbum,
+                                        bool showTimestamps, bool showButton) {
+    if (!m_core) return;
+    QJsonObject obj;
+    obj.insert(QStringLiteral("enabled"), enabled);
+    obj.insert(QStringLiteral("status_display"), display);
+    obj.insert(QStringLiteral("activity_type"), activityType);
+    obj.insert(QStringLiteral("show_when_paused"), showWhenPaused);
+    obj.insert(QStringLiteral("show_cover"), showCover);
+    obj.insert(QStringLiteral("show_album"), showAlbum);
+    obj.insert(QStringLiteral("show_timestamps"), showTimestamps);
+    obj.insert(QStringLiteral("show_button"), showButton);
+    const QByteArray json = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    ymusic_core_set_discord_config(m_core, json.constData());
+}
+
 void YMusicBackend::play(int index) {
     if (m_core) ymusic_core_play(m_core, index);
 }

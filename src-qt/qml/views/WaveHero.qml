@@ -168,6 +168,36 @@ FocusScope {
         return fallback;
     }
 
+    Image {
+        id: waveBackdropSource
+        visible: false
+        source: appSettings.coversEnabled && root.inWave && backend.hasCover ? backend.nowCover : ""
+        sourceSize: Qt.size(64, 64)
+        smooth: true
+        asynchronous: true
+    }
+
+    // Experimental ambient cover wash matching HomeView spotlight card
+    ShaderEffect {
+        anchors.fill: parent
+        property variant source: waveBackdropSource
+        property size itemSize: Qt.size(width, height)
+        property real radius: Appearance.rounding.large
+        fragmentShader: "qrc:/shaders/artwork_backdrop.frag.qsb"
+        visible: !root.auroraActive && waveBackdropSource.status === Image.Ready
+        opacity: 0.14
+    }
+
+    Stickers {
+        anchors.fill: parent
+        key: "wave-hero"
+        count: 6
+        minimumSize: 80
+        maximumSize: 220
+        strength: 0.72
+        clipRadius: Appearance.rounding.large
+    }
+
     // 3D silk-plasma sphere + acoustic wave fronts spanning behind the split stage
     ShaderEffect {
         id: waveAurora

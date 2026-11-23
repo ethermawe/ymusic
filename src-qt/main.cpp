@@ -257,11 +257,22 @@ int main(int argc, char *argv[]) {
     ymusic::SpectrumSource spectrum(&backend);
 
     ThemeManager::instance().setPreset(settings.themePreset());
-    backend.setDiscordRpcEnabled(settings.discordRpcEnabled());
+    const auto syncDiscord = [&]() {
+        backend.setDiscordRpcConfig(
+            settings.discordRpcEnabled(),
+            settings.discordRpcDisplay(),
+            settings.discordRpcType(),
+            settings.discordRpcShowPaused(),
+            settings.discordRpcShowCover(),
+            settings.discordRpcShowAlbum(),
+            settings.discordRpcShowTimestamps(),
+            settings.discordRpcShowButton());
+    };
+    syncDiscord();
     backend.setTempo(settings.playbackSpeed());
     QObject::connect(&settings, &AppSettings::changed, &backend, [&]() {
         ThemeManager::instance().setPreset(settings.themePreset());
-        backend.setDiscordRpcEnabled(settings.discordRpcEnabled());
+        syncDiscord();
         if (!qFuzzyCompare(backend.tempo() + 1.0, settings.playbackSpeed() + 1.0)) {
             backend.setTempo(settings.playbackSpeed());
         }

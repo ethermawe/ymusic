@@ -1693,6 +1693,10 @@ impl YMusicCore {
         self.discord.set_enabled(enabled);
     }
 
+    pub fn set_discord_config(&self, config: crate::discord::DiscordConfig) {
+        self.discord.set_config(config);
+    }
+
     pub fn send_event(&self, event_type: i32, payload: &impl Serialize) {
         if let Ok(json) = serde_json::to_string(payload) {
             self.sink.on_event(event_type, &json);

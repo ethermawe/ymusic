@@ -227,6 +227,9 @@ public:
     Q_INVOKABLE void openArtist(const QString &artistId);
     Q_INVOKABLE void openNowAlbum();
     Q_INVOKABLE void setDiscordRpcEnabled(bool enabled);
+    Q_INVOKABLE void setDiscordRpcConfig(bool enabled, const QString &display, const QString &activityType,
+                                         bool showWhenPaused, bool showCover, bool showAlbum,
+                                         bool showTimestamps, bool showButton);
 
     Q_INVOKABLE void play(int index);
     Q_INVOKABLE void trackAction(const QString &id, int action);

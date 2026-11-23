@@ -366,6 +366,20 @@ pub unsafe extern "C" fn ymusic_core_set_discord_enabled(handle: *mut CoreHandle
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_core_set_discord_config(
+    handle: *mut CoreHandle,
+    config_json: *const c_char,
+) {
+    if let Some(h) = unsafe { handle.as_ref() }
+        && !config_json.is_null()
+        && let Ok(json) = unsafe { CStr::from_ptr(config_json) }.to_str()
+        && let Ok(config) = serde_json::from_str::<crate::discord::DiscordConfig>(json)
+    {
+        h.core.set_discord_config(config);
+    }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_toggle_mute(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
         let rt = h.core.rt_handle.clone();

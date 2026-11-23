@@ -8,6 +8,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::api::Track;
@@ -53,6 +54,61 @@ impl CompatLevel {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusDisplay {
+    #[default]
+    Track,
+    Artist,
+    App,
+}
+
+impl StatusDisplay {
+    fn as_discord_value(self) -> u8 {
+        match self {
+            Self::App => 0,
+            Self::Artist => 1,
+            Self::Track => 2,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityKind {
+    #[default]
+    Listening,
+    Playing,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct DiscordConfig {
+    pub enabled: bool,
+    pub status_display: StatusDisplay,
+    pub activity_type: ActivityKind,
+    pub show_when_paused: bool,
+    pub show_cover: bool,
+    pub show_album: bool,
+    pub show_timestamps: bool,
+    pub show_button: bool,
+}
+
+impl Default for DiscordConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            status_display: StatusDisplay::Track,
+            activity_type: ActivityKind::Listening,
+            show_when_paused: true,
+            show_cover: true,
+            show_album: true,
+            show_timestamps: true,
+            show_button: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TrackInfo {
     id: String,
@@ -69,6 +125,7 @@ enum Cmd {
     Status(Status, f64),
     Clear,
     SetEnabled(bool),
+    SetConfig(DiscordConfig),
 }
 
 pub struct Discord {
@@ -117,6 +174,10 @@ impl Discord {
     pub fn set_enabled(&self, enabled: bool) {
         let _ = self.tx.send(Cmd::SetEnabled(enabled));
     }
+
+    pub fn set_config(&self, config: DiscordConfig) {
+        let _ = self.tx.send(Cmd::SetConfig(config));
+    }
 }
 
 struct StatusReporter {
@@ -151,9 +212,16 @@ impl StatusReporter {
     }
 }
 
+fn is_track_visible(config: &DiscordConfig, current: Option<&TrackInfo>, status: Status) -> bool {
+    config.enabled
+        && current.is_some()
+        && (status == Status::Playing || (status == Status::Paused && config.show_when_paused))
+}
+
 fn apply_cmd(
     cmd: Cmd,
-    enabled: &mut bool,
+    config: &mut DiscordConfig,
+    compat: &mut CompatLevel,
     current: &mut Option<TrackInfo>,
     status: &mut Status,
     pos_secs: &mut f64,
@@ -206,8 +274,20 @@ fn apply_cmd(
             *dirty = true;
         }
         Cmd::SetEnabled(v) => {
-            if *enabled != v {
-                *enabled = v;
+            if config.enabled != v {
+                config.enabled = v;
+                *pending_until = None;
+                *dirty = true;
+            }
+        }
+        Cmd::SetConfig(next) => {
+            if *config != next {
+                if config.activity_type != next.activity_type
+                    || config.status_display != next.status_display
+                {
+                    *compat = CompatLevel::Full;
+                }
+                *config = next;
                 *pending_until = None;
                 *dirty = true;
             }
@@ -240,7 +320,7 @@ fn run(rx: mpsc::Receiver<Cmd>, sink: Option<Arc<dyn EventSink>>) {
     let mut reporter = StatusReporter::new(sink);
     let mut conn: Option<IpcStream> = None;
     let mut compat = CompatLevel::Full;
-    let mut enabled = true;
+    let mut config = DiscordConfig::default();
     let mut current: Option<TrackInfo> = None;
     let mut status = Status::Stopped;
     let mut pos_secs = 0.0f64;
@@ -255,7 +335,7 @@ fn run(rx: mpsc::Receiver<Cmd>, sink: Option<Arc<dyn EventSink>>) {
 
     loop {
         let now = Instant::now();
-        let active_track = enabled && current.is_some() && status != Status::Stopped;
+        let active_track = is_track_visible(&config, current.as_ref(), status);
         let next_maintenance = if active_track {
             if conn.is_none() {
                 Some(
@@ -288,7 +368,8 @@ fn run(rx: mpsc::Receiver<Cmd>, sink: Option<Arc<dyn EventSink>>) {
             Ok(first_cmd) => {
                 apply_cmd(
                     first_cmd,
-                    &mut enabled,
+                    &mut config,
+                    &mut compat,
                     &mut current,
                     &mut status,
                     &mut pos_secs,
@@ -299,7 +380,8 @@ fn run(rx: mpsc::Receiver<Cmd>, sink: Option<Arc<dyn EventSink>>) {
                 for cmd in rx.try_iter() {
                     apply_cmd(
                         cmd,
-                        &mut enabled,
+                        &mut config,
+                        &mut compat,
                         &mut current,
                         &mut status,
                         &mut pos_secs,
@@ -322,7 +404,7 @@ fn run(rx: mpsc::Receiver<Cmd>, sink: Option<Arc<dyn EventSink>>) {
         if pending_until.is_some_and(|d| now >= d) {
             pending_until = None;
         }
-        if enabled && current.is_some() && status != Status::Stopped {
+        if is_track_visible(&config, current.as_ref(), status) {
             if conn.is_none() {
                 if last_connect_attempt.is_none_or(|t| now.duration_since(t) >= RECONNECT_INTERVAL)
                 {
@@ -349,7 +431,7 @@ fn run(rx: mpsc::Receiver<Cmd>, sink: Option<Arc<dyn EventSink>>) {
             continue;
         }
 
-        if !enabled {
+        if !config.enabled {
             if let Some(mut stream) = conn.take() {
                 let _ = send_activity(&mut stream, None, &mut nonce);
             }
@@ -362,7 +444,7 @@ fn run(rx: mpsc::Receiver<Cmd>, sink: Option<Arc<dyn EventSink>>) {
             continue;
         }
 
-        if current.is_none() || status == Status::Stopped {
+        if !is_track_visible(&config, current.as_ref(), status) {
             if let Some(stream) = conn.as_mut()
                 && send_activity(stream, None, &mut nonce).is_err()
             {
@@ -373,7 +455,12 @@ fn run(rx: mpsc::Receiver<Cmd>, sink: Option<Arc<dyn EventSink>>) {
             last_anchor_start_secs = None;
             dirty = false;
             pending_until = None;
-            reporter.report(conn.is_some(), false, "Ожидание воспроизведения");
+            let status_text = if current.is_some() && status == Status::Paused {
+                "На паузе (скрыто)"
+            } else {
+                "Ожидание воспроизведения"
+            };
+            reporter.report(conn.is_some(), false, status_text);
             continue;
         }
 
@@ -440,7 +527,7 @@ fn run(rx: mpsc::Receiver<Cmd>, sink: Option<Arc<dyn EventSink>>) {
                 break;
             };
 
-            let activity = build_activity(track, status, anchor_start_secs, compat);
+            let activity = build_activity(track, status, anchor_start_secs, compat, &config);
             match send_activity(stream, Some(activity), &mut nonce) {
                 Ok(()) => {
                     sent = true;
@@ -492,6 +579,7 @@ fn build_activity(
     status: Status,
     start_secs: f64,
     compat: CompatLevel,
+    config: &DiscordConfig,
 ) -> Value {
     let details = pad_discord_str(&track.title, "Без названия");
     let raw_artists = if track.artists.trim().is_empty() {
@@ -500,31 +588,35 @@ fn build_activity(
         track.artists.trim().to_string()
     };
 
-    let state_str = if status == Status::Paused {
-        format!("{raw_artists} (На паузе)")
-    } else {
-        raw_artists
-    };
-    let state = pad_discord_str(&state_str, "Исполнитель");
+    let state = pad_discord_str(&raw_artists, "Исполнитель");
 
     let mut activity = serde_json::Map::new();
-    match compat {
-        CompatLevel::Full => {
+    match (compat, config.activity_type) {
+        (CompatLevel::Full, ActivityKind::Listening) => {
             activity.insert("type".into(), json!(2));
-            activity.insert("status_display_type".into(), json!(2));
+            activity.insert(
+                "status_display_type".into(),
+                json!(config.status_display.as_discord_value()),
+            );
         }
-        CompatLevel::ListeningBasic => {
-            activity.insert("type".into(), json!(2));
-        }
-        CompatLevel::PlayingCompat => {
+        (CompatLevel::Full, ActivityKind::Playing) => {
             activity.insert("type".into(), json!(0));
         }
-        CompatLevel::Minimal => {}
+        (CompatLevel::ListeningBasic, ActivityKind::Listening) => {
+            activity.insert("type".into(), json!(2));
+        }
+        (CompatLevel::ListeningBasic, ActivityKind::Playing) => {
+            activity.insert("type".into(), json!(0));
+        }
+        (CompatLevel::PlayingCompat, _) => {
+            activity.insert("type".into(), json!(0));
+        }
+        (CompatLevel::Minimal, _) => {}
     }
     activity.insert("details".into(), Value::String(details));
     activity.insert("state".into(), Value::String(state));
 
-    if status == Status::Playing && track.duration_secs > 0.0 {
+    if config.show_timestamps && status == Status::Playing && track.duration_secs > 0.0 {
         let start_s = start_secs.max(0.0).floor() as u64;
         let end_s = (start_secs + track.duration_secs).max(0.0).ceil() as u64;
         if end_s > start_s {
@@ -539,22 +631,25 @@ fn build_activity(
     }
 
     let mut assets = serde_json::Map::new();
-    if let Some(cover) = track.cover_url.as_deref().filter(|u| {
-        (u.starts_with("https://") || u.starts_with("http://")) && u.len() <= MAX_URL_BYTES
-    }) {
-        assets.insert("large_image".into(), Value::String(cover.to_string()));
-    }
-    if !track.album_title.trim().is_empty() {
-        assets.insert(
-            "large_text".into(),
-            Value::String(pad_discord_str(&track.album_title, "Альбом")),
-        );
+    if config.show_cover {
+        if let Some(cover) = track.cover_url.as_deref().filter(|u| {
+            (u.starts_with("https://") || u.starts_with("http://")) && u.len() <= MAX_URL_BYTES
+        }) {
+            assets.insert("large_image".into(), Value::String(cover.to_string()));
+        }
+        if config.show_album && !track.album_title.trim().is_empty() {
+            assets.insert(
+                "large_text".into(),
+                Value::String(pad_discord_str(&track.album_title, "Альбом")),
+            );
+        }
     }
     if !assets.is_empty() {
         activity.insert("assets".into(), Value::Object(assets));
     }
 
-    if compat != CompatLevel::Minimal
+    if config.show_button
+        && compat != CompatLevel::Minimal
         && !track.id.trim().is_empty()
         && !track.id.starts_with("local:")
     {
@@ -897,29 +992,60 @@ mod tests {
 
     #[test]
     fn listening_status_uses_track_title_and_seconds_timestamps() {
-        let activity = build_activity(&track(), Status::Playing, 1000.0, CompatLevel::Full);
+        let cfg = DiscordConfig::default();
+        let activity = build_activity(&track(), Status::Playing, 1000.0, CompatLevel::Full, &cfg);
         assert_eq!(activity["type"], 2);
         assert_eq!(activity["status_display_type"], 2);
         assert_eq!(activity["details"], "Название трека");
         assert_eq!(activity["timestamps"]["start"], 1000u64);
         assert_eq!(activity["timestamps"]["end"], 1180u64);
-        let paused = build_activity(&track(), Status::Paused, 1000.0, CompatLevel::Full);
+        let paused = build_activity(&track(), Status::Paused, 1000.0, CompatLevel::Full, &cfg);
         assert!(paused.get("timestamps").is_none());
-        // assert!(paused["state"].as_str().unwrap().contains("На паузе"));
+        assert_eq!(paused["state"], "Исполнитель");
+    }
+
+    #[test]
+    fn custom_discord_config_controls_status_display_and_fields() {
+        let mut cfg = DiscordConfig {
+            status_display: StatusDisplay::Artist,
+            show_album: false,
+            show_timestamps: false,
+            show_button: false,
+            ..DiscordConfig::default()
+        };
+        let by_artist = build_activity(&track(), Status::Playing, 1000.0, CompatLevel::Full, &cfg);
+        assert_eq!(by_artist["type"], 2);
+        assert_eq!(by_artist["status_display_type"], 1);
+        assert!(by_artist.get("timestamps").is_none());
+        assert!(by_artist.get("buttons").is_none());
+        assert!(by_artist["assets"].get("large_image").is_some());
+        assert!(by_artist["assets"].get("large_text").is_none());
+
+        cfg.status_display = StatusDisplay::App;
+        cfg.show_cover = false;
+        let by_app = build_activity(&track(), Status::Playing, 1000.0, CompatLevel::Full, &cfg);
+        assert_eq!(by_app["status_display_type"], 0);
+        assert!(by_app.get("assets").is_none());
+
+        cfg.activity_type = ActivityKind::Playing;
+        let playing = build_activity(&track(), Status::Playing, 1000.0, CompatLevel::Full, &cfg);
+        assert_eq!(playing["type"], 0);
+        assert!(playing.get("status_display_type").is_none());
     }
 
     #[test]
     fn compat_fallback_strips_newer_fields() {
+        let cfg = DiscordConfig::default();
         let t = track();
-        let b = build_activity(&t, Status::Playing, 1000.0, CompatLevel::ListeningBasic);
+        let b = build_activity(&t, Status::Playing, 1000.0, CompatLevel::ListeningBasic, &cfg);
         assert_eq!(b["type"], 2);
         assert!(b.get("status_display_type").is_none());
 
-        let c = build_activity(&t, Status::Playing, 1000.0, CompatLevel::PlayingCompat);
+        let c = build_activity(&t, Status::Playing, 1000.0, CompatLevel::PlayingCompat, &cfg);
         assert_eq!(c["type"], 0);
         assert!(c.get("buttons").is_some());
 
-        let m = build_activity(&t, Status::Playing, 1000.0, CompatLevel::Minimal);
+        let m = build_activity(&t, Status::Playing, 1000.0, CompatLevel::Minimal, &cfg);
         assert!(m.get("type").is_none());
         assert!(m.get("buttons").is_none());
         assert_eq!(m["details"], "Название трека");
@@ -927,9 +1053,10 @@ mod tests {
 
     #[test]
     fn button_label_fits_utf8_byte_limit_and_default_client_id_is_registered() {
+        let cfg = DiscordConfig::default();
         assert_eq!(DEFAULT_CLIENT_ID, "1269826362399522849");
         assert_eq!(FALLBACK_CLIENT_ID, "1217562797999784007");
-        let activity = build_activity(&track(), Status::Playing, 1000.0, CompatLevel::Full);
+        let activity = build_activity(&track(), Status::Playing, 1000.0, CompatLevel::Full, &cfg);
         let label = activity["buttons"][0]["label"].as_str().unwrap();
         assert!(
             label.len() <= MAX_BUTTON_LABEL_BYTES,
@@ -968,6 +1095,7 @@ mod tests {
                 Status::Playing,
                 1000.0,
                 CompatLevel::Full,
+                &DiscordConfig::default(),
             )),
             &mut 0,
         )
