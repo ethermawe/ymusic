@@ -114,8 +114,10 @@ Item {
         anchors.centerIn: parent
         width: root.size
         height: root.size
-        // Heart's deep top cleft places its visual pocket slightly below geometric center.
-        anchors.verticalCenterOffset: root.target === "heart" ? Math.round(root.size * 0.07) : 0
+        // Heart's cleft and cookie9's uneven top/bottom peak heights shift their visual cavity slightly down.
+        anchors.verticalCenterOffset: root.target === "heart"
+            ? Math.round(root.size * 0.07)
+            : (root.target === "cookie9" ? root.size * 0.016 : 0)
         text: root.symbol
         iconSize: root.iconSize
         fill: root.fill

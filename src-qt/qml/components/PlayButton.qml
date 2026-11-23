@@ -44,7 +44,7 @@ ShapeButton {
     contentItem: Item {
         MaterialSymbol {
             id: glyph
-            anchors.centerIn: parent
+            anchors.fill: parent
             text: root.playing ? "pause" : "play_arrow"
             iconSize: root.iconSize
             fill: 1

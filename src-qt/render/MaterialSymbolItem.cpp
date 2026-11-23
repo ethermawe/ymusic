@@ -619,15 +619,17 @@ QSGNode *MaterialSymbolItem::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeDa
         node->markDirty(QSGNode::DirtyMaterial);
     }
 
-    // where a Text centred in the item puts the line's left end on its
-    // baseline, and the glyph's coverage from there
+    // Center vertically by true ink height; keep typographic sidebearings only for right-pointing
+    // play_arrow so its triangle mass stays optically centered.
     const qreal ratio = glyph->devicePixelRatio;
-    const qreal originX = (width() - glyph->advance) / 2;
-    const qreal baseline = (height() - glyph->lineHeight) / 2 + glyph->ascent;
-    const float left = float(originX + glyph->offset.x() / ratio);
-    const float top = float(baseline + glyph->offset.y() / ratio);
-    const float right = left + float(glyph->coverage.width() / ratio);
-    const float bottom = top + float(glyph->coverage.height() / ratio);
+    const float glyphWidth = float(glyph->coverage.width() / ratio);
+    const float glyphHeight = float(glyph->coverage.height() / ratio);
+    const float left = (m_text == QLatin1StringView("play_arrow"))
+        ? float((width() - glyph->advance) / 2.0 + glyph->offset.x() / ratio)
+        : float((width() - glyphWidth) / 2.0);
+    const float top = float((height() - glyphHeight) / 2.0);
+    const float right = left + glyphWidth;
+    const float bottom = top + glyphHeight;
     const float side = float(slot.page->side());
     const float u0 = float(slot.rect.x()) / side;
     const float v0 = float(slot.rect.y()) / side;
