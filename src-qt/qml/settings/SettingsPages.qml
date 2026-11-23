@@ -35,6 +35,7 @@ Item {
     readonly property list<string> backends: ["auto", "vulkan", "opengl"]
     readonly property list<string> discordDisplayModes: ["track", "artist", "app"]
     readonly property list<string> discordActivityTypes: ["listening", "playing"]
+    readonly property list<string> lyricsSourceModes: ["yandex_first", "lrclib_first", "lrclib_only", "yandex_only"]
     readonly property list<string> immersivePanels: ["artwork", "lyrics", "queue"]
     readonly property list<real> volumeSteps: [0.02, 0.05, 0.10]
     readonly property string normalizedPreset: (appSettings.themePreset === "" || appSettings.themePreset === "system")
@@ -738,6 +739,86 @@ Item {
                 }
                 NoteText {
                     text: "Пункт «В строке статуса» управляет текстом рядом с ником в списке друзей: название трека, исполнитель или «Яндекс Музыка»."
+                }
+            }
+
+            ContentSection {
+                title: "Тексты песен и LRCLIB"
+                symbol: "lyrics"
+
+                StatusRow {
+                    label: "Текущий текст"
+                    value: {
+                        if (UiState.lyricsLoading) return "Загрузка…";
+                        if (!UiState.lyricsLines || UiState.lyricsLines.length === 0) return "Не загружен";
+                        const src = UiState.lyricsSource === "lrclib" ? "LRCLIB" : "Яндекс Музыка";
+                        if (!UiState.lyricsSynced) return src + " (без синхронизации)";
+                        return src + (UiState.lyricsWordSynced ? " (пословно)" : " (построчно)");
+                    }
+                    good: UiState.lyricsLines && UiState.lyricsLines.length > 0
+                }
+                ConfigSelection {
+                    text: "Приоритет источников"
+                    currentIndex: Math.max(0, root.lyricsSourceModes.indexOf(appSettings.lyricsSourceMode))
+                    segments: [
+                        Segment { text: "Яндекс → LRCLIB" },
+                        Segment { text: "LRCLIB → Яндекс" },
+                        Segment { text: "Только LRCLIB" },
+                        Segment { text: "Только Яндекс" }
+                    ]
+                    onActivated: (index) => appSettings.lyricsSourceMode = root.lyricsSourceModes[index]
+                }
+                ConfigSwitch {
+                    text: "Предпочитать пословную синхронизацию LRCLIB"
+                    enabled: appSettings.lyricsSourceMode === "yandex_first"
+                    checked: appSettings.lrclibPreferWordSync
+                    onToggledTo: (checked) => appSettings.lrclibPreferWordSync = checked
+                }
+                ConfigSwitch {
+                    text: "Караоке по словам при наличии таймингов"
+                    checked: appSettings.lyricsWordKaraoke
+                    onToggledTo: (checked) => appSettings.lyricsWordKaraoke = checked
+                }
+
+                Item {
+                    width: parent.width
+                    height: lrclibUrlField.implicitHeight + (lrclibResetBtn.visible ? lrclibResetBtn.implicitHeight + 8 : 0) + 16
+                    visible: appSettings.lyricsSourceMode !== "yandex_only"
+
+                    OutlinedTextField {
+                        id: lrclibUrlField
+                        x: 8
+                        y: 6
+                        width: parent.width - 16
+                        placeholder: "Сервер LRCLIB (по умолчанию https://lrclib.net)"
+                        text: appSettings.lrclibBaseUrl
+                        onAccepted: appSettings.lrclibBaseUrl = text
+                    }
+                    TextButton {
+                        id: lrclibResetBtn
+                        x: 8
+                        y: lrclibUrlField.y + lrclibUrlField.height + 8
+                        visible: appSettings.lrclibBaseUrl !== "https://lrclib.net"
+                        variant: TextButton.Tonal
+                        symbol: "restart_alt"
+                        text: "Сбросить на https://lrclib.net"
+                        onClicked: {
+                            appSettings.lrclibBaseUrl = "https://lrclib.net";
+                            lrclibUrlField.text = appSettings.lrclibBaseUrl;
+                        }
+                    }
+                    Connections {
+                        target: lrclibUrlField.inputItem
+                        function onActiveFocusChanged() {
+                            if (!lrclibUrlField.inputItem.activeFocus) {
+                                appSettings.lrclibBaseUrl = lrclibUrlField.text;
+                            }
+                        }
+                    }
+                }
+
+                NoteText {
+                    text: "Режим «LRCLIB → Яндекс» сначала берёт текст из открытой базы LRCLIB (помогает обходить цензуру в текстах Яндекс Музыки). Пословное караоке работает только для треков с реальными таймингами слов; для обычных LRC активная строка выделяется целиком."
                 }
             }
 

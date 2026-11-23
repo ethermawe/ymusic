@@ -195,6 +195,7 @@ set(QML_FILES
     qml/components/FastWheel.qml
     qml/components/HomeShortcut.qml
     qml/components/IconButton.qml
+    qml/components/KaraokeLyricLine.qml
     qml/components/LikeBurst.qml
     qml/components/LoadingSpinner.qml
     qml/components/MenuLoader.qml

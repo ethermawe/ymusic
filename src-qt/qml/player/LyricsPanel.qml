@@ -365,6 +365,7 @@ Item {
 
             required property int index
             required property var modelData
+            readonly property var wordList: (modelData && modelData.words) ? modelData.words : []
             readonly property bool hasTime: Boolean(modelData && modelData.time !== undefined && modelData.time !== null)
             readonly property real timeSecs: hasTime ? Number(modelData.time) : -1
             readonly property bool isCurrent: UiState.lyricsSynced && UiState.activeLyricIndex === index
@@ -431,42 +432,23 @@ Item {
                     NumberAnimation { duration: 420; easing.type: Easing.OutCubic }
                 }
 
-                StyledText {
+                KaraokeLyricLine {
                     id: text
                     width: parent.width
-                    text: line.modelData && line.modelData.text && line.modelData.text.length > 0 ? line.modelData.text : "♪"
-                    wrapMode: Text.Wrap
-                    font.pixelSize: 20
-                    font.weight: line.isCurrent || !UiState.lyricsSynced ? Font.Bold : Font.DemiBold
-                    color: root.scheme.onSurface
-                    opacity: {
-                        if (!UiState.lyricsSynced) {
-                            return line.isHovered ? 1.0 : 0.86
-                        }
-                        if (line.isCurrent) return 1.0
-                        if (line.isHovered && line.hasTime) return 0.86
-                        return line.isPast ? 0.34 : 0.56
-                    }
-
-                    layer.enabled: line.isCurrent
-                    layer.smooth: true
-                    layer.effect: ShaderEffect {
-                        property variant source
-                        property color accentColor: root.scheme.primary
-                        property color sungColor: root.scheme.onSurface
-                        property size itemSize: Qt.size(text.width, text.height)
-                        property real progress: UiState.activeLyricProgress
-                        property real lineCount: Math.max(1, text.lineCount)
-                        property real textWidthFrac: text.width > 0 ? Math.min(1.0, Math.max(0.06, text.contentWidth / text.width)) : 1.0
-                        property real dimAlpha: 0.34
-                        property real glowAmount: Appearance.performanceMode ? 0.0 : 0.85
-                        fragmentShader: "qrc:/shaders/lyric_karaoke.frag.qsb"
-                    }
-
-                    Behavior on opacity {
-                        enabled: !root.suspended
-                        NumberAnimation { duration: Appearance.duration(260); easing.type: Easing.InOutQuad }
-                    }
+                    lineText: line.modelData && line.modelData.text ? String(line.modelData.text) : ""
+                    wordTimings: line.wordList
+                    wordKaraokeActive: line.isCurrent && UiState.lyricsWordSynced && appSettings.lyricsWordKaraoke && line.wordList.length > 0
+                    isCurrent: line.isCurrent
+                    synced: UiState.lyricsSynced
+                    isPast: line.isPast
+                    isHovered: line.isHovered
+                    hasTime: line.hasTime
+                    fontPixelSize: 20
+                    fontWeight: line.isCurrent || !UiState.lyricsSynced ? Font.Bold : Font.DemiBold
+                    textColor: root.scheme.onSurface
+                    accentColor: root.scheme.primary
+                    dimAlpha: 0.34
+                    glowAmount: Appearance.performanceMode ? 0.0 : 0.85
                 }
             }
 
@@ -525,7 +507,13 @@ Item {
                 color: root.scheme.onSurfaceVariant
             }
             StyledText {
-                text: qsTr("Яндекс Музыка")
+                text: {
+                    const src = UiState.lyricsSource === "lrclib"
+                        ? qsTr("LRCLIB")
+                        : qsTr("Яндекс Музыка");
+                    if (!UiState.lyricsSynced) return src + qsTr(" • без синхронизации");
+                    return src + (UiState.lyricsWordSynced ? qsTr(" • пословно") : qsTr(" • построчно"));
+                }
                 font.pixelSize: Appearance.fontSize.smaller
                 color: root.scheme.outline
             }

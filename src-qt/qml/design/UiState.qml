@@ -73,6 +73,8 @@ QtObject {
     property string lyricsTrackId: ""
     property bool lyricsLoading: false
     property bool lyricsSynced: false
+    property bool lyricsWordSynced: false
+    property string lyricsSource: ""
     property var lyricsLines: []
     property string lyricsMessage: ""
     property string lyricsWriters: ""
@@ -106,7 +108,7 @@ QtObject {
         if (!lyricsSynced || !lyricsLines || lyricsLines.length === 0) {
             return -1
         }
-        const pos = smoothPositionSecs + 0.15
+        const pos = smoothPositionSecs + 0.05
         let idx = -1
         for (let i = 0; i < lyricsLines.length; ++i) {
             const rawTime = lyricsLines[i] ? lyricsLines[i].time : undefined
@@ -163,7 +165,7 @@ QtObject {
             }
         }
         const span = Math.max(0.25, end - start)
-        return Math.max(0, Math.min(1, (smoothPositionSecs + 0.15 - start) / span))
+        return Math.max(0, Math.min(1, (smoothPositionSecs + 0.05 - start) / span))
     }
 
     function formatLyricTime(secs: real): string {
@@ -191,11 +193,38 @@ QtObject {
         lyricsTrackId = backend.nowId
         lyricsLoading = true
         lyricsSynced = false
+        lyricsWordSynced = false
+        lyricsSource = ""
         lyricsLines = []
         lyricsMessage = ""
         lyricsWriters = ""
         lyricsMajor = ""
-        backend.feature({ action: "lyrics", id: backend.nowId })
+        backend.feature({
+            action: "lyrics",
+            id: backend.nowId,
+            sourceMode: appSettings.lyricsSourceMode,
+            preferWordSync: appSettings.lrclibPreferWordSync,
+            lrclibUrl: appSettings.lrclibBaseUrl
+        })
+    }
+
+    function reloadLyrics() {
+        if (lyricsTrackId === "" && !showingLyrics && !immersiveOpen) {
+            return
+        }
+        lyricsTrackId = ""
+        ensureLyrics(true)
+    }
+
+    readonly property Connections lyricsSettingsSync: Connections {
+        target: appSettings
+        function onLyricsSettingsChanged() {
+            if (root.showingLyrics || root.immersiveOpen) {
+                root.reloadLyrics()
+            } else {
+                root.lyricsTrackId = ""
+            }
+        }
     }
 
     readonly property Connections lyricsWatcher: Connections {
@@ -207,6 +236,8 @@ QtObject {
             } else if (result.type === "lyrics" && result.trackId === root.lyricsTrackId) {
                 root.lyricsLoading = false
                 root.lyricsSynced = Boolean(result.synced)
+                root.lyricsWordSynced = Boolean(result.wordSynced)
+                root.lyricsSource = result.source ? String(result.source) : ""
                 root.lyricsLines = result.lines || []
                 root.lyricsMessage = result.message || ""
                 root.lyricsWriters = result.writers || ""

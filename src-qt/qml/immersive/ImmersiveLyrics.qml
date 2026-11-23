@@ -355,6 +355,7 @@ Item {
             required property int index
             required property var modelData
             readonly property string words: String(modelData && modelData.text !== undefined ? modelData.text : "")
+            readonly property var wordList: (modelData && modelData.words) ? modelData.words : []
             readonly property bool hasTime: Boolean(modelData && modelData.time !== undefined && modelData.time !== null)
             readonly property real timeSecs: hasTime ? Number(modelData.time) : -1
             readonly property bool isCurrent: UiState.lyricsSynced && UiState.activeLyricIndex === index
@@ -443,7 +444,7 @@ Item {
                     shadowVerticalOffset: 0
                 }
 
-                StyledText {
+                KaraokeLyricLine {
                     id: label
                     objectName: "lyricText"
                     anchors.left: parent.left
@@ -451,38 +452,20 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.leftMargin: 26
                     anchors.rightMargin: immersiveTimeBadge.visible ? immersiveTimeBadge.implicitWidth + 30 : 24
-                    text: line.words.length > 0 ? line.words : "♪"
-                    wrapMode: Text.Wrap
-                    font.pixelSize: 28
-                    font.weight: Font.Bold
-                    color: "white"
-                    opacity: {
-                        if (!UiState.lyricsSynced) {
-                            return line.isHovered ? 1.0 : 0.90;
-                        }
-                        if (line.isCurrent) return 1.0;
-                        if (line.isHovered && line.hasTime) return 0.86;
-                        return line.isPast ? 0.24 : 0.48;
-                    }
-
-                    Behavior on opacity {
-                        NumberAnimation { duration: Appearance.duration(280); easing.type: Easing.InOutQuad }
-                    }
-
-                    layer.enabled: line.isCurrent
-                    layer.smooth: true
-                    layer.effect: ShaderEffect {
-                        property variant source
-                        property color accentColor: PlayerStyle.primary
-                        property color sungColor: Qt.rgba(1, 1, 1, 1)
-                        property size itemSize: Qt.size(label.width, label.height)
-                        property real progress: UiState.activeLyricProgress
-                        property real lineCount: Math.max(1, label.lineCount)
-                        property real textWidthFrac: label.width > 0 ? Math.min(1.0, Math.max(0.06, label.contentWidth / label.width)) : 1.0
-                        property real dimAlpha: 0.28
-                        property real glowAmount: Appearance.performanceMode ? 0.0 : line.glowStrength
-                        fragmentShader: "qrc:/shaders/lyric_karaoke.frag.qsb"
-                    }
+                    lineText: line.words
+                    wordTimings: line.wordList
+                    wordKaraokeActive: line.isCurrent && UiState.lyricsWordSynced && appSettings.lyricsWordKaraoke && line.wordList.length > 0
+                    isCurrent: line.isCurrent
+                    synced: UiState.lyricsSynced
+                    isPast: line.isPast
+                    isHovered: line.isHovered
+                    hasTime: line.hasTime
+                    fontPixelSize: 28
+                    fontWeight: Font.Bold
+                    textColor: "white"
+                    accentColor: PlayerStyle.primary
+                    dimAlpha: 0.28
+                    glowAmount: Appearance.performanceMode ? 0.0 : line.glowStrength
                 }
             }
 

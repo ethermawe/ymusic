@@ -31,6 +31,10 @@ class AppSettings : public QObject {
     Q_PROPERTY(bool discordRpcShowAlbum READ discordRpcShowAlbum WRITE setDiscordRpcShowAlbum NOTIFY changed)
     Q_PROPERTY(bool discordRpcShowTimestamps READ discordRpcShowTimestamps WRITE setDiscordRpcShowTimestamps NOTIFY changed)
     Q_PROPERTY(bool discordRpcShowButton READ discordRpcShowButton WRITE setDiscordRpcShowButton NOTIFY changed)
+    Q_PROPERTY(QString lyricsSourceMode READ lyricsSourceMode WRITE setLyricsSourceMode NOTIFY lyricsSettingsChanged)
+    Q_PROPERTY(bool lrclibPreferWordSync READ lrclibPreferWordSync WRITE setLrclibPreferWordSync NOTIFY lyricsSettingsChanged)
+    Q_PROPERTY(bool lyricsWordKaraoke READ lyricsWordKaraoke WRITE setLyricsWordKaraoke NOTIFY lyricsSettingsChanged)
+    Q_PROPERTY(QString lrclibBaseUrl READ lrclibBaseUrl WRITE setLrclibBaseUrl NOTIFY lyricsSettingsChanged)
     Q_PROPERTY(QString themePreset READ themePreset WRITE setThemePreset NOTIFY themeChanged)
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY themeChanged)
     Q_PROPERTY(QString matugenColorsPath READ matugenColorsPath WRITE setMatugenColorsPath NOTIFY themeChanged)
@@ -104,6 +108,18 @@ public:
     bool discordRpcShowAlbum() const { return m_store.value("discord/showAlbum", true).toBool(); }
     bool discordRpcShowTimestamps() const { return m_store.value("discord/showTimestamps", true).toBool(); }
     bool discordRpcShowButton() const { return m_store.value("discord/showButton", true).toBool(); }
+    QString lyricsSourceMode() const {
+        const QString v = m_store.value("lyrics/sourceMode", "yandex_first").toString();
+        return (v == "lrclib_first" || v == "lrclib_only" || v == "yandex_only")
+            ? v
+            : QStringLiteral("yandex_first");
+    }
+    bool lrclibPreferWordSync() const { return m_store.value("lyrics/preferWordSync", true).toBool(); }
+    bool lyricsWordKaraoke() const { return m_store.value("lyrics/wordKaraoke", true).toBool(); }
+    QString lrclibBaseUrl() const {
+        const QString v = m_store.value("lyrics/lrclibBaseUrl", "https://lrclib.net").toString().trimmed();
+        return v.isEmpty() ? QStringLiteral("https://lrclib.net") : v;
+    }
     QString themePreset() const { return m_store.value("ui/themePreset", "auto").toString(); }
     QString themeMode() const { return m_store.value("ui/themeMode", "auto").toString(); }
     QString matugenColorsPath() const { return m_store.value("ui/matugenColorsPath", "").toString(); }
@@ -196,6 +212,34 @@ public:
     void setDiscordRpcShowAlbum(bool value) { if (value != discordRpcShowAlbum()) save("discord/showAlbum", value); }
     void setDiscordRpcShowTimestamps(bool value) { if (value != discordRpcShowTimestamps()) save("discord/showTimestamps", value); }
     void setDiscordRpcShowButton(bool value) { if (value != discordRpcShowButton()) save("discord/showButton", value); }
+    void setLyricsSourceMode(const QString &value) {
+        if (value != "yandex_first" && value != "lrclib_first" && value != "lrclib_only" && value != "yandex_only") return;
+        if (value != lyricsSourceMode()) {
+            save("lyrics/sourceMode", value);
+            emit lyricsSettingsChanged();
+        }
+    }
+    void setLrclibPreferWordSync(bool value) {
+        if (value != lrclibPreferWordSync()) {
+            save("lyrics/preferWordSync", value);
+            emit lyricsSettingsChanged();
+        }
+    }
+    void setLyricsWordKaraoke(bool value) {
+        if (value != lyricsWordKaraoke()) {
+            save("lyrics/wordKaraoke", value);
+            emit lyricsSettingsChanged();
+        }
+    }
+    void setLrclibBaseUrl(const QString &value) {
+        QString norm = value.trimmed();
+        while (norm.endsWith('/')) norm.chop(1);
+        if (norm.isEmpty()) norm = QStringLiteral("https://lrclib.net");
+        if (norm != lrclibBaseUrl()) {
+            save("lyrics/lrclibBaseUrl", norm);
+            emit lyricsSettingsChanged();
+        }
+    }
     void setThemePreset(const QString &value) {
         if (value != themePreset()) {
             save("ui/themePreset", value);
@@ -530,6 +574,7 @@ signals:
     void volumeStepChanged();
     void themeChanged();
     void autoUpdateEnabledChanged();
+    void lyricsSettingsChanged();
 
 private:
     void save(const QString &key, const QVariant &value) {

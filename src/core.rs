@@ -1406,7 +1406,7 @@ impl YMusicCore {
                 self.pause_if_playing();
             }
             "lyrics" => {
-                let (track_id, meta) = {
+                let (track_id, meta, options) = {
                     let st = self.state.lock().unwrap();
                     let cur = current_track(&st);
                     let id = cmd["id"]
@@ -1444,13 +1444,23 @@ impl YMusicCore {
                             None
                         },
                     });
-                    (id, meta)
+                    let options = crate::api::LyricsFetchOptions {
+                        source_mode: crate::api::LyricsSourceMode::from_str_opt(cmd["sourceMode"].as_str()),
+                        prefer_word_sync: cmd["preferWordSync"].as_bool().unwrap_or(true),
+                        lrclib_base_url: cmd["lrclibUrl"]
+                            .as_str()
+                            .unwrap_or("https://lrclib.net")
+                            .to_string(),
+                    };
+                    (id, meta, options)
                 };
                 let Some(track_id) = track_id else { return };
                 let Some(api) = self.api() else {
                     self.send_feature("lyrics", serde_json::json!({
                         "trackId": track_id,
                         "synced": false,
+                        "wordSynced": false,
+                        "source": "",
                         "lines": [],
                         "writers": "",
                         "major": "",
@@ -1460,7 +1470,7 @@ impl YMusicCore {
                 };
                 let this = self.clone();
                 self.rt_handle.spawn(async move {
-                    match api.track_lyrics(&track_id, meta.as_ref()).await {
+                    match api.track_lyrics(&track_id, meta.as_ref(), &options).await {
                         Ok(lyrics) => {
                             let message = if lyrics.lines.is_empty() {
                                 "Текст для этого трека не найден"
@@ -1470,6 +1480,8 @@ impl YMusicCore {
                             this.send_feature("lyrics", serde_json::json!({
                                 "trackId": track_id,
                                 "synced": lyrics.synced,
+                                "wordSynced": lyrics.word_synced,
+                                "source": lyrics.source,
                                 "lines": lyrics.lines,
                                 "writers": lyrics.writers,
                                 "major": lyrics.major,
@@ -1480,6 +1492,8 @@ impl YMusicCore {
                             this.send_feature("lyrics", serde_json::json!({
                                 "trackId": track_id,
                                 "synced": false,
+                                "wordSynced": false,
+                                "source": "",
                                 "lines": [],
                                 "writers": "",
                                 "major": "",
