@@ -381,7 +381,7 @@ FocusScope {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     size: 36
-                    iconSize: 19
+                    iconSize: 18
                     shape: "sunny"
                     hoverShape: "cookie9"
                     symbol: "my_wave"
@@ -1145,7 +1145,7 @@ FocusScope {
 
                     ShapeIcon {
                         size: 36
-                        iconSize: 19
+                        iconSize: 18
                         shape: "sunny"
                         symbol: "tune"
                         color: Appearance.colors.primaryContainer

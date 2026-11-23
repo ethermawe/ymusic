@@ -65,7 +65,7 @@ T.AbstractButton {
             anchors.leftMargin: 10
             anchors.verticalCenter: parent.verticalCenter
             size: 44
-            iconSize: 21
+            iconSize: 22
             shape: root.iconShape
             keepsShape: root.keepsShape
             symbol: root.symbol

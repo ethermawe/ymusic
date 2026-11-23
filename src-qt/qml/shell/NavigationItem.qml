@@ -118,7 +118,7 @@ T.AbstractButton {
                 Reveal.shown: root.selected && !root.showArtwork
                 Reveal.overshoot: 2.4
                 size: 30
-                iconSize: 17
+                iconSize: 16
                 shape: root.iconShape
                 keepsShape: root.keepsShape
                 symbol: root.symbol

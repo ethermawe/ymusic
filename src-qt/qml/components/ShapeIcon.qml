@@ -112,6 +112,8 @@ Item {
     MaterialSymbol {
         visible: !root.concentricHearts
         anchors.centerIn: parent
+        width: root.size
+        height: root.size
         // Heart's deep top cleft places its visual pocket slightly below geometric center.
         anchors.verticalCenterOffset: root.target === "heart" ? Math.round(root.size * 0.07) : 0
         text: root.symbol
