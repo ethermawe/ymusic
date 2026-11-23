@@ -147,6 +147,7 @@ export component InstallerWindow inherits Window {
     in-out property <bool> opt-launch: true;
     in-out property <bool> opt-remove-data: false;
     in-out property <float> progress: 0.0;
+    in-out property <image> progress-wave;
     in-out property <string> status-text: "";
     in-out property <string> error-text: "";
 
@@ -230,17 +231,10 @@ export component InstallerWindow inherits Window {
                 HorizontalLayout {
                     spacing: 10px;
 
-                    // Small title icon + product label
+                    // Product label
                     HorizontalLayout {
                         spacing: 8px;
                         horizontal-stretch: 1;
-
-                        Image {
-                            source: @image-url("../../../../icon.svg");
-                            width: 20px;
-                            height: 20px;
-                            y: (parent.height - self.height) / 2;
-                        }
 
                         Text {
                             text: "Yandex Music";
@@ -475,22 +469,12 @@ export component InstallerWindow inherits Window {
                         }
                     }
 
-                    // Smooth progress track
-                    Rectangle {
-                        height: 10px;
-                        border-radius: 5px;
-                        background: #2B2930;
-                        clip: true;
-
-                        Rectangle {
-                            x: 0px;
-                            y: 0px;
-                            height: parent.height;
-                            width: Math.max(10px, parent.width * Math.clamp(root.progress, 0.0, 1.0));
-                            border-radius: 5px;
-                            background: root.screen-mode == "uninstalling" ? #F2B8B5 : #D0BCFF;
-                            animate width { duration: 100ms; easing: ease-out; }
-                        }
+                    // Wavy Material 3 Expressive snake progress bar
+                    Image {
+                        width: 100%;
+                        height: 22px;
+                        source: root.progress-wave;
+                        image-fit: fill;
                     }
 
                     Text {

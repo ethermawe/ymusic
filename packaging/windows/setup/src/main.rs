@@ -12,10 +12,17 @@ mod os_unix;
 #[cfg(not(windows))]
 use os_unix as os_impl;
 
+use std::cell::Cell;
+use std::f32::consts::TAU;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
-use slint::{ComponentHandle, PhysicalPosition, SharedString};
+use slint::{
+    ComponentHandle, Image, PhysicalPosition, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer,
+    TimerMode,
+};
 
 slint::include_modules!();
 
@@ -133,15 +140,15 @@ where
         )?;
     } else {
         // Preview simulation when launched un-packed locally
-        for step in 1..=20 {
-            let frac = 0.05 + 0.90 * (step as f32 / 20.0);
+        for step in 1..=45 {
+            let frac = 0.04 + 0.94 * (step as f32 / 45.0);
             let msg = if is_ru {
-                format!("Предпросмотр установки ({step}/20)…")
+                format!("Предпросмотр установки ({step}/45)…")
             } else {
-                format!("Preview install step ({step}/20)…")
+                format!("Preview install step ({step}/45)…")
             };
             on_progress(frac, &msg);
-            std::thread::sleep(std::time::Duration::from_millis(60));
+            std::thread::sleep(Duration::from_millis(60));
         }
     }
 
@@ -290,6 +297,7 @@ fn main() {
     let ui = InstallerWindow::new().expect("Failed to create installer window");
     ui.set_is_ru(is_ru);
     ui.set_install_dir(SharedString::from(default_dir.to_string_lossy().as_ref()));
+    ui.set_progress_wave(render_wavy_progress_image(0.0, 0.0, false));
 
     if missing_payload_error {
         ui.set_screen_mode("error".into());
@@ -496,8 +504,130 @@ fn main() {
         });
     });
 
+    let wave_timer = Timer::default();
+    let wave_phase = Rc::new(Cell::new(0.0f32));
+    let shown_progress = Rc::new(Cell::new(0.0f32));
+    {
+        let weak_wave = ui.as_weak();
+        let phase_cell = Rc::clone(&wave_phase);
+        let shown_cell = Rc::clone(&shown_progress);
+        wave_timer.start(TimerMode::Repeated, Duration::from_millis(33), move || {
+            let Some(u) = weak_wave.upgrade() else {
+                return;
+            };
+            let mode = u.get_screen_mode();
+            let is_installing = mode == "installing";
+            let is_uninstalling = mode == "uninstalling";
+            if !is_installing && !is_uninstalling {
+                shown_cell.set(0.0);
+                return;
+            }
+            let target = u.get_progress().clamp(0.0, 1.0);
+            let prev = shown_cell.get();
+            let next_prog = prev + (target - prev) * 0.25;
+            shown_cell.set(next_prog);
+
+            let next_phase = (phase_cell.get() - 0.145).rem_euclid(TAU);
+            phase_cell.set(next_phase);
+
+            u.set_progress_wave(render_wavy_progress_image(
+                next_prog,
+                next_phase,
+                is_uninstalling,
+            ));
+        });
+    }
+
     ui.show().expect("Failed to show installer window");
     os_impl::apply_window_chrome();
     let _ = weak;
     ui.run().expect("Event loop failed");
+}
+
+fn render_wavy_progress_image(progress: f32, phase: f32, is_uninstall: bool) -> Image {
+    const W: usize = 1000;
+    const H: usize = 44;
+    const SCALE: f32 = 2.0;
+
+    let thickness = 4.0 * SCALE;
+    let half = 0.5 * thickness;
+    let amplitude = 2.4 * SCALE;
+    let wavelength = 34.0 * SCALE;
+    let gap = 5.0 * SCALE;
+
+    let wf = W as f32;
+    let hf = H as f32;
+    let handle_x = progress.clamp(0.0, 1.0) * wf;
+    let active_end = handle_x;
+    let track_start = if active_end > half {
+        active_end + gap
+    } else {
+        half
+    };
+
+    let active_rgb: [u8; 3] = if is_uninstall {
+        [242, 184, 181]
+    } else {
+        [208, 188, 255]
+    };
+    let track_rgb: [u8; 3] = [56, 52, 68];
+
+    let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(W as u32, H as u32);
+    let pixels = buffer.make_mut_slice();
+
+    let slope_k = amplitude * TAU / wavelength;
+
+    for py in 0..H {
+        let point_y = py as f32 + 0.5 - 0.5 * hf;
+        let row_offset = py * W;
+        for px in 0..W {
+            let point_x = px as f32 + 0.5;
+
+            let mut played = 0.0f32;
+            if active_end > half && point_x <= active_end + half + 2.0 {
+                let x = point_x.clamp(half, active_end);
+                let angle = TAU * x / wavelength + phase;
+                let y = amplitude * angle.sin();
+                let slope = slope_k * angle.cos();
+                let dx = point_x - x;
+                let dy = (point_y - y) / (1.0 + slope * slope).sqrt();
+                let dist = (dx * dx + dy * dy).sqrt();
+                played = (half + 0.7 - dist).clamp(0.0, 1.0);
+            }
+
+            let mut track = 0.0f32;
+            if track_start < wf - half && point_x >= track_start - half - 2.0 {
+                let x = point_x.clamp(track_start, wf - half);
+                let dx = point_x - x;
+                let dist = (dx * dx + point_y * point_y).sqrt();
+                track = (half + 0.7 - dist).clamp(0.0, 1.0);
+            }
+
+            let pixel = if played >= track && played > 0.0 {
+                Rgba8Pixel {
+                    r: active_rgb[0],
+                    g: active_rgb[1],
+                    b: active_rgb[2],
+                    a: (played * 255.0).round() as u8,
+                }
+            } else if track > 0.0 {
+                Rgba8Pixel {
+                    r: track_rgb[0],
+                    g: track_rgb[1],
+                    b: track_rgb[2],
+                    a: (track * 255.0).round() as u8,
+                }
+            } else {
+                Rgba8Pixel {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 0,
+                }
+            };
+            pixels[row_offset + px] = pixel;
+        }
+    }
+
+    Image::from_rgba8(buffer)
 }
