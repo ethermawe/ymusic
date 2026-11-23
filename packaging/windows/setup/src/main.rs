@@ -78,15 +78,6 @@ fn parse_cli_args() -> CliOptions {
     opts
 }
 
-fn format_size_mb(bytes: u64, is_ru: bool) -> String {
-    let mb = (bytes as f64 / (1024.0 * 1024.0)).max(1.0);
-    if is_ru {
-        format!("~{mb:.0} МБ")
-    } else {
-        format!("~{mb:.0} MB")
-    }
-}
-
 fn run_install_sync<F>(
     exe_path: &Path,
     payload: Option<&payload::EmbeddedPayload>,
@@ -300,16 +291,6 @@ fn main() {
     ui.set_is_ru(is_ru);
     ui.set_install_dir(SharedString::from(default_dir.to_string_lossy().as_ref()));
 
-    if let Some(ref pack) = embedded {
-        ui.set_app_version(SharedString::from(pack.metadata.version.as_str()));
-        ui.set_size_label(SharedString::from(
-            format_size_mb(pack.metadata.total_bytes, is_ru).as_str(),
-        ));
-    } else {
-        ui.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
-        ui.set_size_label(SharedString::from(if is_ru { "~110 МБ" } else { "~110 MB" }));
-    }
-
     if missing_payload_error {
         ui.set_screen_mode("error".into());
         ui.set_error_text(SharedString::from(if is_ru {
@@ -352,19 +333,11 @@ fn main() {
         }
     });
 
-    let embedded_for_lang = embedded.clone();
     let weak_lang = ui.as_weak();
     ui.on_toggle_lang_clicked(move || {
         if let Some(u) = weak_lang.upgrade() {
             let next_ru = !u.get_is_ru();
             u.set_is_ru(next_ru);
-            if let Some(ref pack) = embedded_for_lang {
-                u.set_size_label(SharedString::from(
-                    format_size_mb(pack.metadata.total_bytes, next_ru).as_str(),
-                ));
-            } else {
-                u.set_size_label(SharedString::from(if next_ru { "~110 МБ" } else { "~110 MB" }));
-            }
         }
     });
 

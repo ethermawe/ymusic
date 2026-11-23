@@ -141,8 +141,6 @@ export component InstallerWindow inherits Window {
     // Modes: "setup", "installing", "done", "uninstall", "uninstalling", "uninstalled", "error"
     in-out property <string> screen-mode: "setup";
     in-out property <bool> is-ru: true;
-    in-out property <string> app-version: "0.3.0";
-    in-out property <string> size-label: "~110 МБ";
     in-out property <string> install-dir: "";
     in-out property <bool> opt-desktop: true;
     in-out property <bool> opt-start-menu: true;
@@ -251,25 +249,6 @@ export component InstallerWindow inherits Window {
                             color: #E6E0E9;
                             vertical-alignment: center;
                         }
-
-                        Rectangle {
-                            width: ver-txt.preferred-width + 14px;
-                            height: 20px;
-                            y: (parent.height - self.height) / 2;
-                            border-radius: 10px;
-                            background: #2B253A;
-                            border-width: 1px;
-                            border-color: #49454F;
-
-                            ver-txt := Text {
-                                text: "v" + root.app-version;
-                                font-size: 11px;
-                                font-weight: 600;
-                                color: #D0BCFF;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
                     }
 
                     // Language switch pill + Window controls
@@ -318,31 +297,16 @@ export component InstallerWindow inherits Window {
 
             // Hero branding banner
             HorizontalLayout {
-                padding-left: 6px;
+                padding-left: 4px;
                 padding-right: 6px;
-                spacing: 16px;
-                height: 76px;
+                spacing: 14px;
+                height: 70px;
 
-                Rectangle {
-                    width: 68px;
-                    height: 68px;
+                Image {
+                    source: @image-url("../../../../icon.svg");
+                    width: 60px;
+                    height: 60px;
                     y: (parent.height - self.height) / 2;
-                    border-radius: 22px;
-                    background: (screen-mode == "uninstall" || screen-mode == "uninstalling")
-                        ? #3B1E20
-                        : #261E3B;
-                    border-width: 1px;
-                    border-color: (screen-mode == "uninstall" || screen-mode == "uninstalling")
-                        ? #6D3539
-                        : #4F378B;
-
-                    Image {
-                        source: @image-url("../../../../icon.svg");
-                        width: 52px;
-                        height: 52px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                    }
                 }
 
                 VerticalLayout {
@@ -384,8 +348,8 @@ export component InstallerWindow inherits Window {
                                             : screen-mode == "error"
                                                 ? (is-ru ? "Операция не могла быть завершена" : "The operation could not complete")
                                                 : (is-ru
-                                                    ? ("Нативный клиент Яндекс Музыки  •  " + root.size-label)
-                                                    : ("Native Yandex Music desktop client  •  " + root.size-label));
+                                                    ? "Нативный Rust/QML клиент Яндекс музыки"
+                                                    : "Native Rust/QML client for Yandex Music");
                         font-size: 13px;
                         color: #B6B0C0;
                         overflow: elide;
