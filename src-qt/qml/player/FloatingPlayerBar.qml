@@ -118,8 +118,7 @@ Item {
 
             PlayButton {
                 anchors.verticalCenter: parent.verticalCenter
-                implicitWidth: root.tiny ? 36 : (root.compact ? 40 : 44)
-                implicitHeight: implicitWidth
+                size: root.tiny ? 36 : (root.compact ? 40 : 44)
                 enabled: backend.hasTrack
                 playing: backend.playing
                 color: root.scheme.primary
