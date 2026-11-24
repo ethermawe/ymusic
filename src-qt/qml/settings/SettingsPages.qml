@@ -19,6 +19,8 @@
 
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Dialogs
+import QtQuick.Layouts
 import ymusic.ui
 import "../settings"
 
@@ -27,11 +29,16 @@ Item {
 
     property int page: 0
     property string cacheSizeLabel: appSettings.cacheSizeText()
+    property int themeListRev: 0
+    property var fontOptions: ["По умолчанию (Google Sans Flex / система)"]
 
     readonly property list<string> fades: ["none", "finalSeconds", "entire"]
     readonly property list<string> qualities: ["nq", "hq", "lossless"]
     readonly property list<string> aiBehaviors: ["skip_if_not_liked", "dislike_if_not_liked", "skip", "dislike", "nothing"]
     readonly property list<string> themeModes: ["auto", "light", "dark"]
+    readonly property list<string> schemeVariantIds: ["tonal_spot", "expressive", "vibrant", "fidelity", "monochrome", "neutral"]
+    readonly property list<string> schemeVariantLabels: ["Tonal Spot", "Expressive", "Vibrant", "Fidelity", "Monochrome", "Neutral"]
+    readonly property list<string> accentQuickSwatches: ["#fc3f1d", "#ff3d8a", "#8b5cf6", "#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"]
     readonly property list<string> backends: ["auto", "vulkan", "opengl"]
     readonly property list<string> discordDisplayModes: ["track", "artist", "app"]
     readonly property list<string> discordActivityTypes: ["listening", "playing"]
@@ -40,6 +47,28 @@ Item {
     readonly property list<real> volumeSteps: [0.02, 0.05, 0.10]
     readonly property string normalizedPreset: (appSettings.themePreset === "" || appSettings.themePreset === "system")
         ? "auto" : appSettings.themePreset
+
+    function fontComboIndex(): int {
+        if (!appSettings.customFontFamily || appSettings.customFontFamily.length === 0) return 0;
+        const idx = fontOptions.indexOf(appSettings.customFontFamily);
+        return idx >= 0 ? idx : 0;
+    }
+
+    function fileBaseLabel(path: string): string {
+        if (!path || path.length === 0) return "Не выбрано";
+        const parts = path.split(/[\\/]/);
+        return parts.length > 0 ? parts[parts.length - 1] : path;
+    }
+
+    Component.onCompleted: {
+        fontOptions = ["По умолчанию (Google Sans Flex / система)"].concat(Theme.availableFonts());
+    }
+
+    Connections {
+        target: Theme
+        function onSchemeChanged() { root.themeListRev += 1; }
+        function onUserThemesChanged() { root.themeListRev += 1; }
+    }
 
     function nearestVolumeStepIndex(): int {
         let best = 1;
@@ -169,13 +198,111 @@ Item {
                     bottomPadding: 10
 
                     Repeater {
-                        model: Theme.themeOptions(Theme.dark)
+                        model: root.themeListRev >= 0 ? Theme.themeOptions(Theme.dark) : []
 
                         delegate: ThemeSwatch {
                             required property var modelData
                             option: modelData
                             selected: modelData.id === root.normalizedPreset
-                            onClicked: appSettings.themePreset = modelData.id
+                            onClicked: Theme.selectPreset(modelData.id)
+                            onDeleteRequested: {
+                                const removedName = modelData.name;
+                                if (Theme.deleteUserTheme(modelData.id)) {
+                                    UiState.showToast("Тема «" + removedName + "» удалена");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Column {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 10
+                    topPadding: 4
+                    bottomPadding: 8
+                    visible: root.normalizedPreset === "custom"
+
+                    StyledText {
+                        text: "Акцентный цвет и стиль Material 3"
+                        font.pixelSize: Appearance.fontSize.smaller
+                        font.weight: Font.DemiBold
+                        color: Appearance.colors.onSurfaceVariant
+                    }
+
+                    Flow {
+                        width: parent.width
+                        spacing: 8
+
+                        Repeater {
+                            model: root.accentQuickSwatches
+                            delegate: RippleButton {
+                                id: swatchBtn
+                                required property string modelData
+                                readonly property bool isCurrent: appSettings.customAccentColor.toLowerCase() === modelData.toLowerCase()
+                                width: 32
+                                height: 32
+                                padding: 0
+                                buttonRadius: width / 2
+                                colBackground: modelData
+                                colBackgroundHover: modelData
+                                backgroundItem.border.width: isCurrent ? 2 : 1
+                                backgroundItem.border.color: isCurrent
+                                    ? Appearance.colors.onSurface
+                                    : Appearance.colors.outlineVariant
+                                tooltip: modelData
+                                onClicked: appSettings.customAccentColor = modelData
+
+                                MaterialSymbol {
+                                    anchors.centerIn: parent
+                                    visible: swatchBtn.isCurrent
+                                    text: "check"
+                                    iconSize: 16
+                                    color: Appearance.colors.onPrimary
+                                }
+                            }
+                        }
+
+                        OutlinedTextField {
+                            id: customHexField
+                            width: 126
+                            placeholder: "#FC3F1D"
+                            text: appSettings.customAccentColor
+                            onAccepted: appSettings.customAccentColor = text
+                        }
+                        Connections {
+                            target: customHexField.inputItem
+                            function onActiveFocusChanged() {
+                                if (!customHexField.inputItem.activeFocus) {
+                                    appSettings.customAccentColor = customHexField.text;
+                                }
+                            }
+                        }
+
+                        TextButton {
+                            variant: TextButton.Tonal
+                            symbol: "colorize"
+                            text: "Выбрать цвет…"
+                            onClicked: {
+                                accentColorDialog.selectedColor = appSettings.customAccentColor;
+                                accentColorDialog.open();
+                            }
+                        }
+                    }
+
+                    Flow {
+                        width: parent.width
+                        spacing: 8
+
+                        Repeater {
+                            model: root.schemeVariantIds.length
+                            delegate: TextButton {
+                                required property int index
+                                readonly property string variantId: root.schemeVariantIds[index]
+                                text: root.schemeVariantLabels[index]
+                                variant: appSettings.customSchemeVariant === variantId ? TextButton.Filled : TextButton.Outlined
+                                onClicked: appSettings.customSchemeVariant = variantId
+                            }
                         }
                     }
                 }
@@ -218,13 +345,222 @@ Item {
                 }
 
                 NoteText {
-                    text: root.normalizedPreset !== "auto"
-                        ? "Используется встроенный пресет цветов."
-                        : (Theme.usingSystemScheme
-                            ? ("Системная схема: " + Theme.systemSchemePath + " (обновляется автоматически)")
-                            : (appSettings.matugenColorsPath.length > 0
-                                ? ("Файл схемы не найден по пути: " + appSettings.matugenColorsPath)
-                                : "Автоматически подбирает цвета по обоям или системному акценту."))
+                    text: root.normalizedPreset === "custom"
+                        ? ("Своя палитра Material 3 (" + appSettings.customAccentColor + ", " + appSettings.customSchemeVariant + ").")
+                        : (root.normalizedPreset.startsWith("user:")
+                            ? "Используется сохранённая пользовательская тема."
+                            : (root.normalizedPreset !== "auto"
+                                ? "Используется встроенный пресет цветов."
+                                : (Theme.usingSystemScheme
+                                    ? ("Системная схема: " + Theme.systemSchemePath + " (обновляется автоматически)")
+                                    : (appSettings.matugenColorsPath.length > 0
+                                        ? ("Файл схемы не найден по пути: " + appSettings.matugenColorsPath)
+                                        : "Автоматически подбирает цвета по обоям или системному акценту."))))
+                }
+            }
+
+            ContentSection {
+                title: "Типографика и скругления"
+                symbol: "text_fields"
+
+                RowLayout {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 12
+
+                    StyledText {
+                        Layout.fillWidth: true
+                        text: "Шрифт интерфейса"
+                        elide: Text.ElideRight
+                    }
+
+                    StyledComboBox {
+                        id: fontCombo
+                        Layout.preferredWidth: 280
+                        model: root.fontOptions
+                        currentIndex: root.fontComboIndex()
+                        onActivated: (index) => {
+                            appSettings.customFontFamily = index <= 0 ? "" : root.fontOptions[index];
+                        }
+                    }
+
+                    IconButton {
+                        visible: appSettings.customFontFamily.length > 0
+                        symbol: "restart_alt"
+                        tooltip: "Вернуть стандартный шрифт"
+                        onClicked: appSettings.customFontFamily = ""
+                    }
+                }
+
+                ConfigSlider {
+                    text: "Скругление углов"
+                    from: 0.0
+                    to: 1.6
+                    stepSize: 0.05
+                    value: appSettings.roundingScale
+                    valueText: Math.round(appSettings.roundingScale * 100) + "%"
+                    onMoved: (value) => appSettings.roundingScale = Number(value.toFixed(2))
+                }
+
+                Flow {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+
+                    TextButton {
+                        variant: Math.abs(appSettings.roundingScale - 0.25) < 0.03 ? TextButton.Filled : TextButton.Outlined
+                        text: "Острые (25%)"
+                        onClicked: appSettings.roundingScale = 0.25
+                    }
+                    TextButton {
+                        variant: Math.abs(appSettings.roundingScale - 1.0) < 0.03 ? TextButton.Filled : TextButton.Outlined
+                        text: "Стандарт (100%)"
+                        onClicked: appSettings.roundingScale = 1.0
+                    }
+                    TextButton {
+                        variant: Math.abs(appSettings.roundingScale - 1.4) < 0.03 ? TextButton.Filled : TextButton.Outlined
+                        text: "Мягкие (140%)"
+                        onClicked: appSettings.roundingScale = 1.4
+                    }
+                }
+            }
+
+            ContentSection {
+                title: "Фон окна и прозрачность"
+                symbol: "wallpaper"
+
+                RowLayout {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+
+                    Column {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        StyledText {
+                            width: parent.width
+                            text: "Фоновое изображение окна"
+                            elide: Text.ElideRight
+                        }
+                        StyledText {
+                            width: parent.width
+                            text: root.fileBaseLabel(appSettings.windowBackgroundPath)
+                            font.pixelSize: Appearance.fontSize.smaller
+                            color: Appearance.colors.onSurfaceVariant
+                            elide: Text.ElideMiddle
+                        }
+                    }
+
+                    TextButton {
+                        variant: TextButton.Tonal
+                        symbol: "file_open"
+                        text: "Выбрать…"
+                        onClicked: bgImageDialog.open()
+                    }
+                    TextButton {
+                        visible: appSettings.windowBackgroundPath.length > 0
+                        variant: TextButton.Outlined
+                        symbol: "close"
+                        text: "Убрать"
+                        onClicked: appSettings.windowBackgroundPath = ""
+                    }
+                }
+
+                ConfigSlider {
+                    text: "Видимость фона"
+                    enabled: appSettings.windowBackgroundPath.length > 0
+                    from: 0.05
+                    to: 1.0
+                    stepSize: 0.05
+                    value: appSettings.windowBackgroundOpacity
+                    valueText: Math.round(appSettings.windowBackgroundOpacity * 100) + "%"
+                    onMoved: (value) => appSettings.windowBackgroundOpacity = Number(value.toFixed(2))
+                }
+
+                ConfigSlider {
+                    text: "Размытие фона"
+                    enabled: appSettings.windowBackgroundPath.length > 0
+                    from: 0
+                    to: 48
+                    stepSize: 1
+                    value: appSettings.windowBackgroundBlur
+                    valueText: Math.round(appSettings.windowBackgroundBlur) + " px"
+                    onMoved: (value) => appSettings.windowBackgroundBlur = Math.round(value)
+                }
+
+                ConfigSlider {
+                    text: "Непрозрачность панелей"
+                    from: 0.55
+                    to: 1.0
+                    stepSize: 0.02
+                    value: appSettings.surfaceOpacity
+                    valueText: Math.round(appSettings.surfaceOpacity * 100) + "%"
+                    onMoved: (value) => appSettings.surfaceOpacity = Number(value.toFixed(2))
+                }
+            }
+
+            ContentSection {
+                title: "Темы пользователей и обмен (.ymtheme)"
+                symbol: "save"
+
+                RowLayout {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+
+                    OutlinedTextField {
+                        id: saveThemeNameField
+                        Layout.fillWidth: true
+                        placeholder: "Название темы (например, Неоновый вечер)"
+                    }
+
+                    TextButton {
+                        variant: TextButton.Filled
+                        symbol: "add"
+                        text: "Сохранить в коллекцию"
+                        onClicked: {
+                            const res = Theme.saveUserTheme(saveThemeNameField.text);
+                            if (res.ok) {
+                                saveThemeNameField.text = "";
+                                UiState.showToast("Тема «" + res.name + "» сохранена");
+                            } else {
+                                UiState.showToast(res.error || "Не удалось сохранить тему");
+                            }
+                        }
+                    }
+                }
+
+                Flow {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+                    topPadding: 4
+
+                    TextButton {
+                        variant: TextButton.Tonal
+                        symbol: "upload_file"
+                        text: "Экспорт (.ymtheme)…"
+                        onClicked: exportThemeDialog.open()
+                    }
+                    TextButton {
+                        variant: TextButton.Tonal
+                        symbol: "download"
+                        text: "Импорт (.ymtheme / .json)…"
+                        onClicked: importThemeDialog.open()
+                    }
+                    TextButton {
+                        variant: TextButton.Outlined
+                        symbol: "restart_alt"
+                        text: "Сбросить тему"
+                        onClicked: {
+                            Theme.resetThemeDefaults();
+                            UiState.showToast("Оформление сброшено к стандартному");
+                        }
+                    }
+                }
+
+                NoteText {
+                    text: "Экспортированный файл .ymtheme хранит палитру, стиль M3, шрифт, скругление, фон и прозрачность панелей."
                 }
             }
 
@@ -1188,6 +1524,43 @@ Item {
                     ]
                 }
             }
+        }
+    }
+
+    ColorDialog {
+        id: accentColorDialog
+        title: "Выбор акцентного цвета"
+        onAccepted: appSettings.customAccentColor = String(selectedColor)
+    }
+
+    FileDialog {
+        id: bgImageDialog
+        title: "Выберите изображение для фона окна"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Изображения (*.png *.jpg *.jpeg *.webp *.bmp)"]
+        onAccepted: appSettings.windowBackgroundPath = String(selectedFile)
+    }
+
+    FileDialog {
+        id: exportThemeDialog
+        title: "Экспортировать тему (.ymtheme)"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "ymtheme"
+        nameFilters: ["Тема Yandex Music (*.ymtheme)", "JSON (*.json)"]
+        onAccepted: {
+            const res = Theme.exportThemeFile(selectedFile);
+            UiState.showToast(res.ok ? "Тема экспортирована" : (res.error || "Ошибка экспорта"));
+        }
+    }
+
+    FileDialog {
+        id: importThemeDialog
+        title: "Импортировать тему (.ymtheme / .json)"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Темы (*.ymtheme *.json)"]
+        onAccepted: {
+            const res = Theme.importThemeFile(selectedFile, true);
+            UiState.showToast(res.ok ? ("Тема «" + res.name + "» применена") : (res.error || "Ошибка импорта"));
         }
     }
 }

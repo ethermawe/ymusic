@@ -27,6 +27,8 @@ ItemDelegate {
     required property var option
     property bool selected: false
     readonly property bool isAuto: option.id === "auto"
+    readonly property bool isUserTheme: option.id.startsWith("user:")
+    signal deleteRequested()
 
     implicitWidth: 124
     implicitHeight: 104
@@ -139,6 +141,21 @@ ItemDelegate {
                     iconSize: 16
                     color: Appearance.colors.onPrimary
                 }
+            }
+
+            IconButton {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.margins: -6
+                visible: root.isUserTheme && (root.hovered || root.selected)
+                symbol: "close"
+                size: 22
+                iconSize: 13
+                colBackground: Appearance.colors.errorContainer
+                colBackgroundHover: Appearance.colors.error
+                iconColor: hovered ? Appearance.colors.onError : Appearance.colors.onErrorContainer
+                tooltip: "Удалить тему"
+                onClicked: root.deleteRequested()
             }
         }
 

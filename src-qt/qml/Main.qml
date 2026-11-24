@@ -20,6 +20,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Effects
 import QtQuick.Layouts
 import ymusic.ui
 
@@ -306,10 +307,36 @@ ApplicationWindow {
         transformOrigin: Item.TopLeft
         scale: window.zoom
 
+        function resolvedBackgroundSource(path: string): url {
+            if (!path || path.length === 0) return "";
+            if (path.startsWith("file://") || path.startsWith("qrc:") || path.startsWith("http")) {
+                return path;
+            }
+            return "file://" + path;
+        }
+
         Item {
             id: shell
         anchors.fill: parent
         visible: window.onScreen && window.immersiveReveal < 1
+
+        Image {
+            id: windowWallpaper
+            anchors.fill: parent
+            z: -1
+            visible: appSettings.windowBackgroundPath.length > 0
+            source: zoomRoot.resolvedBackgroundSource(appSettings.windowBackgroundPath)
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            smooth: true
+            opacity: appSettings.windowBackgroundOpacity
+            layer.enabled: visible && appSettings.windowBackgroundBlur > 0.5 && !Appearance.performanceMode
+            layer.effect: MultiEffect {
+                blurEnabled: true
+                blurMax: 48
+                blur: Math.min(1.0, appSettings.windowBackgroundBlur / 48.0)
+            }
+        }
 
         // Dismiss active search focus / suggestions when clicking empty space or another control.
         MouseArea {
@@ -369,7 +396,7 @@ ApplicationWindow {
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 8
             radius: Appearance.rounding.large
-            color: Appearance.colors.layer1
+            color: Qt.alpha(Appearance.colors.layer1, appSettings.surfaceOpacity)
 
             Item {
                 id: pageContent
@@ -882,7 +909,7 @@ ApplicationWindow {
                 width: window.activeRightPanelWidth
                 height: parent.height
                 radius: Appearance.rounding.large
-                color: Appearance.colors.layer1
+                color: Qt.alpha(Appearance.colors.layer1, appSettings.surfaceOpacity)
 
                 LyricsPanel {
                     anchors.fill: parent

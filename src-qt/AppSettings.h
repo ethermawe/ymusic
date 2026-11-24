@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QDesktopServices>
 #include <QDir>
 #include <QDirIterator>
@@ -10,6 +11,7 @@
 #include <QStandardPaths>
 #include <QUrl>
 #include <algorithm>
+#include <cmath>
 
 #include "app/Paths.h"
 
@@ -38,6 +40,14 @@ class AppSettings : public QObject {
     Q_PROPERTY(QString themePreset READ themePreset WRITE setThemePreset NOTIFY themeChanged)
     Q_PROPERTY(QString themeMode READ themeMode WRITE setThemeMode NOTIFY themeChanged)
     Q_PROPERTY(QString matugenColorsPath READ matugenColorsPath WRITE setMatugenColorsPath NOTIFY themeChanged)
+    Q_PROPERTY(QString customAccentColor READ customAccentColor WRITE setCustomAccentColor NOTIFY themeChanged)
+    Q_PROPERTY(QString customSchemeVariant READ customSchemeVariant WRITE setCustomSchemeVariant NOTIFY themeChanged)
+    Q_PROPERTY(QString customFontFamily READ customFontFamily WRITE setCustomFontFamily NOTIFY appearanceChanged)
+    Q_PROPERTY(double roundingScale READ roundingScale WRITE setRoundingScale NOTIFY appearanceChanged)
+    Q_PROPERTY(QString windowBackgroundPath READ windowBackgroundPath WRITE setWindowBackgroundPath NOTIFY appearanceChanged)
+    Q_PROPERTY(double windowBackgroundOpacity READ windowBackgroundOpacity WRITE setWindowBackgroundOpacity NOTIFY appearanceChanged)
+    Q_PROPERTY(double windowBackgroundBlur READ windowBackgroundBlur WRITE setWindowBackgroundBlur NOTIFY appearanceChanged)
+    Q_PROPERTY(double surfaceOpacity READ surfaceOpacity WRITE setSurfaceOpacity NOTIFY appearanceChanged)
     Q_PROPERTY(QString graphicsBackend READ graphicsBackend WRITE setGraphicsBackend NOTIFY changed)
 
     Q_PROPERTY(bool visualizersEnabled READ visualizersEnabled WRITE setVisualizersEnabled NOTIFY visualizersEnabledChanged)
@@ -123,6 +133,22 @@ public:
     QString themePreset() const { return m_store.value("ui/themePreset", "auto").toString(); }
     QString themeMode() const { return m_store.value("ui/themeMode", "auto").toString(); }
     QString matugenColorsPath() const { return m_store.value("ui/matugenColorsPath", "").toString(); }
+    QString customAccentColor() const {
+        const QString v = m_store.value("ui/customAccentColor", "#fc3f1d").toString();
+        return QColor(v).isValid() ? QColor(v).name(QColor::HexRgb) : QStringLiteral("#fc3f1d");
+    }
+    QString customSchemeVariant() const {
+        const QString v = m_store.value("ui/customSchemeVariant", "tonal_spot").toString();
+        return (v == "expressive" || v == "vibrant" || v == "fidelity" || v == "content" || v == "monochrome" || v == "neutral")
+            ? v
+            : QStringLiteral("tonal_spot");
+    }
+    QString customFontFamily() const { return m_store.value("ui/customFontFamily", "").toString(); }
+    double roundingScale() const { return std::clamp(m_store.value("ui/roundingScale", 1.0).toDouble(), 0.0, 1.6); }
+    QString windowBackgroundPath() const { return m_store.value("ui/windowBackgroundPath", "").toString(); }
+    double windowBackgroundOpacity() const { return std::clamp(m_store.value("ui/windowBackgroundOpacity", 0.40).toDouble(), 0.05, 1.0); }
+    double windowBackgroundBlur() const { return std::clamp(m_store.value("ui/windowBackgroundBlur", 16.0).toDouble(), 0.0, 48.0); }
+    double surfaceOpacity() const { return std::clamp(m_store.value("ui/surfaceOpacity", 1.0).toDouble(), 0.55, 1.0); }
     QString graphicsBackend() const {
         const QString backend = m_store.value("ui/graphicsBackend", "auto").toString();
         return backend == "vulkan" || backend == "opengl" ? backend : "auto";
@@ -256,6 +282,68 @@ public:
         if (value != matugenColorsPath()) {
             save("ui/matugenColorsPath", value);
             emit themeChanged();
+        }
+    }
+    void setCustomAccentColor(const QString &value) {
+        const QColor parsed(value.trimmed());
+        if (!parsed.isValid()) return;
+        const QString hex = parsed.name(QColor::HexRgb);
+        if (hex != customAccentColor()) {
+            save("ui/customAccentColor", hex);
+            emit themeChanged();
+        }
+    }
+    void setCustomSchemeVariant(const QString &value) {
+        if (value != "tonal_spot" && value != "expressive" && value != "vibrant"
+            && value != "fidelity" && value != "content" && value != "monochrome" && value != "neutral") {
+            return;
+        }
+        if (value != customSchemeVariant()) {
+            save("ui/customSchemeVariant", value);
+            emit themeChanged();
+        }
+    }
+    void setCustomFontFamily(const QString &value) {
+        const QString trimmed = value.trimmed();
+        if (trimmed != customFontFamily()) {
+            save("ui/customFontFamily", trimmed);
+            emit appearanceChanged();
+        }
+    }
+    void setRoundingScale(double value) {
+        const double clamped = std::clamp(value, 0.0, 1.6);
+        if (std::abs(clamped - roundingScale()) > 0.005) {
+            save("ui/roundingScale", clamped);
+            emit appearanceChanged();
+        }
+    }
+    void setWindowBackgroundPath(const QString &value) {
+        QString cleaned = value.trimmed();
+        if (QUrl(cleaned).isLocalFile()) cleaned = QUrl(cleaned).toLocalFile();
+        if (cleaned != windowBackgroundPath()) {
+            save("ui/windowBackgroundPath", cleaned);
+            emit appearanceChanged();
+        }
+    }
+    void setWindowBackgroundOpacity(double value) {
+        const double clamped = std::clamp(value, 0.05, 1.0);
+        if (std::abs(clamped - windowBackgroundOpacity()) > 0.005) {
+            save("ui/windowBackgroundOpacity", clamped);
+            emit appearanceChanged();
+        }
+    }
+    void setWindowBackgroundBlur(double value) {
+        const double clamped = std::clamp(value, 0.0, 48.0);
+        if (std::abs(clamped - windowBackgroundBlur()) > 0.1) {
+            save("ui/windowBackgroundBlur", clamped);
+            emit appearanceChanged();
+        }
+    }
+    void setSurfaceOpacity(double value) {
+        const double clamped = std::clamp(value, 0.55, 1.0);
+        if (std::abs(clamped - surfaceOpacity()) > 0.005) {
+            save("ui/surfaceOpacity", clamped);
+            emit appearanceChanged();
         }
     }
     void setGraphicsBackend(const QString &value) {
@@ -546,6 +634,7 @@ public:
         emit burstsEnabledChanged();
         emit volumeStepChanged();
         emit themeChanged();
+        emit appearanceChanged();
     }
 
 signals:
@@ -573,6 +662,7 @@ signals:
     void burstsEnabledChanged();
     void volumeStepChanged();
     void themeChanged();
+    void appearanceChanged();
     void autoUpdateEnabledChanged();
     void lyricsSettingsChanged();
 

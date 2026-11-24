@@ -21,25 +21,35 @@
 
 #include "AppSettings.h"
 #include "app/Fonts.h"
+#include "app/Paths.h"
 #include "artwork/ArtworkPalette.h"
 #include "cpp/cam/hct.h"
 #include "cpp/scheme/scheme_content.h"
+#include "cpp/scheme/scheme_expressive.h"
+#include "cpp/scheme/scheme_fidelity.h"
+#include "cpp/scheme/scheme_monochrome.h"
+#include "cpp/scheme/scheme_neutral.h"
 #include "cpp/scheme/scheme_tonal_spot.h"
+#include "cpp/scheme/scheme_vibrant.h"
 #include "theme/ColorMath.h"
 
 #include <QAbstractNativeEventFilter>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QEvent>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLoggingCategory>
 #include <QPalette>
 #include <QQmlEngine>
+#include <QRegularExpression>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QStyleHints>
 #include <QUrl>
@@ -260,6 +270,133 @@ QString normalizedPreset(const QString &preset)
     return preset;
 }
 
+QString userThemesDirectory()
+{
+    return ymusic::paths::dataDirectory() + QStringLiteral("/themes");
+}
+
+QString slugifyThemeName(const QString &name)
+{
+    QString ascii = name.trimmed().toLower();
+    ascii.replace(QRegularExpression(QStringLiteral("[^a-z0-9_-]+")), QStringLiteral("-"));
+    ascii.remove(QRegularExpression(QStringLiteral("^-+|-+$")));
+    if (ascii.length() >= 3) {
+        return ascii.left(48);
+    }
+    const QByteArray digest = QCryptographicHash::hash(name.toUtf8(), QCryptographicHash::Sha1).toHex().left(8);
+    return QStringLiteral("theme-") + QString::fromLatin1(digest);
+}
+
+QString userThemeFilePath(const QString &id)
+{
+    if (!id.startsWith(QLatin1StringView("user:"))) return {};
+    const QString slug = QFileInfo(id.mid(5)).fileName();
+    if (slug.isEmpty()) return {};
+    return userThemesDirectory() + QLatin1Char('/') + slug + QStringLiteral(".ymtheme");
+}
+
+std::optional<QJsonObject> readJsonObjectFile(const QString &path)
+{
+    const QFileInfo info(path);
+    if (!info.isFile() || info.size() > 2 * 1024 * 1024) return std::nullopt;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return std::nullopt;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    if (!doc.isObject()) return std::nullopt;
+    return doc.object();
+}
+
+std::optional<MaterialScheme::Roles> rolesFromBundle(const QJsonObject &obj, bool dark)
+{
+    const QString basePreset = normalizedPreset(obj.value(QStringLiteral("basePreset")).toString(QStringLiteral("custom")));
+    if (basePreset == QLatin1StringView("custom")) {
+        QColor accent(obj.value(QStringLiteral("accentColor")).toString(QStringLiteral("#fc3f1d")));
+        if (!accent.isValid()) accent = QColor::fromRgba(Theme::kAccent);
+        const QString variant = obj.value(QStringLiteral("schemeVariant")).toString(QStringLiteral("tonal_spot"));
+        return Theme::rolesFromSeed(accent, dark, variant);
+    }
+    if (basePreset == QLatin1StringView("builtin") || basePreset == QLatin1StringView("swiftify")) {
+        return Theme::rolesFromSeed(QColor::fromRgba(Theme::kRoseAccent), dark, true);
+    }
+    if (const themes::Family *family = themes::find(basePreset)) {
+        return themes::roles(dark ? family->dark : family->light, dark);
+    }
+    if (obj.contains(QStringLiteral("colors")) || obj.contains(QStringLiteral("mPrimary"))) {
+        const QByteArray raw = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+        if (auto matugen = MaterialScheme::fromMatugenJson(raw, dark)) {
+            return matugen;
+        }
+        return readFallbackShellScheme(raw);
+    }
+    return std::nullopt;
+}
+
+void applyBundleToSettings(AppSettings *settings, const QJsonObject &obj)
+{
+    if (!settings) return;
+    if (obj.contains(QStringLiteral("themeMode"))) {
+        const QString mode = obj.value(QStringLiteral("themeMode")).toString();
+        if (mode == QLatin1StringView("auto") || mode == QLatin1StringView("light") || mode == QLatin1StringView("dark")) {
+            settings->setThemeMode(mode);
+        }
+    }
+    if (obj.contains(QStringLiteral("accentColor"))) {
+        settings->setCustomAccentColor(obj.value(QStringLiteral("accentColor")).toString());
+    }
+    if (obj.contains(QStringLiteral("schemeVariant"))) {
+        settings->setCustomSchemeVariant(obj.value(QStringLiteral("schemeVariant")).toString());
+    }
+    if (obj.contains(QStringLiteral("fontFamily"))) {
+        settings->setCustomFontFamily(obj.value(QStringLiteral("fontFamily")).toString());
+    }
+    if (obj.contains(QStringLiteral("roundingScale"))) {
+        settings->setRoundingScale(obj.value(QStringLiteral("roundingScale")).toDouble(1.0));
+    }
+    if (obj.contains(QStringLiteral("backgroundPath"))) {
+        settings->setWindowBackgroundPath(obj.value(QStringLiteral("backgroundPath")).toString());
+    }
+    if (obj.contains(QStringLiteral("backgroundOpacity"))) {
+        settings->setWindowBackgroundOpacity(obj.value(QStringLiteral("backgroundOpacity")).toDouble(0.40));
+    }
+    if (obj.contains(QStringLiteral("backgroundBlur"))) {
+        settings->setWindowBackgroundBlur(obj.value(QStringLiteral("backgroundBlur")).toDouble(16.0));
+    }
+    if (obj.contains(QStringLiteral("surfaceOpacity"))) {
+        settings->setSurfaceOpacity(obj.value(QStringLiteral("surfaceOpacity")).toDouble(1.0));
+    }
+}
+
+QJsonObject bundleFromSettings(const AppSettings *settings, const QString &name)
+{
+    QJsonObject obj;
+    obj.insert(QStringLiteral("ymusicTheme"), 1);
+    obj.insert(QStringLiteral("name"), name.trimmed().isEmpty() ? QStringLiteral("Моя тема") : name.trimmed());
+    if (!settings) return obj;
+
+    QString basePreset = normalizedPreset(settings->themePreset());
+    if (basePreset.startsWith(QLatin1StringView("user:"))) {
+        if (const auto current = readJsonObjectFile(userThemeFilePath(basePreset))) {
+            basePreset = current->value(QStringLiteral("basePreset")).toString(QStringLiteral("custom"));
+        } else {
+            basePreset = QStringLiteral("custom");
+        }
+    } else if (basePreset == QLatin1StringView("auto")) {
+        basePreset = QStringLiteral("custom");
+    }
+
+    obj.insert(QStringLiteral("themeMode"), settings->themeMode());
+    obj.insert(QStringLiteral("basePreset"), basePreset);
+    obj.insert(QStringLiteral("accentColor"), settings->customAccentColor());
+    obj.insert(QStringLiteral("schemeVariant"), settings->customSchemeVariant());
+    obj.insert(QStringLiteral("fontFamily"), settings->customFontFamily());
+    obj.insert(QStringLiteral("roundingScale"), settings->roundingScale());
+    obj.insert(QStringLiteral("backgroundPath"), settings->windowBackgroundPath());
+    obj.insert(QStringLiteral("backgroundOpacity"), settings->windowBackgroundOpacity());
+    obj.insert(QStringLiteral("backgroundBlur"), settings->windowBackgroundBlur());
+    obj.insert(QStringLiteral("surfaceOpacity"), settings->surfaceOpacity());
+    return obj;
+}
+
 #ifdef Q_OS_WIN
 class WindowsThemeEventFilter final : public QAbstractNativeEventFilter {
 public:
@@ -379,7 +516,7 @@ Theme::Theme(AppSettings *settings, QObject *parent)
     }
 
     m_reloadDebounce.setSingleShot(true);
-    m_reloadDebounce.setInterval(120);
+    m_reloadDebounce.setInterval(50);
     connect(&m_reloadDebounce, &QTimer::timeout, this, &Theme::reload);
     const auto scheduleReload = [this] { m_reloadDebounce.start(); };
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, scheduleReload);
@@ -502,12 +639,207 @@ QString Theme::monoFontFamily() const
 
 MaterialScheme::Roles Theme::rolesFromSeed(QColor seed, bool dark, bool fidelity)
 {
+    return rolesFromSeed(seed, dark, fidelity ? QStringLiteral("content") : QStringLiteral("tonal_spot"));
+}
+
+MaterialScheme::Roles Theme::rolesFromSeed(QColor seed, bool dark, const QString &variant)
+{
     using namespace material_color_utilities;
     const Hct hct(seed.rgba() | 0xff000000u);
-    if (fidelity) {
+    if (variant == QLatin1StringView("expressive")) {
+        return MaterialScheme::fromDynamicScheme(SchemeExpressive(hct, dark, 0.0));
+    }
+    if (variant == QLatin1StringView("vibrant")) {
+        return MaterialScheme::fromDynamicScheme(SchemeVibrant(hct, dark, 0.0));
+    }
+    if (variant == QLatin1StringView("fidelity")) {
+        return MaterialScheme::fromDynamicScheme(SchemeFidelity(hct, dark, 0.0));
+    }
+    if (variant == QLatin1StringView("content")) {
         return MaterialScheme::fromDynamicScheme(SchemeContent(hct, dark, 0.0));
     }
+    if (variant == QLatin1StringView("monochrome")) {
+        return MaterialScheme::fromDynamicScheme(SchemeMonochrome(hct, dark, 0.0));
+    }
+    if (variant == QLatin1StringView("neutral")) {
+        return MaterialScheme::fromDynamicScheme(SchemeNeutral(hct, dark, 0.0));
+    }
     return MaterialScheme::fromDynamicScheme(SchemeTonalSpot(hct, dark, 0.0));
+}
+
+QStringList Theme::availableFonts() const
+{
+    QStringList list;
+    for (const QString &family : QFontDatabase::families()) {
+        if (!family.isEmpty() && !family.startsWith(u'.')) {
+            list.append(family);
+        }
+    }
+    std::sort(list.begin(), list.end(), [](const QString &a, const QString &b) {
+        return QString::localeAwareCompare(a, b) < 0;
+    });
+    return list;
+}
+
+void Theme::selectPreset(const QString &presetId)
+{
+    if (!m_settings) return;
+    const QString preset = normalizedPreset(presetId);
+    if (preset.startsWith(QLatin1StringView("user:"))) {
+        if (const auto bundle = readJsonObjectFile(userThemeFilePath(preset))) {
+            applyBundleToSettings(m_settings, *bundle);
+        }
+    }
+    m_settings->setThemePreset(preset);
+    reload();
+}
+
+QVariantMap Theme::saveUserTheme(const QString &name)
+{
+    const QString trimmed = name.trimmed().isEmpty() ? QStringLiteral("Моя тема") : name.trimmed();
+    const QString dirPath = userThemesDirectory();
+    if (!QDir().mkpath(dirPath)) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Не удалось создать папку тем")}};
+    }
+    const QString slug = slugifyThemeName(trimmed);
+    const QString filePath = dirPath + QLatin1Char('/') + slug + QStringLiteral(".ymtheme");
+    const QJsonObject bundle = bundleFromSettings(m_settings, trimmed);
+
+    QSaveFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), file.errorString()}};
+    }
+    file.write(QJsonDocument(bundle).toJson(QJsonDocument::Indented));
+    if (!file.commit()) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), file.errorString()}};
+    }
+
+    const QString id = QStringLiteral("user:") + slug;
+    if (m_settings) {
+        m_settings->setThemePreset(id);
+    }
+    reload();
+    emit userThemesChanged();
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("id"), id}, {QStringLiteral("name"), trimmed}};
+}
+
+bool Theme::deleteUserTheme(const QString &id)
+{
+    const QString filePath = userThemeFilePath(id);
+    if (filePath.isEmpty() || !QFileInfo::exists(filePath)) {
+        return false;
+    }
+    if (!QFile::remove(filePath)) {
+        return false;
+    }
+    if (m_settings && normalizedPreset(m_settings->themePreset()) == id) {
+        m_settings->setThemePreset(QStringLiteral("custom"));
+    }
+    reload();
+    emit userThemesChanged();
+    return true;
+}
+
+QVariantMap Theme::exportThemeFile(const QUrl &fileUrl) const
+{
+    QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : expandedPath(fileUrl.toString());
+    if (path.isEmpty()) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Не указан путь для сохранения")}};
+    }
+    if (!path.endsWith(QLatin1StringView(".ymtheme"), Qt::CaseInsensitive)
+        && !path.endsWith(QLatin1StringView(".json"), Qt::CaseInsensitive)) {
+        path += QStringLiteral(".ymtheme");
+    }
+    const QString baseName = QFileInfo(path).completeBaseName();
+    const QJsonObject bundle = bundleFromSettings(m_settings, baseName);
+
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), file.errorString()}};
+    }
+    file.write(QJsonDocument(bundle).toJson(QJsonDocument::Indented));
+    if (!file.commit()) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), file.errorString()}};
+    }
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("path"), path}};
+}
+
+QVariantMap Theme::importThemeFile(const QUrl &fileUrl, bool saveToLibrary)
+{
+    const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : expandedPath(fileUrl.toString());
+    const auto obj = readJsonObjectFile(path);
+    if (!obj) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Не удалось прочитать файл темы")}};
+    }
+
+    const bool isNativeBundle = obj->contains(QStringLiteral("ymusicTheme"))
+        || obj->contains(QStringLiteral("basePreset"))
+        || obj->contains(QStringLiteral("accentColor"));
+    const bool isShellScheme = obj->contains(QStringLiteral("colors")) || obj->contains(QStringLiteral("mPrimary"));
+    if (!isNativeBundle && !isShellScheme) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Неизвестный формат файла темы")}};
+    }
+
+    QJsonObject normalized = *obj;
+    QString displayName = normalized.value(QStringLiteral("name")).toString().trimmed();
+    if (displayName.isEmpty()) {
+        displayName = QFileInfo(path).completeBaseName();
+    }
+    if (displayName.isEmpty()) {
+        displayName = QStringLiteral("Импортированная тема");
+    }
+    normalized.insert(QStringLiteral("ymusicTheme"), 1);
+    normalized.insert(QStringLiteral("name"), displayName);
+    if (!normalized.contains(QStringLiteral("basePreset"))) {
+        normalized.insert(QStringLiteral("basePreset"), isShellScheme ? QStringLiteral("matugen") : QStringLiteral("custom"));
+    }
+
+    if (m_settings) {
+        applyBundleToSettings(m_settings, normalized);
+    }
+
+    if (saveToLibrary) {
+        const QString dirPath = userThemesDirectory();
+        if (QDir().mkpath(dirPath)) {
+            const QString slug = slugifyThemeName(displayName);
+            const QString targetPath = dirPath + QLatin1Char('/') + slug + QStringLiteral(".ymtheme");
+            QSaveFile out(targetPath);
+            if (out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                out.write(QJsonDocument(normalized).toJson(QJsonDocument::Indented));
+                if (out.commit()) {
+                    const QString id = QStringLiteral("user:") + slug;
+                    if (m_settings) {
+                        m_settings->setThemePreset(id);
+                    }
+                    reload();
+                    emit userThemesChanged();
+                    return {{QStringLiteral("ok"), true}, {QStringLiteral("id"), id}, {QStringLiteral("name"), displayName}};
+                }
+            }
+        }
+    }
+
+    if (m_settings) {
+        m_settings->setThemePreset(QStringLiteral("custom"));
+    }
+    reload();
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("name"), displayName}};
+}
+
+void Theme::resetThemeDefaults()
+{
+    if (!m_settings) return;
+    m_settings->setThemeMode(QStringLiteral("auto"));
+    m_settings->setThemePreset(QStringLiteral("auto"));
+    m_settings->setCustomAccentColor(QStringLiteral("#fc3f1d"));
+    m_settings->setCustomSchemeVariant(QStringLiteral("tonal_spot"));
+    m_settings->setCustomFontFamily(QString());
+    m_settings->setRoundingScale(1.0);
+    m_settings->setWindowBackgroundPath(QString());
+    m_settings->setWindowBackgroundOpacity(0.40);
+    m_settings->setWindowBackgroundBlur(16.0);
+    m_settings->setSurfaceOpacity(1.0);
+    reload();
 }
 
 std::optional<QColor> Theme::wallpaperSeedFromBytes(const QByteArray &encoded)
@@ -554,7 +886,21 @@ void Theme::reload()
 
     const bool dark = rawPreset == QLatin1StringView("light_clean") ? false : wantsDark();
     m_usingSystemScheme = false;
-    if (preset == QLatin1StringView("builtin") || preset == QLatin1StringView("swiftify")) {
+    if (preset == QLatin1StringView("custom")) {
+        const QColor accent(m_settings ? m_settings->customAccentColor() : QStringLiteral("#fc3f1d"));
+        const QString variant = m_settings ? m_settings->customSchemeVariant() : QStringLiteral("tonal_spot");
+        m_colors->setRoles(rolesFromSeed(accent.isValid() ? accent : QColor::fromRgba(kAccent), dark, variant), dark);
+    } else if (preset.startsWith(QLatin1StringView("user:"))) {
+        const auto bundle = readJsonObjectFile(userThemeFilePath(preset));
+        const auto roles = bundle ? rolesFromBundle(*bundle, dark) : std::nullopt;
+        if (roles) {
+            m_colors->setRoles(*roles, dark);
+        } else {
+            const QColor accent(m_settings ? m_settings->customAccentColor() : QStringLiteral("#fc3f1d"));
+            const QString variant = m_settings ? m_settings->customSchemeVariant() : QStringLiteral("tonal_spot");
+            m_colors->setRoles(rolesFromSeed(accent.isValid() ? accent : QColor::fromRgba(kAccent), dark, variant), dark);
+        }
+    } else if (preset == QLatin1StringView("builtin") || preset == QLatin1StringView("swiftify")) {
         m_colors->setRoles(rolesFromSeed(QColor::fromRgba(kRoseAccent), dark, true), dark);
     } else if (const themes::Family *family = themes::find(preset)) {
         m_colors->setRoles(themes::roles(dark ? family->dark : family->light, dark), dark);
@@ -604,6 +950,27 @@ QList<ThemeOption> Theme::themeOptions(bool dark) const
     options.append(option(QStringLiteral("auto"),
                           QStringLiteral("Авто (система)"),
                           desktop ? *desktop : fallbackAuto));
+
+    const QColor customAccent(m_settings ? m_settings->customAccentColor() : QStringLiteral("#fc3f1d"));
+    const QString customVariant = m_settings ? m_settings->customSchemeVariant() : QStringLiteral("tonal_spot");
+    options.append(option(QStringLiteral("custom"),
+                          QStringLiteral("Своя палитра"),
+                          rolesFromSeed(customAccent.isValid() ? customAccent : QColor::fromRgba(kAccent), dark, customVariant)));
+
+    const QDir userDir(userThemesDirectory());
+    if (userDir.exists()) {
+        const auto files = userDir.entryInfoList({QStringLiteral("*.ymtheme")}, QDir::Files | QDir::Readable, QDir::Name | QDir::IgnoreCase);
+        for (const QFileInfo &file : files) {
+            const auto bundle = readJsonObjectFile(file.absoluteFilePath());
+            if (!bundle) continue;
+            const auto roles = rolesFromBundle(*bundle, dark);
+            if (!roles) continue;
+            const QString id = QStringLiteral("user:") + file.completeBaseName();
+            const QString name = bundle->value(QStringLiteral("name")).toString(file.completeBaseName());
+            options.append(option(id, name, *roles));
+        }
+    }
+
     options.append(option(QStringLiteral("builtin"),
                           QStringLiteral("Swiftify Rose"),
                           rolesFromSeed(QColor::fromRgba(kRoseAccent), dark, true)));

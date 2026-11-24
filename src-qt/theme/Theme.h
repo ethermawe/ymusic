@@ -25,7 +25,10 @@
 #include <QColor>
 #include <QFileSystemWatcher>
 #include <QObject>
+#include <QStringList>
 #include <QTimer>
+#include <QUrl>
+#include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
 class AppSettings;
@@ -65,16 +68,25 @@ public:
     QString monoFontFamily() const;
 
     static MaterialScheme::Roles rolesFromSeed(QColor seed, bool dark, bool fidelity);
+    static MaterialScheme::Roles rolesFromSeed(QColor seed, bool dark, const QString &variant);
     static std::optional<QColor> wallpaperSeedFromBytes(const QByteArray &encoded);
 
     Q_INVOKABLE QList<ymusic::ThemeOption> themeOptions(bool dark) const;
     Q_INVOKABLE void refreshSystemScheme();
+    Q_INVOKABLE QStringList availableFonts() const;
+    Q_INVOKABLE void selectPreset(const QString &presetId);
+    Q_INVOKABLE QVariantMap saveUserTheme(const QString &name);
+    Q_INVOKABLE bool deleteUserTheme(const QString &id);
+    Q_INVOKABLE QVariantMap exportThemeFile(const QUrl &fileUrl) const;
+    Q_INVOKABLE QVariantMap importThemeFile(const QUrl &fileUrl, bool saveToLibrary = true);
+    Q_INVOKABLE void resetThemeDefaults();
 
     Q_INVOKABLE static QColor mix(const QColor &a, const QColor &b, qreal amountOfA);
     Q_INVOKABLE static QColor withAlpha(const QColor &color, qreal alpha);
 
 signals:
     void schemeChanged();
+    void userThemesChanged();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;

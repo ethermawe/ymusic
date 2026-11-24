@@ -35,15 +35,15 @@ QtObject {
     readonly property real zoom: appSettings.zoom
 
     component Rounding: QtObject {
-        readonly property int unsharpen: 2
-        readonly property int unsharpenMore: 6
-        readonly property int verySmall: 8
-        readonly property int small: 12
-        readonly property int normal: 17
-        readonly property int large: 23
-        readonly property int veryLarge: 30
+        readonly property int unsharpen: Math.max(0, Math.round(2 * appSettings.roundingScale))
+        readonly property int unsharpenMore: Math.max(0, Math.round(6 * appSettings.roundingScale))
+        readonly property int verySmall: Math.max(0, Math.round(8 * appSettings.roundingScale))
+        readonly property int small: Math.max(0, Math.round(12 * appSettings.roundingScale))
+        readonly property int normal: Math.max(0, Math.round(17 * appSettings.roundingScale))
+        readonly property int large: Math.max(0, Math.round(23 * appSettings.roundingScale))
+        readonly property int veryLarge: Math.max(0, Math.round(30 * appSettings.roundingScale))
         readonly property int full: 9999
-        readonly property int window: 18
+        readonly property int window: Math.max(0, Math.round(18 * appSettings.roundingScale))
     }
     readonly property Rounding rounding: Rounding {}
 
@@ -63,7 +63,9 @@ QtObject {
     }
     readonly property FontSizes fontSize: FontSizes {}
 
-    readonly property string fontFamily: Theme.fontFamily
+    readonly property string fontFamily: appSettings.customFontFamily.length > 0
+        ? appSettings.customFontFamily
+        : Theme.fontFamily
     readonly property string monoFontFamily: Theme.monoFontFamily
     readonly property string iconFontFamily: "Material Symbols Rounded"
 
@@ -101,8 +103,8 @@ QtObject {
         readonly property real shelfGap: 16
         readonly property real cardSize: 176
         readonly property real headerArtwork: 232
-        readonly property real artworkRadius: 12
-        readonly property real smallArtworkRadius: 7
+        readonly property real artworkRadius: Math.max(0, Math.round(12 * appSettings.roundingScale))
+        readonly property real smallArtworkRadius: Math.max(0, Math.round(7 * appSettings.roundingScale))
         readonly property real sideSheetWidth: 320
         readonly property real topBarHeight: 64
         readonly property real playerBarClearance: 120
