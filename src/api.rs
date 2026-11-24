@@ -2473,6 +2473,7 @@ fn parse_lyricsfile_yaml(raw: &str) -> Option<(bool, Vec<LyricsLine>)> {
                 });
             }
         }
+        normalize_word_timings(&mut words);
         if !words.is_empty() {
             any_words = true;
         }
@@ -2501,6 +2502,26 @@ fn parse_lyricsfile_yaml(raw: &str) -> Option<(bool, Vec<LyricsLine>)> {
         None
     } else {
         Some((any_words, out))
+    }
+}
+
+fn normalize_word_timings(words: &mut [LyricsWord]) {
+    if words.is_empty() {
+        return;
+    }
+    words[0].end = words[0].end.max(words[0].start + 0.05);
+    for i in 1..words.len() {
+        let prev_start = words[i - 1].start;
+        let prev_end = words[i - 1].end;
+        if words[i].start <= prev_start {
+            words[i].start = prev_end.max(prev_start + 0.04);
+        } else if words[i].start < prev_end {
+            words[i - 1].end = words[i].start.max(prev_start + 0.04);
+            if words[i].start < words[i - 1].end {
+                words[i].start = words[i - 1].end;
+            }
+        }
+        words[i].end = words[i].end.max(words[i].start + 0.05);
     }
 }
 
@@ -2656,6 +2677,7 @@ fn parse_enhanced_lrc_words(raw: &str, line_start: f64) -> (String, Vec<LyricsWo
             text: txt.clone(),
         });
     }
+    normalize_word_timings(&mut words);
 
     let line_end = words
         .last()
@@ -2813,6 +2835,17 @@ mod tests {
         assert_eq!(enh_lines[0].words[0].start, 10.0);
         assert_eq!(enh_lines[0].words[0].end, 10.5);
         assert_eq!(enh_lines[0].words[1].end, 11.2);
+
+        // Ensure non-monotonic / overlapping word timestamps never highlight later words out of order.
+        let scrambled = serde_json::json!({
+            "hasWordSync": true,
+            "lyricsfile": "version: '1.0'\nlines:\n- text: trying to fly\n  start_ms: 10000\n  end_ms: 13000\n  words:\n  - text: 'trying '\n    start_ms: 10000\n    end_ms: 12000\n  - text: 'to '\n    start_ms: 11500\n    end_ms: 11800\n  - text: fly\n    start_ms: 11200\n    end_ms: 12500\n"
+        });
+        let fixed = extract_lrclib_entry(&scrambled).expect("scrambled should normalize");
+        let w = &fixed.lines[0].words;
+        assert!(w[0].end <= w[1].start);
+        assert!(w[1].end <= w[2].start);
+        assert!(w[0].start < w[1].start && w[1].start < w[2].start);
     }
 
     #[test]
