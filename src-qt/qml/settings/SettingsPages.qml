@@ -823,6 +823,145 @@ Item {
             }
 
             ContentSection {
+                id: lastfmSection
+                title: "Last.fm"
+                symbol: "radio"
+                property bool showCustomKeys: false
+
+                StatusRow {
+                    label: backend.lastfmConnected && backend.lastfmUsername.length > 0
+                        ? ("Аккаунт: " + backend.lastfmUsername)
+                        : "Статус Last.fm"
+                    value: backend.lastfmStatus
+                    good: backend.lastfmConnected && !backend.lastfmIsError
+                }
+
+                Flow {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+                    topPadding: 4
+                    bottomPadding: 4
+
+                    TextButton {
+                        visible: !backend.lastfmConnected && !backend.lastfmAuthorizing
+                        variant: TextButton.Filled
+                        symbol: "login"
+                        text: "Войти через браузер"
+                        enabled: backend.lastfmConfigured
+                        onClicked: backend.feature({action: "lastfm_auth_start"})
+                    }
+                    TextButton {
+                        visible: backend.lastfmAuthorizing
+                        variant: TextButton.Outlined
+                        symbol: "close"
+                        text: "Отменить вход"
+                        onClicked: backend.feature({action: "lastfm_auth_cancel"})
+                    }
+                    TextButton {
+                        visible: backend.lastfmConnected
+                        variant: TextButton.Outlined
+                        symbol: "logout"
+                        text: "Отключить Last.fm"
+                        onClicked: backend.feature({action: "lastfm_disconnect"})
+                    }
+                    TextButton {
+                        variant: TextButton.Text
+                        symbol: "key"
+                        text: lastfmSection.showCustomKeys ? "Скрыть свои ключи" : "Свои API-ключи"
+                        visible: backend.lastfmHasBuiltinKeys
+                        onClicked: lastfmSection.showCustomKeys = !lastfmSection.showCustomKeys
+                    }
+                }
+
+                Column {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+                    topPadding: 4
+                    bottomPadding: 4
+                    visible: !backend.lastfmHasBuiltinKeys || lastfmSection.showCustomKeys || backend.lastfmCustomApiKey.length > 0
+
+                    OutlinedTextField {
+                        id: lastfmApiKeyField
+                        width: parent.width
+                        placeholder: "Last.fm API Key"
+                        text: backend.lastfmCustomApiKey
+                    }
+                    OutlinedTextField {
+                        id: lastfmApiSecretField
+                        width: parent.width
+                        placeholder: backend.lastfmHasCustomSecret
+                            ? "Last.fm Shared Secret (сохранён; введите новый для замены)"
+                            : "Last.fm Shared Secret"
+                        text: ""
+                    }
+                    Flow {
+                        width: parent.width
+                        spacing: 8
+
+                        TextButton {
+                            variant: TextButton.Tonal
+                            symbol: "check"
+                            text: "Сохранить ключи"
+                            enabled: lastfmApiKeyField.text.trim().length > 0
+                                && (lastfmApiSecretField.text.trim().length > 0 || backend.lastfmHasCustomSecret)
+                            onClicked: {
+                                backend.feature({
+                                    action: "set_lastfm_config",
+                                    customApiKey: lastfmApiKeyField.text.trim(),
+                                    customApiSecret: lastfmApiSecretField.text.trim()
+                                });
+                                lastfmApiSecretField.text = "";
+                                UiState.showToast("Ключи Last.fm сохранены");
+                            }
+                        }
+                        TextButton {
+                            visible: backend.lastfmCustomApiKey.length > 0 || backend.lastfmHasCustomSecret
+                            variant: TextButton.Outlined
+                            symbol: "restart_alt"
+                            text: "Сбросить ключи"
+                            onClicked: {
+                                lastfmApiKeyField.text = "";
+                                lastfmApiSecretField.text = "";
+                                backend.feature({action: "lastfm_clear_custom_keys"});
+                            }
+                        }
+                    }
+                }
+
+                ConfigSwitch {
+                    text: "Включить скробблинг Last.fm"
+                    enabled: backend.lastfmConnected
+                    checked: backend.lastfmEnabled
+                    onToggledTo: (checked) => backend.feature({action: "set_lastfm_config", enabled: checked})
+                }
+                ConfigSwitch {
+                    text: "Отправлять статус «Сейчас играет»"
+                    enabled: backend.lastfmConnected && backend.lastfmEnabled
+                    checked: backend.lastfmNowPlaying
+                    onToggledTo: (checked) => backend.feature({action: "set_lastfm_config", nowPlaying: checked})
+                }
+                ConfigSwitch {
+                    text: "Отправлять лайк (♥ Love) в Last.fm"
+                    enabled: backend.lastfmConnected && backend.lastfmEnabled
+                    checked: backend.lastfmLoveOnLike
+                    onToggledTo: (checked) => backend.feature({action: "set_lastfm_config", loveOnLike: checked})
+                }
+                ConfigSwitch {
+                    text: "Не скробблить AI-треки (Slopless)"
+                    enabled: backend.lastfmConnected && backend.lastfmEnabled
+                    checked: backend.lastfmSkipAi
+                    onToggledTo: (checked) => backend.feature({action: "set_lastfm_config", skipAi: checked})
+                }
+                NoteText {
+                    text: backend.lastfmHasBuiltinKeys
+                        ? "Скробблинг срабатывает после прослушивания ≥ 50% трека (или 4 мин для длинных треков, от 30 сек). При потере сети скробблы сохраняются в локальную очередь."
+                        : "В этой локальной сборке не заданы встроенные LASTFM_API_KEY/LASTFM_API_SECRET. Введите свои ключи с last.fm/api/account/create или используйте релизную сборку GitHub Actions."
+                }
+            }
+
+            ContentSection {
                 title: "Горячие клавиши"
                 symbol: "keyboard"
 

@@ -7,11 +7,35 @@ use serde::{Deserialize, Serialize};
 use crate::api::Track;
 
 const KEYRING_SERVICE: &str = "ymusic";
-const KEYRING_USER: &str = "oauth-token";
-#[cfg(target_os = "linux")]
-const KEYRING_LABEL: &str = "Yandex Music OAuth token";
-#[cfg(target_os = "windows")]
-const WIN_CRED_TARGET: &str = "ymusic/oauth-token";
+
+#[derive(Clone, Copy)]
+struct SecretSlot {
+    user: &'static str,
+    #[cfg(target_os = "linux")]
+    label: &'static str,
+    #[cfg(target_os = "windows")]
+    win_target: &'static str,
+    legacy_file: &'static str,
+}
+
+const YANDEX_TOKEN_SLOT: SecretSlot = SecretSlot {
+    user: "oauth-token",
+    #[cfg(target_os = "linux")]
+    label: "Yandex Music OAuth token",
+    #[cfg(target_os = "windows")]
+    win_target: "ymusic/oauth-token",
+    legacy_file: "token",
+};
+
+const LASTFM_SESSION_SLOT: SecretSlot = SecretSlot {
+    user: "lastfm-session",
+    #[cfg(target_os = "linux")]
+    label: "Last.fm session key",
+    #[cfg(target_os = "windows")]
+    win_target: "ymusic/lastfm-session",
+    legacy_file: "lastfm_session",
+};
+
 #[cfg(target_os = "windows")]
 const WIN_CRED_USER: &str = "ymusic";
 
@@ -28,7 +52,7 @@ trait KeyringBackend {
     fn delete(&self);
 }
 
-struct PlatformKeyring;
+struct PlatformKeyring(SecretSlot);
 
 #[cfg(target_os = "linux")]
 mod linux_keyring {
@@ -38,22 +62,22 @@ mod linux_keyring {
     use keyring_core::{Entry, Error};
     use zbus_secret_service_keyring_store::Store;
 
-    use super::{KEYRING_LABEL, KEYRING_SERVICE, KEYRING_USER, KeyringRead};
+    use super::{KEYRING_SERVICE, KeyringRead, SecretSlot};
 
-    fn entry() -> Option<Entry> {
+    fn entry(slot: SecretSlot) -> Option<Entry> {
         let store: Arc<Store> = Store::new().ok()?;
-        let mods = HashMap::from([("label", KEYRING_LABEL)]);
+        let mods = HashMap::from([("label", slot.label)]);
         keyring_core::api::CredentialStoreApi::build(
             store.as_ref(),
             KEYRING_SERVICE,
-            KEYRING_USER,
+            slot.user,
             Some(&mods),
         )
         .ok()
     }
 
-    pub(super) fn read() -> KeyringRead {
-        let Some(entry) = entry() else {
+    pub(super) fn read(slot: SecretSlot) -> KeyringRead {
+        let Some(entry) = entry(slot) else {
             return KeyringRead::Unavailable;
         };
         match entry.get_password() {
@@ -81,8 +105,8 @@ mod linux_keyring {
         }
     }
 
-    pub(super) fn write(token: &str) -> Result<(), ()> {
-        let entry = entry().ok_or(())?;
+    pub(super) fn write(slot: SecretSlot, token: &str) -> Result<(), ()> {
+        let entry = entry(slot).ok_or(())?;
         match entry.set_password(token) {
             Ok(()) => Ok(()),
             Err(Error::Ambiguous(entries)) => {
@@ -95,8 +119,8 @@ mod linux_keyring {
         }
     }
 
-    pub(super) fn delete() {
-        let Some(entry) = entry() else {
+    pub(super) fn delete(slot: SecretSlot) {
+        let Some(entry) = entry(slot) else {
             return;
         };
         if let Err(Error::Ambiguous(entries)) = entry.delete_credential() {
@@ -138,7 +162,7 @@ mod windows_keyring {
         CredReadW, CredWriteW,
     };
 
-    use super::{KeyringRead, WIN_CRED_TARGET, WIN_CRED_USER, decode_utf16_blob, encode_utf16_le};
+    use super::{KeyringRead, SecretSlot, WIN_CRED_USER, decode_utf16_blob, encode_utf16_le};
 
     fn to_wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -153,8 +177,8 @@ mod windows_keyring {
         }
     }
 
-    pub(super) fn read() -> KeyringRead {
-        let target = to_wide(WIN_CRED_TARGET);
+    pub(super) fn read(slot: SecretSlot) -> KeyringRead {
+        let target = to_wide(slot.win_target);
         let mut raw: *mut CREDENTIALW = ptr::null_mut();
         let ok = unsafe { CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut raw) };
         if ok == 0 {
@@ -184,8 +208,8 @@ mod windows_keyring {
         }
     }
 
-    pub(super) fn write(token: &str) -> Result<(), ()> {
-        let mut target = to_wide(WIN_CRED_TARGET);
+    pub(super) fn write(slot: SecretSlot, token: &str) -> Result<(), ()> {
+        let mut target = to_wide(slot.win_target);
         let mut user = to_wide(WIN_CRED_USER);
         let mut blob = encode_utf16_le(token);
         let blob_size = u32::try_from(blob.len()).map_err(|_| ())?;
@@ -207,8 +231,8 @@ mod windows_keyring {
         if ok == 0 { Err(()) } else { Ok(()) }
     }
 
-    pub(super) fn delete() {
-        let target = to_wide(WIN_CRED_TARGET);
+    pub(super) fn delete(slot: SecretSlot) {
+        let target = to_wide(slot.win_target);
         unsafe {
             CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0);
         }
@@ -219,11 +243,11 @@ impl KeyringBackend for PlatformKeyring {
     fn read(&self) -> KeyringRead {
         #[cfg(target_os = "linux")]
         {
-            linux_keyring::read()
+            linux_keyring::read(self.0)
         }
         #[cfg(target_os = "windows")]
         {
-            windows_keyring::read()
+            windows_keyring::read(self.0)
         }
         #[cfg(not(any(target_os = "linux", target_os = "windows")))]
         {
@@ -234,11 +258,11 @@ impl KeyringBackend for PlatformKeyring {
     fn write(&self, token: &str) -> Result<(), ()> {
         #[cfg(target_os = "linux")]
         {
-            linux_keyring::write(token)
+            linux_keyring::write(self.0, token)
         }
         #[cfg(target_os = "windows")]
         {
-            windows_keyring::write(token)
+            windows_keyring::write(self.0, token)
         }
         #[cfg(not(any(target_os = "linux", target_os = "windows")))]
         {
@@ -249,14 +273,14 @@ impl KeyringBackend for PlatformKeyring {
 
     fn delete(&self) {
         #[cfg(target_os = "linux")]
-        linux_keyring::delete();
+        linux_keyring::delete(self.0);
         #[cfg(target_os = "windows")]
-        windows_keyring::delete();
+        windows_keyring::delete(self.0);
     }
 }
 
-fn token_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("ymusic").join("token"))
+fn slot_legacy_path(slot: SecretSlot) -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("ymusic").join(slot.legacy_file))
 }
 
 fn read_legacy_token(path: Option<&Path>) -> Option<String> {
@@ -323,18 +347,33 @@ pub fn load_token() -> Option<String> {
     {
         return Some(token.trim().to_string());
     }
-    let path = token_path();
-    load_token_with(&PlatformKeyring, path.as_deref())
+    let path = slot_legacy_path(YANDEX_TOKEN_SLOT);
+    load_token_with(&PlatformKeyring(YANDEX_TOKEN_SLOT), path.as_deref())
 }
 
 pub fn save_token(token: &str) -> io::Result<()> {
-    let path = token_path();
-    save_token_with(&PlatformKeyring, path.as_deref(), token)
+    let path = slot_legacy_path(YANDEX_TOKEN_SLOT);
+    save_token_with(&PlatformKeyring(YANDEX_TOKEN_SLOT), path.as_deref(), token)
 }
 
 pub fn clear_token() {
-    let path = token_path();
-    clear_token_with(&PlatformKeyring, path.as_deref());
+    let path = slot_legacy_path(YANDEX_TOKEN_SLOT);
+    clear_token_with(&PlatformKeyring(YANDEX_TOKEN_SLOT), path.as_deref());
+}
+
+pub fn load_lastfm_session() -> Option<String> {
+    let path = slot_legacy_path(LASTFM_SESSION_SLOT);
+    load_token_with(&PlatformKeyring(LASTFM_SESSION_SLOT), path.as_deref())
+}
+
+pub fn save_lastfm_session(session_key: &str) -> io::Result<()> {
+    let path = slot_legacy_path(LASTFM_SESSION_SLOT);
+    save_token_with(&PlatformKeyring(LASTFM_SESSION_SLOT), path.as_deref(), session_key)
+}
+
+pub fn clear_lastfm_session() {
+    let path = slot_legacy_path(LASTFM_SESSION_SLOT);
+    clear_token_with(&PlatformKeyring(LASTFM_SESSION_SLOT), path.as_deref());
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -399,6 +438,24 @@ pub struct UserSettings {
     pub show_ai_labels: bool,
     #[serde(default)]
     pub wave_selected: std::collections::HashMap<String, String>,
+    #[serde(default = "default_true")]
+    pub lastfm_enabled: bool,
+    #[serde(default)]
+    pub lastfm_username: Option<String>,
+    #[serde(default = "default_true")]
+    pub lastfm_now_playing: bool,
+    #[serde(default)]
+    pub lastfm_love_on_like: bool,
+    #[serde(default = "default_true")]
+    pub lastfm_skip_ai: bool,
+    #[serde(default)]
+    pub lastfm_custom_api_key: Option<String>,
+    #[serde(default)]
+    pub lastfm_custom_api_secret: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_volume() -> f32 {
@@ -438,6 +495,13 @@ impl Default for UserSettings {
             ai_strict_tracks: false,
             show_ai_labels: default_show_ai_labels(),
             wave_selected: std::collections::HashMap::new(),
+            lastfm_enabled: true,
+            lastfm_username: None,
+            lastfm_now_playing: true,
+            lastfm_love_on_like: false,
+            lastfm_skip_ai: true,
+            lastfm_custom_api_key: None,
+            lastfm_custom_api_secret: None,
         }
     }
 }

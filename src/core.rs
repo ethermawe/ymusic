@@ -12,6 +12,7 @@ use crate::audio::{Audio, Event, SourceData};
 use crate::cache;
 use crate::config;
 use crate::discord::Discord;
+use crate::lastfm::{Lastfm, LastfmConfig};
 use crate::mpris::{Action as MprisAction, Meta as MprisMeta, Mpris, Status as MprisStatus};
 
 pub const EVENT_LOGIN_STATUS: i32 = 1;
@@ -317,6 +318,7 @@ pub struct YMusicCore {
     pub audio: Audio,
     pub mpris: Mpris,
     pub discord: Discord,
+    pub lastfm: Lastfm,
     pub sink: Arc<dyn EventSink>,
 }
 
@@ -712,6 +714,7 @@ mod queue_tests {
             audio: Audio::spawn(|_| {}),
             mpris,
             discord: Discord::spawn(),
+            lastfm: Lastfm::disabled(),
             sink: Arc::new(CaptureSink(events.clone())),
         });
 
@@ -745,6 +748,7 @@ mod queue_tests {
             audio: Audio::spawn(|_| {}),
             mpris: mpris2,
             discord: Discord::spawn(),
+            lastfm: Lastfm::disabled(),
             sink: Arc::new(CaptureSink(events2.clone())),
         });
         // Wrap in async-safe drop wait via rt2 already entered above — drop handles cleanly outside block_on
@@ -825,6 +829,7 @@ mod queue_tests {
             audio: Audio::spawn(|_| {}),
             mpris,
             discord: Discord::spawn(),
+            lastfm: Lastfm::disabled(),
             sink: Arc::new(CaptureSink(events.clone())),
         });
 
@@ -863,6 +868,7 @@ mod queue_tests {
             audio: Audio::spawn(|_| {}),
             mpris,
             discord: Discord::spawn(),
+            lastfm: Lastfm::disabled(),
             sink: Arc::new(CaptureSink(events.clone())),
         });
 
@@ -910,6 +916,7 @@ mod queue_tests {
             audio: Audio::spawn(|_| {}),
             mpris,
             discord: Discord::spawn(),
+            lastfm: Lastfm::disabled(),
             sink: Arc::new(CaptureSink(events)),
         });
 
@@ -955,6 +962,7 @@ mod queue_tests {
             audio: Audio::spawn(|_| {}),
             mpris,
             discord: Discord::spawn(),
+            lastfm: Lastfm::disabled(),
             sink: Arc::new(CaptureSink(events.clone())),
         });
 
@@ -1205,6 +1213,36 @@ impl YMusicCore {
                 config::update_settings(|s| s.show_ai_labels = show);
                 self.send_view_feature();
                 self.refresh_rows();
+            }
+            "lastfm_auth_start" => {
+                self.lastfm.start_auth();
+            }
+            "lastfm_auth_cancel" => {
+                self.lastfm.cancel_auth();
+            }
+            "lastfm_disconnect" => {
+                self.lastfm.disconnect();
+            }
+            "lastfm_clear_custom_keys" => {
+                self.lastfm.clear_custom_keys();
+            }
+            "set_lastfm_config" => {
+                let cur = config::load_settings();
+                let next = LastfmConfig {
+                    enabled: cmd["enabled"].as_bool().unwrap_or(cur.lastfm_enabled),
+                    now_playing: cmd["nowPlaying"].as_bool().unwrap_or(cur.lastfm_now_playing),
+                    love_on_like: cmd["loveOnLike"].as_bool().unwrap_or(cur.lastfm_love_on_like),
+                    skip_ai: cmd["skipAi"].as_bool().unwrap_or(cur.lastfm_skip_ai),
+                    custom_api_key: cmd["customApiKey"]
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| cur.lastfm_custom_api_key.unwrap_or_default()),
+                    custom_api_secret: cmd["customApiSecret"]
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| cur.lastfm_custom_api_secret.unwrap_or_default()),
+                };
+                self.lastfm.set_config(next);
             }
             "search_suggest" => {
                 let part = cmd["part"].as_str().unwrap_or("").trim().to_string();
@@ -1608,11 +1646,13 @@ impl YMusicCore {
                     }
                 }),
                 discord: Discord::spawn_with_sink(sink.clone()),
+                lastfm: Lastfm::spawn_with_sink(rt_handle.clone(), api::http_client(), sink.clone()),
                 sink,
             }
         });
 
         let settings = config::load_settings();
+        core.lastfm.load_initial(&settings);
         let initial_vol = settings.volume;
         core.audio.set_volume(perceptual(initial_vol));
         core.mpris.set_volume(initial_vol);
@@ -1701,6 +1741,7 @@ impl YMusicCore {
         self.persist_session_sync();
         self.audio.stop();
         self.discord.set_stopped();
+        self.lastfm.set_stopped();
     }
 
     pub fn set_discord_enabled(&self, enabled: bool) {
@@ -2081,6 +2122,7 @@ impl YMusicCore {
         self.audio.stop();
         self.mpris.set_stopped();
         self.discord.set_stopped();
+        self.lastfm.set_stopped();
         self.send_playback_state(false);
         self.send_queue();
 
@@ -3995,6 +4037,7 @@ impl YMusicCore {
                 api.rotor_feedback(&w.session_id, &w.batch_id, ev, Some(&track.composite_id()), None)
                     .await;
             }
+            this.lastfm.love_track(&track, add);
         });
     }
 
@@ -4083,6 +4126,7 @@ impl YMusicCore {
         }
         self.mpris.set_status(MprisStatus::Stopped, 0.0);
         self.discord.set_stopped();
+        self.lastfm.set_stopped();
 
         self.set_playing(false, false);
         self.send_event(EVENT_PLAYBACK_PROGRESS, &PlaybackProgressPayload {
@@ -4256,6 +4300,7 @@ impl YMusicCore {
             MprisStatus::Paused,
         );
         self.discord.set_track(&track, MprisStatus::Paused);
+        self.lastfm.set_track(&track);
 
         {
             let this_ai = self.clone();
@@ -4264,6 +4309,7 @@ impl YMusicCore {
                 let (is_ai_label, should_act) =
                     crate::slopless::check_track_online(&this_ai.http, &track_ai, ai_strict).await;
                 if is_ai_label {
+                    this_ai.lastfm.mark_track_ai(&track_ai.id);
                     let mut updated = false;
                     {
                         let mut st = this_ai.state.lock().unwrap();
@@ -4484,6 +4530,7 @@ impl YMusicCore {
             Event::Started(g) if g == current => {
                 self.mpris.set_status(MprisStatus::Playing, 0.0);
                 self.discord.set_status(MprisStatus::Playing, 0.0);
+                self.lastfm.on_started();
                 let resume = self.state.lock().unwrap().resume_at.take();
                 if let Some(secs) = resume {
                     self.audio.seek(secs);
@@ -4552,6 +4599,7 @@ impl YMusicCore {
                 let status = if paused { MprisStatus::Paused } else { MprisStatus::Playing };
                 self.mpris.set_status(status, secs);
                 self.discord.set_status(status, secs);
+                self.lastfm.on_position(secs, paused);
                 let progress = if duration > 0.0 { (secs / duration) as f32 } else { 0.0 };
 
                 self.send_event(EVENT_PLAYBACK_PROGRESS, &PlaybackProgressPayload {
@@ -4579,6 +4627,7 @@ impl YMusicCore {
             Event::Error(g, msg) if g == current || g == 0 => {
                 self.mpris.set_status(MprisStatus::Stopped, 0.0);
                 self.discord.set_stopped();
+                self.lastfm.set_stopped();
                 self.state.lock().unwrap().audio_started = false;
                 self.set_playing(false, false);
                 self.error(msg);
@@ -4894,6 +4943,7 @@ impl YMusicCore {
             MprisStatus::Paused,
         );
         self.discord.set_track(&track, MprisStatus::Paused);
+        self.lastfm.set_track(&track);
         self.send_queue();
         if !restored_wave_selected.is_empty() {
             self.send_feature("wave_applied", serde_json::json!({"selected": restored_wave_selected}));
@@ -4924,6 +4974,7 @@ impl YMusicCore {
                 self.set_playing(false, false);
                 self.mpris.set_status(MprisStatus::Stopped, 0.0);
                 self.discord.set_stopped();
+                self.lastfm.set_stopped();
             }
             MprisAction::Next => self.step(1, true),
             MprisAction::Prev => self.step(-1, true),

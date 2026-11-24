@@ -98,6 +98,20 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(bool showAiLabels READ showAiLabels NOTIFY featuresChanged)
     Q_PROPERTY(bool discordConnected READ discordConnected NOTIFY featuresChanged)
     Q_PROPERTY(QString discordStatus READ discordStatus NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmHasBuiltinKeys READ lastfmHasBuiltinKeys NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmConfigured READ lastfmConfigured NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmConnected READ lastfmConnected NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmAuthorizing READ lastfmAuthorizing NOTIFY featuresChanged)
+    Q_PROPERTY(QString lastfmUsername READ lastfmUsername NOTIFY featuresChanged)
+    Q_PROPERTY(QString lastfmStatus READ lastfmStatus NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmIsError READ lastfmIsError NOTIFY featuresChanged)
+    Q_PROPERTY(int lastfmPendingCount READ lastfmPendingCount NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmEnabled READ lastfmEnabled NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmNowPlaying READ lastfmNowPlaying NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmLoveOnLike READ lastfmLoveOnLike NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmSkipAi READ lastfmSkipAi NOTIFY featuresChanged)
+    Q_PROPERTY(QString lastfmCustomApiKey READ lastfmCustomApiKey NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmHasCustomSecret READ lastfmHasCustomSecret NOTIFY featuresChanged)
     Q_PROPERTY(QVariantList searchSuggestions READ searchSuggestions NOTIFY featuresChanged)
     Q_PROPERTY(QVariantList searchQuickTracks READ searchQuickTracks NOTIFY featuresChanged)
     Q_PROPERTY(QVariantMap searchSuggestBest READ searchSuggestBest NOTIFY featuresChanged)
@@ -189,6 +203,20 @@ public:
     bool showAiLabels() const { return m_showAiLabels; }
     bool discordConnected() const { return m_discordConnected; }
     QString discordStatus() const { return m_discordStatus; }
+    bool lastfmHasBuiltinKeys() const { return m_lastfmHasBuiltinKeys; }
+    bool lastfmConfigured() const { return m_lastfmConfigured; }
+    bool lastfmConnected() const { return m_lastfmConnected; }
+    bool lastfmAuthorizing() const { return m_lastfmAuthorizing; }
+    QString lastfmUsername() const { return m_lastfmUsername; }
+    QString lastfmStatus() const { return m_lastfmStatus; }
+    bool lastfmIsError() const { return m_lastfmIsError; }
+    int lastfmPendingCount() const { return m_lastfmPendingCount; }
+    bool lastfmEnabled() const { return m_lastfmEnabled; }
+    bool lastfmNowPlaying() const { return m_lastfmNowPlaying; }
+    bool lastfmLoveOnLike() const { return m_lastfmLoveOnLike; }
+    bool lastfmSkipAi() const { return m_lastfmSkipAi; }
+    QString lastfmCustomApiKey() const { return m_lastfmCustomApiKey; }
+    bool lastfmHasCustomSecret() const { return m_lastfmHasCustomSecret; }
     QVariantList searchSuggestions() const { return m_searchSuggestions; }
     QVariantList searchQuickTracks() const { return m_searchQuickTracks; }
     QVariantMap searchSuggestBest() const { return m_searchSuggestBest; }
@@ -302,6 +330,20 @@ private:
     bool m_showAiLabels = true;
     bool m_discordConnected = false;
     QString m_discordStatus = QStringLiteral("Ожидание трека");
+    bool m_lastfmHasBuiltinKeys = false;
+    bool m_lastfmConfigured = false;
+    bool m_lastfmConnected = false;
+    bool m_lastfmAuthorizing = false;
+    QString m_lastfmUsername;
+    QString m_lastfmStatus = QStringLiteral("Не подключён");
+    bool m_lastfmIsError = false;
+    int m_lastfmPendingCount = 0;
+    bool m_lastfmEnabled = true;
+    bool m_lastfmNowPlaying = true;
+    bool m_lastfmLoveOnLike = false;
+    bool m_lastfmSkipAi = true;
+    QString m_lastfmCustomApiKey;
+    bool m_lastfmHasCustomSecret = false;
     QVariantList m_searchSuggestions;
     QVariantList m_searchQuickTracks;
     QVariantMap m_searchSuggestBest;

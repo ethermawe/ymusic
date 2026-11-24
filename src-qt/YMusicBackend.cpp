@@ -7,8 +7,10 @@
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QCryptographicHash>
-#include <QFileInfo>
+#include <QDesktopServices>
 #include <QDir>
+#include <QFileInfo>
+#include <QUrl>
 #include <algorithm>
 #include <cmath>
 
@@ -175,6 +177,26 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
             m_discordStatus = obj["text"].toString();
             if (!m_discordConnected && obj["is_error"].toBool(false)) {
                 qWarning().noquote() << "Discord RPC:" << m_discordStatus;
+            }
+        }
+        else if (type == "lastfm_status") {
+            m_lastfmHasBuiltinKeys = obj["has_builtin_keys"].toBool(false);
+            m_lastfmConfigured = obj["configured"].toBool(false);
+            m_lastfmConnected = obj["connected"].toBool(false);
+            m_lastfmAuthorizing = obj["authorizing"].toBool(false);
+            m_lastfmUsername = obj["username"].toString();
+            m_lastfmStatus = obj["text"].toString();
+            m_lastfmIsError = obj["is_error"].toBool(false);
+            m_lastfmPendingCount = obj["pending_count"].toInt(0);
+            m_lastfmEnabled = obj["enabled"].toBool(true);
+            m_lastfmNowPlaying = obj["now_playing"].toBool(true);
+            m_lastfmLoveOnLike = obj["love_on_like"].toBool(false);
+            m_lastfmSkipAi = obj["skip_ai"].toBool(true);
+            m_lastfmCustomApiKey = obj["custom_api_key"].toString();
+            m_lastfmHasCustomSecret = obj["has_custom_secret"].toBool(false);
+            const QString authUrl = obj["auth_url"].toString();
+            if (!authUrl.isEmpty()) {
+                QDesktopServices::openUrl(QUrl(authUrl));
             }
         }
         emit featuresChanged();
