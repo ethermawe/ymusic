@@ -336,6 +336,11 @@ QVariantList ModManager::slotEntries(const QString &slotName) const
         entry.insert(QStringLiteral("sourceUrl"), QUrl::fromLocalFile(filePath));
         entry.insert(QStringLiteral("title"), m.sidebarTitle);
         entry.insert(QStringLiteral("symbol"), m.sidebarSymbol);
+        entry.insert(QStringLiteral("settingsTabTitle"), m.settingsTabTitle);
+        entry.insert(QStringLiteral("settingsTabSymbol"), m.settingsTabSymbol);
+        entry.insert(QStringLiteral("settingsTabShape"), m.settingsTabShape);
+        entry.insert(QStringLiteral("immersivePanelTitle"), m.immersivePanelTitle);
+        entry.insert(QStringLiteral("immersivePanelSymbol"), m.immersivePanelSymbol);
         entry.insert(QStringLiteral("api"), QVariant::fromValue(static_cast<QObject *>(api)));
         entries.append(entry);
     }

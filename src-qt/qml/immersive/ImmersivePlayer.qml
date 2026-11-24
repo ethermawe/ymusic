@@ -30,6 +30,7 @@ FocusScope {
     property real windowControlsTopInset: 0
 
     readonly property list<string> panels: ["", "lyrics", "queue", "sleep", "audio"]
+    readonly property var modPanels: ModManager.reloadRevision >= 0 ? ModManager.slotEntries("immersive.panel") : []
     property string panel: ""
     property string shownPanel: ""
     property real panelOpacity: 1
@@ -431,6 +432,36 @@ FocusScope {
             onClicked: root.toggleDistractionFree()
         }
 
+        Row {
+            id: modPanelSwitcher
+            visible: root.modPanels.length > 0
+            anchors.right: switcher.left
+            anchors.rightMargin: 8
+            anchors.verticalCenter: switcher.verticalCenter
+            spacing: 4
+
+            Repeater {
+                model: root.modPanels
+                delegate: IconButton {
+                    required property var modelData
+                    readonly property string panelKey: "mod:" + modelData.modId
+                    readonly property bool selected: root.panel === panelKey
+                    scheme: root.scheme
+                    symbol: modelData.immersivePanelSymbol || "extension"
+                    tooltip: modelData.immersivePanelTitle || modelData.modName || ""
+                    size: 32
+                    iconSize: 19
+                    toggled: selected
+                    colBackground: Qt.rgba(1, 1, 1, 0.12)
+                    colBackgroundHover: Qt.rgba(1, 1, 1, 0.22)
+                    colBackgroundToggled: Qt.rgba(1, 1, 1, 0.92)
+                    colBackgroundToggledHover: Qt.rgba(1, 1, 1, 0.96)
+                    iconColor: selected ? "#141414" : Qt.rgba(1, 1, 1, 0.86)
+                    onClicked: root.swapPanel(selected ? "" : panelKey, true)
+                }
+            }
+        }
+
         SegmentedControl {
             id: switcher
             anchors.right: parent.right
@@ -444,7 +475,7 @@ FocusScope {
             indicatorColor: Qt.rgba(1, 1, 1, 0.92)
             contentColor: Qt.rgba(1, 1, 1, 0.86)
             selectedContentColor: "#141414"
-            currentIndex: Math.max(0, root.panels.indexOf(root.panel))
+            currentIndex: root.panel.startsWith("mod:") ? -1 : Math.max(0, root.panels.indexOf(root.panel))
             segments: [
                 Segment { symbol: "image"; tooltip: "Обложка" },
                 Segment { symbol: "lyrics"; tooltip: "Текст песни" },
@@ -510,6 +541,7 @@ FocusScope {
             opacity: root.panelOpacity * root.panelDistractionFreeOpacity
             active: backend.hasTrack && root.shownPanel.length > 0
             sourceComponent: {
+                if (root.shownPanel.startsWith("mod:")) return modPanelComponent;
                 switch (root.shownPanel) {
                 case "lyrics": return lyrics;
                 case "queue": return queue;
@@ -533,6 +565,14 @@ FocusScope {
     Component { id: lyrics; ImmersiveLyrics { scheme: root.scheme } }
     Component { id: queue; ImmersiveQueue { scheme: root.scheme } }
     Component { id: sleep; SleepTimerPanel { scheme: root.scheme } }
+    Component {
+        id: modPanelComponent
+        ModSlotHost {
+            slotName: "immersive.panel"
+            filterModId: root.shownPanel.startsWith("mod:") ? root.shownPanel.slice(4) : ""
+            slotContext: ({ scheme: root.scheme })
+        }
+    }
     Component {
         id: sound
         Flickable {

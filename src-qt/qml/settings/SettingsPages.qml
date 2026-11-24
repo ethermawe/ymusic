@@ -28,6 +28,7 @@ Item {
     id: root
 
     property int page: 0
+    property string activeModTabId: ""
     property string cacheSizeLabel: appSettings.cacheSizeText()
     property int themeListRev: 0
     property var fontOptions: ["По умолчанию (Google Sans Flex / система)"]
@@ -167,7 +168,7 @@ Item {
 
         // 0: Оформление
         Page {
-            visible: root.page === 0
+            visible: root.activeModTabId.length === 0 && root.page === 0
 
             ContentSection {
                 title: "Цвета и тема"
@@ -564,11 +565,17 @@ Item {
                     onToggledTo: (checked) => appSettings.minimizeToTray = checked
                 }
             }
+            ModSlotHost {
+                layoutMode: "column"
+                width: parent.width
+                visible: implicitHeight > 0
+                slotName: "settings.section.appearance"
+            }
         }
 
         // 1: Плеер и фон
         Page {
-            visible: root.page === 1
+            visible: root.activeModTabId.length === 0 && root.page === 1
 
             ContentSection {
                 title: "Иммерсивный плеер"
@@ -740,11 +747,17 @@ Item {
                     onMoved: (value) => appSettings.waveReactivity = Number(value.toFixed(1))
                 }
             }
+            ModSlotHost {
+                layoutMode: "column"
+                width: parent.width
+                visible: implicitHeight > 0
+                slotName: "settings.section.player"
+            }
         }
 
         // 2: Звук и Анти-ИИ
         Page {
-            visible: root.page === 2
+            visible: root.activeModTabId.length === 0 && root.page === 2
 
             ContentSection {
                 title: "Аудиопоток и воспроизведение"
@@ -838,11 +851,17 @@ Item {
                     text: "Использует встроенную базу Slopless и онлайн проверку slopless.art."
                 }
             }
+            ModSlotHost {
+                layoutMode: "column"
+                width: parent.width
+                visible: implicitHeight > 0
+                slotName: "settings.section.audio"
+            }
         }
 
         // 3: Анимации и ввод
         Page {
-            visible: root.page === 3
+            visible: root.activeModTabId.length === 0 && root.page === 3
 
             ContentSection {
                 title: "Анимации и отклик"
@@ -921,11 +940,17 @@ Item {
                     onActivated: (index) => appSettings.graphicsBackend = root.backends[index]
                 }
             }
+            ModSlotHost {
+                layoutMode: "column"
+                width: parent.width
+                visible: implicitHeight > 0
+                slotName: "settings.section.animations"
+            }
         }
 
         // 4: Интеграции и горячие клавиши
         Page {
-            visible: root.page === 4
+            visible: root.activeModTabId.length === 0 && root.page === 4
 
             ContentSection {
                 title: "Discord Rich Presence"
@@ -1233,11 +1258,17 @@ Item {
                 KeyRow { label: "Перезагрузить моды"; shortcut: "Ctrl + Shift + R" }
                 KeyRow { label: "Настройки"; shortcut: "Ctrl + ," }
             }
+            ModSlotHost {
+                layoutMode: "column"
+                width: parent.width
+                visible: implicitHeight > 0
+                slotName: "settings.section.integrations"
+            }
         }
 
         // 5: Моды и расширения
         Page {
-            visible: root.page === 5
+            visible: root.activeModTabId.length === 0 && root.page === 5
 
             ContentSection {
                 title: "Система модов"
@@ -1554,7 +1585,7 @@ Item {
 
         // 6: Система и аккаунт
         Page {
-            visible: root.page === 6
+            visible: root.activeModTabId.length === 0 && root.page === 6
 
             ContentSection {
                 title: "Аккаунт Яндекс"
@@ -1762,6 +1793,25 @@ Item {
                         }
                     ]
                 }
+            }
+
+            ModSlotHost {
+                layoutMode: "column"
+                width: parent.width
+                visible: implicitHeight > 0
+                slotName: "settings.section.system"
+            }
+        }
+
+        // Динамическая глава настроек, добавленная модом (slot: "settings.tab")
+        Page {
+            visible: root.activeModTabId.length > 0
+
+            ModSlotHost {
+                layoutMode: "column"
+                width: parent.width
+                slotName: "settings.tab"
+                filterModId: root.activeModTabId
             }
         }
     }

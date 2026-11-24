@@ -27,6 +27,8 @@ T.Popup {
     id: root
 
     property int page: 0
+    property string activeModTabId: ""
+    readonly property var modTabs: ModManager.reloadRevision >= 0 ? ModManager.slotEntries("settings.tab") : []
     readonly property list<string> titles: [
         "Оформление", "Плеер и фон", "Звук",
         "Анимации", "Интеграции", "Моды", "Система"
@@ -103,7 +105,7 @@ T.Popup {
                         id: destination
 
                         required property int index
-                        readonly property bool selected: root.page === index
+                        readonly property bool selected: root.activeModTabId.length === 0 && root.page === index
 
                         width: rail.width
                         implicitHeight: 68
@@ -111,7 +113,10 @@ T.Popup {
                         colBackground: "transparent"
                         colBackgroundHover: "transparent"
                         rippleEnabled: false
-                        onClicked: root.page = index
+                        onClicked: {
+                            root.activeModTabId = "";
+                            root.page = index;
+                        }
 
                         contentItem: Column {
                             spacing: 4
@@ -159,6 +164,69 @@ T.Popup {
                         }
                     }
                 }
+
+                Repeater {
+                    model: root.modTabs
+
+                    delegate: RippleButton {
+                        id: modDest
+                        required property var modelData
+                        readonly property bool selected: root.activeModTabId === modelData.modId
+
+                        width: rail.width
+                        implicitHeight: 68
+                        padding: 0
+                        colBackground: "transparent"
+                        colBackgroundHover: "transparent"
+                        rippleEnabled: false
+                        onClicked: root.activeModTabId = modelData.modId
+
+                        contentItem: Column {
+                            spacing: 4
+
+                            Rectangle {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                width: 56
+                                height: 32
+                                radius: height / 2
+                                color: Qt.alpha(Appearance.colors.layer1Hover, !modDest.selected && modDest.hovered ? 1 : 0)
+
+                                Behavior on color {
+                                    ElementMoveFastColor {}
+                                }
+
+                                MaterialSymbol {
+                                    anchors.centerIn: parent
+                                    Reveal.shown: !modDest.selected
+                                    text: modDest.modelData.settingsTabSymbol || "widgets"
+                                    iconSize: 22
+                                    color: Appearance.colors.onSurfaceVariant
+                                }
+                                ShapeIcon {
+                                    anchors.centerIn: parent
+                                    Reveal.shown: modDest.selected
+                                    Reveal.overshoot: 2.4
+                                    size: 38
+                                    iconSize: 20
+                                    shape: modDest.modelData.settingsTabShape || "flower"
+                                    symbol: modDest.modelData.settingsTabSymbol || "widgets"
+                                    hovered: modDest.hovered
+                                }
+                            }
+
+                            StyledText {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                width: rail.width
+                                horizontalAlignment: Text.AlignHCenter
+                                elide: Text.ElideRight
+                                text: modDest.modelData.settingsTabTitle || modDest.modelData.modName || ""
+                                font.pixelSize: Appearance.fontSize.smaller
+                                font.weight: modDest.selected ? Font.DemiBold : Font.Normal
+                                color: modDest.selected ? Appearance.colors.onSurface : Appearance.colors.onSurfaceVariant
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -177,7 +245,7 @@ T.Popup {
             Stickers {
                 anchors.fill: parent
                 anchors.margins: 6
-                key: root.titles[root.page]
+                key: root.activeModTabId.length > 0 ? root.activeModTabId : root.titles[root.page]
                 count: 4
                 minimumSize: 90
                 maximumSize: 220
@@ -197,8 +265,15 @@ T.Popup {
                     id: pages
                     width: scroller.width
                     page: root.page
+                    activeModTabId: root.activeModTabId
 
                     onPageChanged: {
+                        scroller.contentY = 0;
+                        if (!Appearance.performanceMode && !Appearance.reduceMotion) {
+                            arrive.restart();
+                        }
+                    }
+                    onActiveModTabIdChanged: {
                         scroller.contentY = 0;
                         if (!Appearance.performanceMode && !Appearance.reduceMotion) {
                             arrive.restart();

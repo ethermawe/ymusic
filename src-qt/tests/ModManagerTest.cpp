@@ -89,7 +89,15 @@ int main(int argc, char *argv[]) {
         "apiVersion": 1,
         "permissions": ["playback:read", "ui:slots", "ui:override", "storage", "network:api.example.com"],
         "sidebar": { "title": "Демо", "symbol": "extension" },
-        "slots": { "sidebar.page": "ui/Page.qml" },
+        "settingsTab": { "title": "Демо-глава", "symbol": "tune", "shape": "gem" },
+        "immersivePanel": { "title": "Демо-панель", "symbol": "auto_awesome" },
+        "slots": {
+            "sidebar.page": "ui/Page.qml",
+            "settings.tab": "ui/Page.qml",
+            "settings.section.player": "ui/Page.qml",
+            "playerBar.controls": "ui/Page.qml",
+            "immersive.panel": "ui/Page.qml"
+        },
         "overrides": { "qml/player/FloatingPlayerBar.qml": "overrides/Bar.qml" }
     })"));
 
@@ -131,6 +139,16 @@ int main(int argc, char *argv[]) {
     const QVariantList pageSlots = manager.slotEntries(QStringLiteral("sidebar.page"));
     CHECK(pageSlots.size() == 1);
     CHECK(pageSlots.first().toMap().value(QStringLiteral("modId")).toString() == QStringLiteral("demo-mod"));
+
+    const QVariantList tabSlots = manager.slotEntries(QStringLiteral("settings.tab"));
+    CHECK(tabSlots.size() == 1);
+    CHECK(tabSlots.first().toMap().value(QStringLiteral("settingsTabTitle")).toString() == QStringLiteral("Демо-глава"));
+    CHECK(tabSlots.first().toMap().value(QStringLiteral("settingsTabShape")).toString() == QStringLiteral("gem"));
+    CHECK(manager.slotEntries(QStringLiteral("settings.section.player")).size() == 1);
+    CHECK(manager.slotEntries(QStringLiteral("playerBar.controls")).size() == 1);
+    const QVariantList immPanels = manager.slotEntries(QStringLiteral("immersive.panel"));
+    CHECK(immPanels.size() == 1);
+    CHECK(immPanels.first().toMap().value(QStringLiteral("immersivePanelSymbol")).toString() == QStringLiteral("auto_awesome"));
 
     // Rapid reload lifecycle (leak/dangling-action safety)
     for (int i = 0; i < 20; ++i) {

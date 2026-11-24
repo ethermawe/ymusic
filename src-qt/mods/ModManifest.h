@@ -26,6 +26,13 @@ struct ModManifest {
     /// Optional sidebar page metadata when "sidebar.page" slot is present
     QString sidebarTitle;
     QString sidebarSymbol;
+    /// Optional settings chapter metadata when "settings.tab" slot is present
+    QString settingsTabTitle;
+    QString settingsTabSymbol;
+    QString settingsTabShape;
+    /// Optional immersive panel metadata when "immersive.panel" slot is present
+    QString immersivePanelTitle;
+    QString immersivePanelSymbol;
 
     QStringList permissions;
     /// slot name -> resolved canonical file path

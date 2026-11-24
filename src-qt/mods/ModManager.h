@@ -115,6 +115,8 @@ signals:
     void logsChanged();
     void trackMenuActionsChanged();
     void toastRequested(const QString &message);
+    void immersiveRequested(bool open);
+    void settingsRequested();
 
 private:
     void scanAndSync(bool initialStartup);

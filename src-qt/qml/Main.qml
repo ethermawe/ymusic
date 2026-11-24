@@ -89,6 +89,11 @@ ApplicationWindow {
     Connections {
         target: ModManager
         function onToastRequested(message: string) { toast.show(message); }
+        function onImmersiveRequested(open: bool) {
+            if (open) UiState.openImmersive();
+            else UiState.closeImmersive();
+        }
+        function onSettingsRequested() { window.openSettings(); }
     }
 
     function openSettings() {

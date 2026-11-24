@@ -498,6 +498,20 @@ Item {
                 onClicked: UiState.toggleQueuePanel()
             }
 
+            ModSlotHost {
+                layoutMode: "row"
+                anchors.verticalCenter: parent.verticalCenter
+                height: root.buttonSize
+                spacing: 4
+                visible: !root.tiny && implicitWidth > 0
+                slotName: "playerBar.controls"
+                slotContext: ({
+                    scheme: root.scheme,
+                    buttonSize: root.buttonSize,
+                    compact: root.compact
+                })
+            }
+
             VolumeControl {
                 visible: !root.twoRow
                 anchors.verticalCenter: parent.verticalCenter

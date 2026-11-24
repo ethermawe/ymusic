@@ -414,6 +414,33 @@ bool ModApi::showToast(const QString &message)
     return true;
 }
 
+bool ModApi::openImmersive()
+{
+    if (!requirePermission(QStringLiteral("ui:slots"), "openImmersive") || !m_manager) {
+        return false;
+    }
+    emit m_manager->immersiveRequested(true);
+    return true;
+}
+
+bool ModApi::closeImmersive()
+{
+    if (!requirePermission(QStringLiteral("ui:slots"), "closeImmersive") || !m_manager) {
+        return false;
+    }
+    emit m_manager->immersiveRequested(false);
+    return true;
+}
+
+bool ModApi::openSettings()
+{
+    if (!requirePermission(QStringLiteral("ui:slots"), "openSettings") || !m_manager) {
+        return false;
+    }
+    emit m_manager->settingsRequested();
+    return true;
+}
+
 bool ModApi::registerTrackMenuAction(const QString &actionId,
                                      const QString &label,
                                      const QString &symbol,

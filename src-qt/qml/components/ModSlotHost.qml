@@ -8,6 +8,9 @@ Item {
     property string slotName: ""
     property string filterModId: ""
     property var slotContext: ({})
+    /// "fill" (overlay/full-area), "column" (vertical flow, e.g. settings), or "row" (horizontal flow, e.g. playerBar)
+    property string layoutMode: "fill"
+    property real spacing: 12
 
     readonly property var entries: {
         const _rev = ModManager.reloadRevision;
@@ -17,36 +20,78 @@ Item {
         return list.filter(item => item.modId === root.filterModId);
     }
 
-    Repeater {
-        model: root.entries
+    implicitWidth: layoutMode === "row" ? rowHost.implicitWidth : 0
+    implicitHeight: layoutMode === "column" ? colHost.implicitHeight : (layoutMode === "row" ? rowHost.implicitHeight : 0)
 
-        delegate: Loader {
-            id: modLoader
-            required property var modelData
-            property string loadedKey: ""
-            anchors.fill: parent
+    component ModEntryLoader: Loader {
+        id: modLoader
+        required property var entryData
+        property string loadedKey: ""
 
-            function loadEntry() {
-                if (!modelData || !modelData.sourceUrl) return;
-                const key = modelData.modId + "|" + String(modelData.sourceUrl) + "|" + ModManager.reloadRevision;
-                if (key === loadedKey) return;
-                loadedKey = key;
-                setSource(modelData.sourceUrl, {
-                    modApi: modelData.api,
-                    slotContext: root.slotContext
-                });
+        function loadEntry() {
+            if (!entryData || !entryData.sourceUrl) return;
+            const key = entryData.modId + "|" + String(entryData.sourceUrl) + "|" + ModManager.reloadRevision;
+            if (key === loadedKey) return;
+            loadedKey = key;
+            setSource(entryData.sourceUrl, {
+                modApi: entryData.api,
+                slotContext: root.slotContext
+            });
+        }
+
+        Component.onCompleted: loadEntry()
+        onEntryDataChanged: loadEntry()
+
+        onStatusChanged: {
+            if (status === Loader.Error && entryData) {
+                ModManager.reportModError(
+                    entryData.modId,
+                    "Ошибка загрузки слота '" + root.slotName + "': " + String(entryData.sourceUrl)
+                );
             }
+        }
+    }
 
-            Component.onCompleted: loadEntry()
-            onModelDataChanged: loadEntry()
+    Repeater {
+        model: root.layoutMode === "fill" ? root.entries : []
+        delegate: ModEntryLoader {
+            required property var modelData
+            entryData: modelData
+            anchors.fill: parent
+        }
+    }
 
-            onStatusChanged: {
-                if (status === Loader.Error && modelData) {
-                    ModManager.reportModError(
-                        modelData.modId,
-                        "Ошибка загрузки слота '" + root.slotName + "': " + String(modelData.sourceUrl)
-                    );
-                }
+    Column {
+        id: colHost
+        visible: root.layoutMode === "column"
+        width: parent.width
+        spacing: root.spacing
+
+        Repeater {
+            model: root.layoutMode === "column" ? root.entries : []
+            delegate: ModEntryLoader {
+                required property var modelData
+                entryData: modelData
+                width: colHost.width
+                height: item ? Math.max(item.implicitHeight, item.height) : 0
+            }
+        }
+    }
+
+    Row {
+        id: rowHost
+        visible: root.layoutMode === "row"
+        height: parent.height
+        spacing: root.spacing
+
+        Repeater {
+            model: root.layoutMode === "row" ? root.entries : []
+            delegate: ModEntryLoader {
+                required property var modelData
+                entryData: modelData
+                anchors.verticalCenter: parent.verticalCenter
+                width: item ? Math.max(item.implicitWidth, item.width) : 0
+                height: item ? Math.max(item.implicitHeight, item.height) : rowHost.height
             }
         }
     }

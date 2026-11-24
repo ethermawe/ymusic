@@ -74,9 +74,15 @@
 - `window.backdrop` — слой под интерфейсом главного окна (`Main.qml`).
 - `topbar.center` — центральная зона верхней панели (`TopBar.qml`) между заголовком и строкой поиска.
 - `sidebar.page` — собственная страница приложения (появляется в секции «Моды» в сайдбаре).
+- `playerBar.controls` — дополнительные кнопки/виджеты в правом блоке нижнего плавающего бара (`FloatingPlayerBar.qml`).
 - `immersive.backdrop` — фоновый слой в полноэкранном плеере (`ImmersivePlayer.qml`).
 - `immersive.overlay` — верхний слой виджетов/визуализаторов в полноэкранном плеере (`ImmersivePlayer.qml`).
+- `immersive.panel` — собственная боковая панель в полноэкранном плеере (настраивается через `"immersivePanel": { "title": "...", "symbol": "..." }` в `manifest.json`).
+- `settings.tab` — собственная «глава» (вкладка) в левом меню Настроек (настраивается через `"settingsTab": { "title": "...", "symbol": "...", "shape": "flower" }`).
+- `settings.section.<page>` — добавление своих пунктов/секций (`ContentSection`, `ConfigSwitch`, `ConfigSlider` и т.д.) внутрь встроенных глав Настроек: `appearance`, `player`, `audio`, `animations`, `integrations`, `system`.
 - `entry.script` — фоновый QML-хост, который работает всё время, пока мод включён (удобно для регистрации действий в `TrackMenu` и реакции на события `modApi.trackChanged`).
 - `entry.settings` — собственный UI настроек мода (открывается кнопкой настроек в **Настройки → Моды**).
+
+Дополнительные UI-методы `modApi` (при наличии `ui:slots`): `showToast(msg)`, `openImmersive()`, `closeImmersive()`, `openSettings()`, `openExternalUrl(url)`, `registerTrackMenuAction(...)`.
 
 Готовый рабочий пример лежит в `examples/mods/hello-ymusic/`.

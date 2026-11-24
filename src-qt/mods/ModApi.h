@@ -111,6 +111,9 @@ public:
 
     // UI helpers (requires "ui:slots")
     Q_INVOKABLE bool showToast(const QString &message);
+    Q_INVOKABLE bool openImmersive();
+    Q_INVOKABLE bool closeImmersive();
+    Q_INVOKABLE bool openSettings();
     Q_INVOKABLE bool registerTrackMenuAction(const QString &actionId,
                                              const QString &label,
                                              const QString &symbol = QStringLiteral("extension"),

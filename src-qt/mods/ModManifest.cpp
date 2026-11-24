@@ -197,6 +197,15 @@ ModManifest parseManifest(const QString &modDirectory)
     m.sidebarTitle = sidebar.value(QStringLiteral("title")).toString().trimmed();
     m.sidebarSymbol = sidebar.value(QStringLiteral("symbol")).toString().trimmed();
 
+    const QJsonObject settingsTab = root.value(QStringLiteral("settingsTab")).toObject();
+    m.settingsTabTitle = settingsTab.value(QStringLiteral("title")).toString().trimmed();
+    m.settingsTabSymbol = settingsTab.value(QStringLiteral("symbol")).toString().trimmed();
+    m.settingsTabShape = settingsTab.value(QStringLiteral("shape")).toString().trimmed();
+
+    const QJsonObject immersivePanel = root.value(QStringLiteral("immersivePanel")).toObject();
+    m.immersivePanelTitle = immersivePanel.value(QStringLiteral("title")).toString().trimmed();
+    m.immersivePanelSymbol = immersivePanel.value(QStringLiteral("symbol")).toString().trimmed();
+
     const QJsonObject slotsObj = root.value(QStringLiteral("slots")).toObject();
     for (auto it = slotsObj.constBegin(); it != slotsObj.constEnd(); ++it) {
         const QString slotName = it.key().trimmed();
@@ -236,6 +245,21 @@ ModManifest parseManifest(const QString &modDirectory)
     }
     if (m.sidebarSymbol.isEmpty()) {
         m.sidebarSymbol = QStringLiteral("extension");
+    }
+    if (m.settingsTabTitle.isEmpty()) {
+        m.settingsTabTitle = m.name;
+    }
+    if (m.settingsTabSymbol.isEmpty()) {
+        m.settingsTabSymbol = QStringLiteral("widgets");
+    }
+    if (m.settingsTabShape.isEmpty()) {
+        m.settingsTabShape = QStringLiteral("flower");
+    }
+    if (m.immersivePanelTitle.isEmpty()) {
+        m.immersivePanelTitle = m.name;
+    }
+    if (m.immersivePanelSymbol.isEmpty()) {
+        m.immersivePanelSymbol = QStringLiteral("extension");
     }
 
     m.valid = true;
