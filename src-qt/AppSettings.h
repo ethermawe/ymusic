@@ -85,6 +85,9 @@ class AppSettings : public QObject {
     Q_PROPERTY(bool burstsEnabled READ burstsEnabled WRITE setBurstsEnabled NOTIFY burstsEnabledChanged)
     Q_PROPERTY(double volumeStep READ volumeStep WRITE setVolumeStep NOTIFY volumeStepChanged)
     Q_PROPERTY(bool autoUpdateEnabled READ autoUpdateEnabled WRITE setAutoUpdateEnabled NOTIFY autoUpdateEnabledChanged)
+    Q_PROPERTY(bool modsEnabled READ modsEnabled WRITE setModsEnabled NOTIFY modsSettingsChanged)
+    Q_PROPERTY(bool modDevMode READ modDevMode WRITE setModDevMode NOTIFY modsSettingsChanged)
+    Q_PROPERTY(QStringList enabledModIds READ enabledModIds WRITE setEnabledModIds NOTIFY modsSettingsChanged)
 
 public:
     explicit AppSettings(QObject *parent = nullptr) : QObject(parent), m_store("finrixx", "ymusic") {
@@ -188,6 +191,9 @@ public:
     bool burstsEnabled() const { return m_store.value("ui/burstsEnabled", true).toBool(); }
     double volumeStep() const { return std::clamp(m_store.value("ui/volumeStep", 0.05).toDouble(), 0.01, 0.2); }
     bool autoUpdateEnabled() const { return m_store.value("app/autoUpdateEnabled", true).toBool(); }
+    bool modsEnabled() const { return m_store.value("mods/enabled", true).toBool(); }
+    bool modDevMode() const { return m_store.value("mods/devMode", false).toBool(); }
+    QStringList enabledModIds() const { return m_store.value("mods/enabledIds").toStringList(); }
 
     void setMotionEnabled(bool value) {
         if (value != motionEnabled()) {
@@ -523,6 +529,26 @@ public:
             emit autoUpdateEnabledChanged();
         }
     }
+    void setModsEnabled(bool value) {
+        if (value != modsEnabled()) {
+            save("mods/enabled", value);
+            emit modsSettingsChanged();
+        }
+    }
+    void setModDevMode(bool value) {
+        if (value != modDevMode()) {
+            save("mods/devMode", value);
+            emit modsSettingsChanged();
+        }
+    }
+    void setEnabledModIds(const QStringList &value) {
+        QStringList cleaned = value;
+        cleaned.removeDuplicates();
+        if (cleaned != enabledModIds()) {
+            save("mods/enabledIds", cleaned);
+            emit modsSettingsChanged();
+        }
+    }
 
     Q_INVOKABLE bool openOfflineFolder() {
         QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
@@ -628,6 +654,7 @@ signals:
     void appearanceChanged();
     void autoUpdateEnabledChanged();
     void lyricsSettingsChanged();
+    void modsSettingsChanged();
 
 private:
     void save(const QString &key, const QVariant &value) {

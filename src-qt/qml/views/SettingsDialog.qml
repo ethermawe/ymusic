@@ -29,15 +29,15 @@ T.Popup {
     property int page: 0
     readonly property list<string> titles: [
         "Оформление", "Плеер и фон", "Звук",
-        "Анимации", "Интеграции", "Система"
+        "Анимации", "Интеграции", "Моды", "Система"
     ]
     readonly property list<string> symbols: [
         "palette", "wallpaper", "play_circle",
-        "animation", "extension", "tune"
+        "animation", "extension", "widgets", "tune"
     ]
     readonly property list<string> shapes: [
         "clover4", "flower", "cookie9",
-        "gem", "sunny", "cookie12"
+        "gem", "sunny", "softBurst", "cookie12"
     ]
 
     parent: T.Overlay.overlay

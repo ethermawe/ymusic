@@ -108,7 +108,29 @@ StyledMenu {
         }
     }
 
+    StyledMenuSeparator {
+        visible: ModManager.trackMenuActions.length > 0
+        height: visible ? implicitHeight : 0
+    }
+
     property list<QtObject> _helpers: [
+        Instantiator {
+            model: ModManager.trackMenuActions
+            delegate: StyledMenuItem {
+                required property var modelData
+                text: modelData.label || ""
+                symbol: modelData.symbol || "extension"
+                destructive: Boolean(modelData.destructive)
+                onTriggered: ModManager.triggerTrackMenuAction(
+                    modelData.modId,
+                    modelData.actionId,
+                    root.trackId,
+                    root.trackTitle
+                )
+            }
+            onObjectAdded: (index, object) => root.insertItem(root.count, object)
+            onObjectRemoved: (index, object) => root.removeItem(object)
+        },
         FileDialog {
             id: saveDialog
             property string pendingTrackId: ""

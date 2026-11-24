@@ -1,0 +1,27 @@
+{
+  "id": "hello-ymusic",
+  "name": "Hello YMusic (Пример)",
+  "version": "1.0.0",
+  "author": "ymusic",
+  "description": "Стартовый пример мода: добавляет пункт поиска на YouTube в меню трека, свою страницу в сайдбаре и мини-индикатор в полном экране.",
+  "apiVersion": 1,
+  "entry": {
+    "script": "main.qml",
+    "settings": "ui/Settings.qml"
+  },
+  "sidebar": {
+    "title": "Hello Mod",
+    "symbol": "auto_awesome"
+  },
+  "slots": {
+    "sidebar.page": "ui/Page.qml",
+    "immersive.overlay": "ui/ImmersiveBadge.qml"
+  },
+  "permissions": [
+    "playback:read",
+    "spectrum:read",
+    "ui:slots",
+    "storage",
+    "clipboard"
+  ]
+}

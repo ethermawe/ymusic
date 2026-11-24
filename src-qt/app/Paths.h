@@ -27,5 +27,7 @@ QString dataDirectory();
 QString cacheDirectory();
 QString logDirectory();
 QString logFilePath();
+QString modsDirectory();
+QString modDataDirectory();
 
 } // namespace ymusic::paths

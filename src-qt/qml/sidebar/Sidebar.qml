@@ -6,7 +6,7 @@ import ymusic.ui
 Item {
     id: root
 
-    readonly property int activePage: backend.page
+    readonly property int activePage: UiState.activeModPageId.length > 0 ? -1 : backend.page
     property bool compact: false
     property real expandedWidth: 220
     property bool resizing: false
@@ -131,7 +131,7 @@ Item {
                     iconShape: "softBurst"
                     symbol: "waves"
                     selected: root.activePage === 1
-                    onClicked: backend.startWave()
+                    onClicked: { UiState.closeModPage(); backend.startWave(); }
                 }
 
                 NavigationItem {
@@ -141,7 +141,7 @@ Item {
                     iconShape: "cookie9"
                     symbol: "home"
                     selected: root.activePage === 0
-                    onClicked: backend.loadHome()
+                    onClicked: { UiState.closeModPage(); backend.loadHome(); }
                 }
 
                 SectionLabel {
@@ -158,7 +158,7 @@ Item {
                     keepsShape: true
                     symbol: "favorite"
                     selected: root.activePage === 2
-                    onClicked: backend.loadLikes()
+                    onClicked: { UiState.closeModPage(); backend.loadLikes(); }
                 }
 
                 NavigationItem {
@@ -168,7 +168,7 @@ Item {
                     iconShape: "clamShell"
                     symbol: "download_done"
                     selected: root.activePage === 7
-                    onClicked: backend.loadDownloads()
+                    onClicked: { UiState.closeModPage(); backend.loadDownloads(); }
                 }
 
                 SectionLabel {
@@ -205,7 +205,7 @@ Item {
                             tooltip: appSettings.pinnedPlaylistsExpanded ? qsTr("Свернуть закреплённые") : qsTr("Развернуть закреплённые")
                             onClicked: appSettings.pinnedPlaylistsExpanded = !appSettings.pinnedPlaylistsExpanded
                         }
-                        onClicked: backend.loadPlaylists()
+                        onClicked: { UiState.closeModPage(); backend.loadPlaylists(); }
                     }
 
                     Item {
@@ -293,7 +293,7 @@ Item {
                     iconShape: "sunny"
                     symbol: "album"
                     selected: root.activePage === 4
-                    onClicked: backend.loadAlbums()
+                    onClicked: { UiState.closeModPage(); backend.loadAlbums(); }
                 }
 
                 NavigationItem {
@@ -303,7 +303,30 @@ Item {
                     iconShape: "clover4"
                     symbol: "group"
                     selected: root.activePage === 5
-                    onClicked: backend.loadArtists()
+                    onClicked: { UiState.closeModPage(); backend.loadArtists(); }
+                }
+
+                SectionLabel {
+                    width: parent.width
+                    compact: root.isCompact
+                    visible: modPagesRepeater.count > 0
+                    text: qsTr("Моды")
+                }
+
+                Repeater {
+                    id: modPagesRepeater
+                    model: ModManager.reloadRevision >= 0 ? ModManager.slotEntries("sidebar.page") : []
+
+                    delegate: NavigationItem {
+                        required property var modelData
+                        width: parent.width
+                        compact: root.isCompact
+                        text: modelData.title || modelData.modName || ""
+                        iconShape: "gem"
+                        symbol: modelData.symbol || "extension"
+                        selected: UiState.activeModPageId === modelData.modId
+                        onClicked: UiState.openModPage(modelData.modId)
+                    }
                 }
             }
         }

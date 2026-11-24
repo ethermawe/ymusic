@@ -56,4 +56,14 @@ QString logFilePath()
     return logDirectory() + QStringLiteral("/ymusic.log");
 }
 
+QString modsDirectory()
+{
+    return ensured(dataDirectory() + QStringLiteral("/mods"));
+}
+
+QString modDataDirectory()
+{
+    return ensured(dataDirectory() + QStringLiteral("/mod-data"));
+}
+
 } // namespace ymusic::paths

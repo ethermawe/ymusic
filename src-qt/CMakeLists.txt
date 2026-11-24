@@ -152,6 +152,14 @@ set(YMUSIC_CPP_SOURCES
     render/SpectrumStyle.h
     render/WavyLineItem.h
     render/WavyLineItem.cpp
+    mods/ModApi.h
+    mods/ModApi.cpp
+    mods/ModManager.h
+    mods/ModManager.cpp
+    mods/ModManifest.h
+    mods/ModManifest.cpp
+    mods/ModUrlInterceptor.h
+    mods/ModUrlInterceptor.cpp
     theme/ColorMath.h
     theme/MaterialScheme.h
     theme/MaterialScheme.cpp
@@ -199,6 +207,7 @@ set(QML_FILES
     qml/components/LikeBurst.qml
     qml/components/LoadingSpinner.qml
     qml/components/MenuLoader.qml
+    qml/components/ModSlotHost.qml
     qml/components/OutlinedTextField.qml
     qml/components/PlayButton.qml
     qml/components/PlayHeroButton.qml
@@ -353,6 +362,7 @@ target_include_directories(ymusic-qml PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/app"
     "${CMAKE_CURRENT_SOURCE_DIR}/artwork"
     "${CMAKE_CURRENT_SOURCE_DIR}/motion"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mods"
     "${CMAKE_CURRENT_SOURCE_DIR}/playback"
     "${CMAKE_CURRENT_SOURCE_DIR}/render"
     "${CMAKE_CURRENT_SOURCE_DIR}/theme"
@@ -478,4 +488,24 @@ if(BUILD_TESTING)
     target_link_libraries(theme_test PRIVATE Qt6::Core Qt6::Gui Qt6::Qml material_color_utilities)
     add_test(NAME theme_test COMMAND theme_test)
     set_tests_properties(theme_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    add_executable(mod_manager_test
+        tests/ModManagerTest.cpp
+        AppSettings.h
+        app/Paths.h
+        app/Paths.cpp
+        mods/ModApi.h
+        mods/ModApi.cpp
+        mods/ModManager.h
+        mods/ModManager.cpp
+        mods/ModManifest.h
+        mods/ModManifest.cpp
+        mods/ModUrlInterceptor.h
+        mods/ModUrlInterceptor.cpp
+    )
+    target_include_directories(mod_manager_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_definitions(mod_manager_test PRIVATE YMUSIC_MOD_TEST_NO_BACKEND=1)
+    target_link_libraries(mod_manager_test PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Network)
+    add_test(NAME mod_manager_test COMMAND mod_manager_test)
+    set_tests_properties(mod_manager_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

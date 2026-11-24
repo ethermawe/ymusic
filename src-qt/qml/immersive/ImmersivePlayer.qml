@@ -306,6 +306,12 @@ FocusScope {
         strength: 0.35
     }
 
+    ModSlotHost {
+        anchors.fill: parent
+        slotName: "immersive.backdrop"
+        slotContext: ({ scheme: root.scheme })
+    }
+
     HoverHandler {
         cursorShape: (root.distractionFree && root.controlsHidden) ? Qt.BlankCursor : Qt.ArrowCursor
         onPointChanged: {
@@ -561,5 +567,12 @@ FocusScope {
         Behavior on opacity {
             NumberAnimation { duration: Appearance.duration(240); easing.type: Easing.OutQuad }
         }
+    }
+
+    ModSlotHost {
+        anchors.fill: parent
+        z: 50
+        slotName: "immersive.overlay"
+        slotContext: ({ scheme: root.scheme, controlsOpacity: root.controlsOpacity })
     }
 }

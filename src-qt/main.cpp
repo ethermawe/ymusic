@@ -47,6 +47,7 @@
 #include "artwork/ArtworkCache.h"
 #include "motion/AmbientClock.h"
 #include "motion/ScrollMomentum.h"
+#include "mods/ModManager.h"
 #include "render/SpectrumSource.h"
 #include "theme/PlayerStyle.h"
 #include "theme/Theme.h"
@@ -154,9 +155,12 @@ public:
 
 int main(int argc, char *argv[]) {
     bool graphicsOverride = qEnvironmentVariableIsSet("QSG_RHI_BACKEND");
+    bool safeModeArg = false;
     for (int i = 1; i < argc; ++i) {
         const QByteArray arg(argv[i]);
-        if (arg == "--graphics=vulkan") {
+        if (arg == "--safe-mode") {
+            safeModeArg = true;
+        } else if (arg == "--graphics=vulkan") {
             graphicsOverride = true;
             QQuickWindow::setGraphicsApi(QSGRendererInterface::Vulkan);
         } else if (arg == "--graphics=opengl") {
@@ -255,6 +259,8 @@ int main(int argc, char *argv[]) {
     ymusic::Theme theme(&settings);
     ymusic::PlayerStyle playerStyle(&backend, &theme, &artwork);
     ymusic::SpectrumSource spectrum(&backend);
+    const bool safeMode = safeModeArg || QGuiApplication::queryKeyboardModifiers().testFlag(Qt::ShiftModifier);
+    ymusic::mods::ModManager modManager(&settings, &backend, &spectrum, safeMode);
 
     ThemeManager::instance().setPreset(settings.themePreset());
     const auto syncDiscord = [&]() {
@@ -291,6 +297,8 @@ int main(int argc, char *argv[]) {
     });
 
     QQmlApplicationEngine engine;
+    modManager.attachEngine(&engine);
+    engine.addUrlInterceptor(modManager.urlInterceptor());
     engine.setNetworkAccessManagerFactory(new CustomNamFactory);
     engine.addImageProvider(QStringLiteral("art"), new ymusic::ArtworkImageProvider);
     engine.rootContext()->setContextProperty("backend", &backend);
@@ -311,6 +319,16 @@ int main(int argc, char *argv[]) {
     });
 
     engine.loadFromModule("ymusic.ui", "Main");
+
+    if (engine.rootObjects().isEmpty() && modManager.activeOverrideCount() > 0) {
+        const QString reason = qmlErrors.isEmpty()
+            ? QStringLiteral("Ошибка загрузки Main с активными UI-оверрайдами")
+            : qmlErrors.join(QStringLiteral(" | "));
+        modManager.quarantineOverrideMods(reason);
+        qmlErrors.clear();
+        engine.clearComponentCache();
+        engine.loadFromModule("ymusic.ui", "Main");
+    }
 
     if (engine.rootObjects().isEmpty()) {
         const QString detail = qmlErrors.isEmpty()

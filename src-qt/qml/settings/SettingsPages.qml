@@ -1230,13 +1230,331 @@ Item {
                 KeyRow { label: "Перемешать / Повтор"; shortcut: "Ctrl + Alt + S / R" }
                 KeyRow { label: "Поиск музыки"; shortcut: "Ctrl + K" }
                 KeyRow { label: "Масштаб интерфейса"; shortcut: "Ctrl + + / - / 0" }
+                KeyRow { label: "Перезагрузить моды"; shortcut: "Ctrl + Shift + R" }
                 KeyRow { label: "Настройки"; shortcut: "Ctrl + ," }
             }
         }
 
-        // 5: Система и аккаунт
+        // 5: Моды и расширения
         Page {
             visible: root.page === 5
+
+            ContentSection {
+                title: "Система модов"
+                symbol: "widgets"
+
+                Rectangle {
+                    visible: ModManager.safeMode
+                    x: 8
+                    width: parent.width - 16
+                    implicitHeight: safeText.implicitHeight + 20
+                    radius: Appearance.rounding.small
+                    color: Appearance.colors.errorContainer
+
+                    StyledText {
+                        id: safeText
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        wrapMode: Text.WordWrap
+                        color: Appearance.colors.onErrorContainer
+                        font.pixelSize: Appearance.fontSize.smaller
+                        text: "Клиент запущен в безопасном режиме (--safe-mode / Shift). Все моды и UI-оверрайды временно отключены."
+                    }
+                }
+
+                Rectangle {
+                    visible: ModManager.overridesNeedRestart
+                    x: 8
+                    width: parent.width - 16
+                    implicitHeight: restartText.implicitHeight + 20
+                    radius: Appearance.rounding.small
+                    color: Appearance.colors.tertiaryContainer
+
+                    StyledText {
+                        id: restartText
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        wrapMode: Text.WordWrap
+                        color: Appearance.colors.onTertiaryContainer
+                        font.pixelSize: Appearance.fontSize.smaller
+                        text: "Вы изменили моды с подменой экранов (ui:override). Перезапустите клиент, чтобы новые оверрайды вёрстки применились полностью."
+                    }
+                }
+
+                ConfigSwitch {
+                    text: "Включить систему модов"
+                    enabled: !ModManager.safeMode
+                    checked: appSettings.modsEnabled
+                    onToggledTo: (checked) => appSettings.modsEnabled = checked
+                }
+
+                ConfigSwitch {
+                    text: "Режим разработчика (автоперезагрузка при изменении файлов)"
+                    enabled: ModManager.modsEnabled
+                    checked: appSettings.modDevMode
+                    onToggledTo: (checked) => appSettings.modDevMode = checked
+                }
+
+                Flow {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+                    topPadding: 4
+
+                    TextButton {
+                        variant: TextButton.Tonal
+                        symbol: "folder_open"
+                        text: "Папка модов"
+                        onClicked: {
+                            if (!ModManager.openModsFolder()) {
+                                UiState.showToast("Не удалось открыть папку модов");
+                            }
+                        }
+                    }
+                    TextButton {
+                        variant: TextButton.Tonal
+                        symbol: "add"
+                        text: "Установить папку мода…"
+                        onClicked: installModFolderDialog.open()
+                    }
+                    TextButton {
+                        variant: TextButton.Outlined
+                        symbol: "refresh"
+                        text: "Перезагрузить моды"
+                        enabled: ModManager.modsEnabled
+                        onClicked: {
+                            ModManager.reloadMods();
+                            UiState.showToast("Моды перезагружены");
+                        }
+                    }
+                }
+
+                NoteText {
+                    text: "Активных модов: " + ModManager.activeModCount
+                        + (ModManager.activeOverrideCount > 0 ? (" • UI-оверрайдов: " + ModManager.activeOverrideCount) : "")
+                        + ". Безопасный запуск без модов: ymusic-qml --safe-mode или удержание Shift при старте."
+                }
+            }
+
+            ContentSection {
+                title: "Установленные моды"
+                symbol: "layers"
+
+                NoteText {
+                    visible: ModManager.mods.length === 0
+                    text: "Установленных модов пока нет. Скопируйте папку мода с manifest.json в каталог модов (или нажмите «Установить папку мода…»)."
+                }
+
+                Repeater {
+                    model: ModManager.mods
+
+                    delegate: Rectangle {
+                        id: modCard
+                        required property var modelData
+                        x: 8
+                        width: parent ? parent.width - 16 : 0
+                        implicitHeight: modCardCol.implicitHeight + 24
+                        radius: Appearance.rounding.normal
+                        color: Appearance.colors.surfaceContainer
+                        border.width: 1
+                        border.color: !modelData.valid
+                            ? Appearance.colors.error
+                            : (modelData.enabled ? Appearance.colors.primary : Appearance.colors.outlineVariant)
+
+                        Column {
+                            id: modCardCol
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 8
+
+                            RowLayout {
+                                width: parent.width
+                                spacing: 8
+
+                                Column {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    Row {
+                                        spacing: 8
+                                        StyledText {
+                                            text: modCard.modelData.name || modCard.modelData.id
+                                            font.weight: Font.DemiBold
+                                        }
+                                        StyledText {
+                                            text: "v" + (modCard.modelData.version || "1.0.0")
+                                            font.pixelSize: Appearance.fontSize.smaller
+                                            color: Appearance.colors.onSurfaceVariant
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                        StyledText {
+                                            visible: (modCard.modelData.author || "").length > 0
+                                            text: "• " + (modCard.modelData.author || "")
+                                            font.pixelSize: Appearance.fontSize.smaller
+                                            color: Appearance.colors.onSurfaceVariant
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                    }
+
+                                    StyledText {
+                                        width: parent.width
+                                        visible: (modCard.modelData.description || "").length > 0
+                                        text: modCard.modelData.description || ""
+                                        wrapMode: Text.WordWrap
+                                        font.pixelSize: Appearance.fontSize.smaller
+                                        color: Appearance.colors.onSurfaceVariant
+                                    }
+                                }
+
+                                IconButton {
+                                    visible: Boolean(modCard.modelData.enabled && modCard.modelData.hasSettings)
+                                    symbol: "settings"
+                                    tooltip: "Настройки мода"
+                                    onClicked: {
+                                        modSettingsDialog.modTitle = modCard.modelData.name || modCard.modelData.id;
+                                        modSettingsDialog.modId = modCard.modelData.id;
+                                        modSettingsDialog.settingsUrl = modCard.modelData.settingsUrl;
+                                        modSettingsDialog.open();
+                                    }
+                                }
+
+                                IconButton {
+                                    symbol: "delete"
+                                    tooltip: "Удалить мод"
+                                    onClicked: {
+                                        const name = modCard.modelData.name || modCard.modelData.id;
+                                        if (ModManager.uninstallMod(modCard.modelData.id)) {
+                                            UiState.showToast("Мод «" + name + "» удалён");
+                                        } else {
+                                            UiState.showToast("Не удалось удалить мод");
+                                        }
+                                    }
+                                }
+
+                                StyledSwitch {
+                                    enabled: Boolean(modCard.modelData.valid) && ModManager.modsEnabled
+                                    checked: Boolean(modCard.modelData.enabled)
+                                    onToggled: ModManager.setModEnabled(modCard.modelData.id, checked)
+                                }
+                            }
+
+                            StyledText {
+                                width: parent.width
+                                visible: !modCard.modelData.valid
+                                text: "Ошибка манифеста: " + (modCard.modelData.error || "")
+                                wrapMode: Text.WordWrap
+                                font.pixelSize: Appearance.fontSize.smaller
+                                color: Appearance.colors.error
+                            }
+
+                            StyledText {
+                                width: parent.width
+                                visible: (modCard.modelData.conflicts || []).length > 0
+                                text: "Конфликты оверрайдов: " + (modCard.modelData.conflicts || []).join(", ")
+                                wrapMode: Text.WordWrap
+                                font.pixelSize: Appearance.fontSize.smaller
+                                color: Appearance.colors.error
+                            }
+
+                            Flow {
+                                width: parent.width
+                                spacing: 6
+                                visible: (modCard.modelData.permissions || []).length > 0
+
+                                Repeater {
+                                    model: modCard.modelData.permissions || []
+                                    delegate: Rectangle {
+                                        required property string modelData
+                                        readonly property bool elevated: modelData === "ui:override" || modelData.startsWith("network:")
+                                        width: permLabel.implicitWidth + 14
+                                        height: 22
+                                        radius: Appearance.rounding.verySmall
+                                        color: elevated ? Appearance.colors.tertiaryContainer : Appearance.colors.surfaceContainerHigh
+
+                                        StyledText {
+                                            id: permLabel
+                                            anchors.centerIn: parent
+                                            text: parent.modelData
+                                            font.pixelSize: Appearance.fontSize.smallest
+                                            color: parent.elevated ? Appearance.colors.onTertiaryContainer : Appearance.colors.onSurfaceVariant
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            ContentSection {
+                title: "Консоль модов"
+                symbol: "terminal"
+
+                NoteText {
+                    visible: ModManager.logs.length === 0
+                    text: "Сообщений и ошибок от модов пока нет."
+                }
+
+                Rectangle {
+                    visible: ModManager.logs.length > 0
+                    x: 8
+                    width: parent.width - 16
+                    implicitHeight: Math.min(220, logsCol.implicitHeight + 20)
+                    radius: Appearance.rounding.small
+                    color: Appearance.colors.surfaceContainerLowest
+                    border.width: 1
+                    border.color: Appearance.colors.outlineVariant
+                    clip: true
+
+                    Flickable {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        contentHeight: logsCol.implicitHeight
+                        boundsBehavior: Flickable.StopAtBounds
+                        clip: true
+
+                        Column {
+                            id: logsCol
+                            width: parent.width
+                            spacing: 4
+
+                            Repeater {
+                                model: ModManager.logs
+                                delegate: StyledText {
+                                    required property var modelData
+                                    width: parent ? parent.width : 0
+                                    wrapMode: Text.WrapAnywhere
+                                    font.family: Appearance.monoFontFamily
+                                    font.pixelSize: Appearance.fontSize.smaller
+                                    color: modelData.level === "error"
+                                        ? Appearance.colors.error
+                                        : (modelData.level === "warn" ? Appearance.colors.tertiary : Appearance.colors.onSurfaceVariant)
+                                    text: "[" + modelData.time + "] [" + modelData.modId + "] " + modelData.message
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Flow {
+                    x: 8
+                    width: parent.width - 16
+                    spacing: 8
+                    visible: ModManager.logs.length > 0
+
+                    TextButton {
+                        variant: TextButton.Outlined
+                        symbol: "delete"
+                        text: "Очистить консоль"
+                        onClicked: ModManager.clearLogs()
+                    }
+                }
+            }
+        }
+
+        // 6: Система и аккаунт
+        Page {
+            visible: root.page === 6
 
             ContentSection {
                 title: "Аккаунт Яндекс"
@@ -1475,5 +1793,48 @@ Item {
             const res = Theme.importThemeFile(selectedFile, true);
             UiState.showToast(res.ok ? ("Тема «" + res.name + "» применена") : (res.error || "Ошибка импорта"));
         }
+    }
+
+    FolderDialog {
+        id: installModFolderDialog
+        title: "Выберите папку мода (содержащую manifest.json)"
+        onAccepted: {
+            const res = ModManager.installModFromFolder(selectedFolder);
+            UiState.showToast(res.ok ? ("Мод «" + res.name + "» установлен. Включите его в списке.") : (res.error || "Ошибка установки мода"));
+        }
+    }
+
+    StyledDialog {
+        id: modSettingsDialog
+        property string modTitle: ""
+        property string modId: ""
+        property url settingsUrl: ""
+        headline: modTitle.length > 0 ? ("Настройки: " + modTitle) : "Настройки мода"
+        symbol: "settings"
+        iconShape: "cookie9"
+        preferredWidth: 480
+
+        Loader {
+            id: modSettingsLoader
+            width: parent ? parent.width : 420
+            active: modSettingsDialog.opened && String(modSettingsDialog.settingsUrl).length > 0
+            onActiveChanged: {
+                if (active) {
+                    setSource(modSettingsDialog.settingsUrl, {
+                        modApi: ModManager.apiForMod(modSettingsDialog.modId)
+                    });
+                } else {
+                    source = "";
+                }
+            }
+        }
+
+        buttons: [
+            TextButton {
+                text: "Готово"
+                variant: TextButton.Filled
+                onClicked: modSettingsDialog.close()
+            }
+        ]
     }
 }

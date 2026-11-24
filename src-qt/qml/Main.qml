@@ -41,12 +41,13 @@ ApplicationWindow {
     readonly property real activeRightPanelWidth: Math.max(200, Math.min(desiredRightPanelWidth, maxRightPanelWidth))
     readonly property bool rightPanelFits: layoutWidth - sidebar.width - 200 - 32 >= 404
 
-    readonly property bool isHome: backend.page === 0
-    readonly property bool isWavePage: backend.page === 1
-    readonly property bool isCardsPage: backend.page >= 3 && backend.page <= 5
-    readonly property bool isSearchPage: backend.page === 8
-    readonly property bool isTrackListPage: backend.page === 2 || backend.page === 7
-        || (!isHome && !isWavePage && !isCardsPage && !isSearchPage)
+    readonly property bool isModPage: UiState.activeModPageId.length > 0
+    readonly property bool isHome: !isModPage && backend.page === 0
+    readonly property bool isWavePage: !isModPage && backend.page === 1
+    readonly property bool isCardsPage: !isModPage && backend.page >= 3 && backend.page <= 5
+    readonly property bool isSearchPage: !isModPage && backend.page === 8
+    readonly property bool isTrackListPage: !isModPage && (backend.page === 2 || backend.page === 7
+        || (!isHome && !isWavePage && !isCardsPage && !isSearchPage))
 
     readonly property bool isMacOS: Qt.platform.os === "osx"
     readonly property bool isWindows: Qt.platform.os === "windows"
@@ -83,6 +84,11 @@ ApplicationWindow {
         function onToastRequested(message: string) { toast.show(message); }
         function onCreatePlaylistRequested() { createPlaylist.open(); }
         function onSettingsRequested() { window.openSettings(); }
+    }
+
+    Connections {
+        target: ModManager
+        function onToastRequested(message: string) { toast.show(message); }
     }
 
     function openSettings() {
@@ -311,6 +317,19 @@ ApplicationWindow {
         anchors.fill: parent
         visible: window.onScreen && window.immersiveReveal < 1
 
+        ModSlotHost {
+            anchors.fill: parent
+            z: -1
+            slotName: "window.backdrop"
+        }
+
+        ModSlotHost {
+            width: 0
+            height: 0
+            visible: false
+            slotName: "background.host"
+        }
+
         // Dismiss active search focus / suggestions when clicking empty space or another control.
         MouseArea {
             anchors.fill: parent
@@ -414,6 +433,22 @@ ApplicationWindow {
                         anchors.fill: parent
                         active: backend.loggedIn && homePage.everShown
                         sourceComponent: HomeView {}
+                    }
+                }
+
+                // Custom Mod Page (from Sidebar)
+                PageTransition {
+                    id: modPage
+                    anchors.fill: parent
+                    shown: window.isModPage
+                    transitionKey: UiState.activeModPageId
+
+                    ModSlotHost {
+                        anchors.fill: parent
+                        anchors.topMargin: Appearance.sizes.topBarHeight + 6
+                        anchors.bottomMargin: Appearance.sizes.playerBarClearance
+                        slotName: "sidebar.page"
+                        filterModId: UiState.activeModPageId
                     }
                 }
 
@@ -1188,4 +1223,12 @@ ApplicationWindow {
     Shortcut { sequences: ["Ctrl++", "Ctrl+="]; onActivated: window.setZoom(window.zoom + window.zoomStep) }
     Shortcut { sequences: ["Ctrl+-"]; onActivated: window.setZoom(window.zoom - window.zoomStep) }
     Shortcut { sequence: "Ctrl+0"; onActivated: window.setZoom(1.0) }
+    Shortcut {
+        sequence: "Ctrl+Shift+R"
+        enabled: ModManager.modsEnabled
+        onActivated: {
+            ModManager.reloadMods();
+            toast.show("Моды перезагружены");
+        }
+    }
 }

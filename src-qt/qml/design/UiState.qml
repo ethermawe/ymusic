@@ -28,6 +28,24 @@ QtObject {
     property bool immersiveOpen: false
     property bool showingLyrics: false
     property bool showingQueue: false
+    property string activeModPageId: ""
+
+    function openModPage(modId: string) {
+        activeModPageId = modId
+    }
+
+    function closeModPage() {
+        activeModPageId = ""
+    }
+
+    readonly property Connections modPageAutoClose: Connections {
+        target: backend
+        function onViewHeaderChanged() {
+            if (root.activeModPageId.length > 0) {
+                root.activeModPageId = ""
+            }
+        }
+    }
 
     function openImmersive() {
         immersiveOpen = true
