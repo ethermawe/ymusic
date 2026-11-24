@@ -30,4 +30,7 @@ QString logFilePath();
 QString modsDirectory();
 QString modDataDirectory();
 
+/// Creates the directory if needed and opens it in the user's file manager.
+bool openDirectory(const QString &path);
+
 } // namespace ymusic::paths

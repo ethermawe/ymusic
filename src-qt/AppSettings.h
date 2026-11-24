@@ -554,12 +554,11 @@ public:
         QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
         if (base.isEmpty()) base = QDir::homePath() + "/.local/share";
         const QString path = base + "/ymusic/offline";
-        return QDir().mkpath(path) && QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+        return ymusic::paths::openDirectory(path);
     }
 
     Q_INVOKABLE bool openLogsFolder() {
-        const QString path = ymusic::paths::logDirectory();
-        return QDir().mkpath(path) && QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+        return ymusic::paths::openDirectory(ymusic::paths::logDirectory());
     }
 
     Q_INVOKABLE QString cacheSizeText() const {

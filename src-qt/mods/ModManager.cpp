@@ -469,8 +469,7 @@ void ModManager::clearLogs()
 
 bool ModManager::openModsFolder() const
 {
-    const QString path = ymusic::paths::modsDirectory();
-    return QDir().mkpath(path) && QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    return ymusic::paths::openDirectory(ymusic::paths::modsDirectory());
 }
 
 QVariantMap ModManager::installModFromFolder(const QUrl &folderUrl)

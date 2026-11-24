@@ -19,8 +19,12 @@
 
 #include "app/Paths.h"
 
+#include <QDesktopServices>
 #include <QDir>
+#include <QFileInfo>
+#include <QProcess>
 #include <QStandardPaths>
+#include <QUrl>
 
 namespace ymusic::paths {
 
@@ -64,6 +68,69 @@ QString modsDirectory()
 QString modDataDirectory()
 {
     return ensured(dataDirectory() + QStringLiteral("/mod-data"));
+}
+
+bool openDirectory(const QString &path)
+{
+    if (path.trimmed().isEmpty()) {
+        return false;
+    }
+    if (!QDir().mkpath(path)) {
+        return false;
+    }
+    const QString absPath = QFileInfo(path).absoluteFilePath();
+
+#ifdef Q_OS_LINUX
+    // On Wayland/Hyprland/Arch setups, inode/directory is often hijacked by
+    // kitty-open.desktop or broken portal handlers, making QDesktopServices::openUrl
+    // return true while doing nothing. Check the configured default handler first.
+    QString defaultHandler;
+    if (!QStandardPaths::findExecutable(QStringLiteral("xdg-mime")).isEmpty()) {
+        QProcess mimeProc;
+        mimeProc.start(QStringLiteral("xdg-mime"),
+                       {QStringLiteral("query"), QStringLiteral("default"), QStringLiteral("inode/directory")});
+        if (mimeProc.waitForFinished(500) && mimeProc.exitCode() == 0) {
+            defaultHandler = QString::fromUtf8(mimeProc.readAllStandardOutput()).trimmed().toLower();
+        }
+    }
+
+    const bool brokenHandler = defaultHandler.isEmpty()
+        || defaultHandler.contains(QLatin1StringView("kitty"))
+        || defaultHandler.contains(QLatin1StringView("alacritty"))
+        || defaultHandler.contains(QLatin1StringView("foot"))
+        || defaultHandler.contains(QLatin1StringView("wezterm"))
+        || defaultHandler.contains(QLatin1StringView("ghostty"));
+
+    if (!brokenHandler) {
+        const QString xdgOpen = QStandardPaths::findExecutable(QStringLiteral("xdg-open"));
+        if (!xdgOpen.isEmpty() && QProcess::startDetached(xdgOpen, {absPath})) {
+            return true;
+        }
+    }
+
+    const QString desktop = (qEnvironmentVariable("XDG_CURRENT_DESKTOP") + u' '
+                             + qEnvironmentVariable("QT_QPA_PLATFORMTHEME")).toLower();
+    QStringList managers;
+    if (desktop.contains(QLatin1StringView("gnome"))) {
+        managers = {QStringLiteral("nautilus"), QStringLiteral("dolphin"), QStringLiteral("thunar"),
+                    QStringLiteral("nemo"), QStringLiteral("pcmanfm-qt"), QStringLiteral("pcmanfm"), QStringLiteral("caja")};
+    } else if (desktop.contains(QLatin1StringView("xfce"))) {
+        managers = {QStringLiteral("thunar"), QStringLiteral("dolphin"), QStringLiteral("nautilus"),
+                    QStringLiteral("nemo"), QStringLiteral("pcmanfm-qt"), QStringLiteral("pcmanfm"), QStringLiteral("caja")};
+    } else {
+        managers = {QStringLiteral("dolphin"), QStringLiteral("nautilus"), QStringLiteral("thunar"),
+                    QStringLiteral("nemo"), QStringLiteral("pcmanfm-qt"), QStringLiteral("pcmanfm"), QStringLiteral("caja")};
+    }
+
+    for (const QString &candidate : managers) {
+        const QString exe = QStandardPaths::findExecutable(candidate);
+        if (!exe.isEmpty() && QProcess::startDetached(exe, {absPath})) {
+            return true;
+        }
+    }
+#endif
+
+    return QDesktopServices::openUrl(QUrl::fromLocalFile(absPath));
 }
 
 } // namespace ymusic::paths
