@@ -1187,9 +1187,43 @@ ApplicationWindow {
                 const dialog = settingsLoader.item as SettingsDialog;
                 if (dialog && !dialog.visible) {
                     settingsLoader.active = false;
+                    if (ModManager.pendingRestartPrompt) {
+                        restartModsDialog.open();
+                    }
                 }
             })
         }
+    }
+
+    StyledDialog {
+        id: restartModsDialog
+        parent: Overlay.overlay
+        headline: "Перезапустить приложение?"
+        symbol: "restart_alt"
+        iconShape: "cookie9"
+        body: ModManager.overridesNeedRestart
+            ? "Вы изменили моды с подменой вёрстки. Перезапустите клиент, чтобы все изменения применились полностью."
+            : "Вы изменили список активных модов. Перезапустить клиент сейчас для чистого применения всех изменений?"
+        buttons: [
+            TextButton {
+                text: "Позже"
+                variant: TextButton.Text
+                onClicked: {
+                    ModManager.dismissRestartPrompt();
+                    restartModsDialog.close();
+                }
+            },
+            TextButton {
+                text: "Перезапустить"
+                variant: TextButton.Filled
+                symbol: "restart_alt"
+                onClicked: {
+                    restartModsDialog.accept();
+                    backend.saveSession();
+                    ModManager.requestAppRestart();
+                }
+            }
+        ]
     }
 
     CreatePlaylistDialog {

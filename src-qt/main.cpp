@@ -28,6 +28,7 @@
 #include <QMessageBox>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QProcess>
 #include <QSysInfo>
 #include <QTextStream>
 #include <cstdio>
@@ -441,6 +442,11 @@ int main(int argc, char *argv[]) {
     const int exitCode = app.exec();
     instanceServer.close();
     instanceLock.unlock();
+    if (modManager.restartRequested()) {
+        QStringList restartArgs = QCoreApplication::arguments().mid(1);
+        restartArgs.removeAll(QStringLiteral("--safe-mode"));
+        QProcess::startDetached(QCoreApplication::applicationFilePath(), restartArgs);
+    }
     return exitCode;
 }
 

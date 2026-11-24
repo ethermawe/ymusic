@@ -4,6 +4,7 @@
 #include "app/Paths.h"
 #include "mods/ModApi.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -252,14 +253,33 @@ void ModManager::setModEnabled(const QString &modId, bool enabled)
 {
     if (!m_settings || modId.isEmpty()) return;
     QStringList ids = m_settings->enabledModIds();
+    const bool wasEnabled = ids.contains(modId);
     if (enabled) {
-        if (!ids.contains(modId)) {
+        if (!wasEnabled) {
             ids.append(modId);
         }
     } else {
         ids.removeAll(modId);
     }
+    if (wasEnabled != enabled) {
+        m_pendingRestartPrompt = true;
+    }
     m_settings->setEnabledModIds(ids);
+}
+
+void ModManager::dismissRestartPrompt()
+{
+    if (m_pendingRestartPrompt) {
+        m_pendingRestartPrompt = false;
+        emit modsChanged();
+    }
+}
+
+void ModManager::requestAppRestart()
+{
+    m_pendingRestartPrompt = false;
+    m_restartRequested = true;
+    QCoreApplication::quit();
 }
 
 void ModManager::quarantineOverrideMods(const QString &reason)

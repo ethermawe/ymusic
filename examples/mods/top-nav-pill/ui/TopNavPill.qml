@@ -11,14 +11,14 @@ Item {
 
     readonly property int activePage: UiState.activeModPageId.length > 0 ? -1 : backend.page
     readonly property bool showLabels: modApi ? Boolean(modApi.storageGet("showLabels", false)) : false
-    readonly property bool tight: width < (showLabels ? 620 : 420)
+    readonly property bool tight: width < (showLabels ? 640 : 440)
 
     SoftShadow {
         anchors.fill: pill
         radius: pill.radius
-        blur: 14
+        blur: 16
         offset: Qt.vector2d(0, 4)
-        color: Qt.rgba(0, 0, 0, Appearance.colors.dark ? 0.28 : 0.12)
+        color: Qt.rgba(0, 0, 0, Appearance.colors.dark ? 0.30 : 0.12)
     }
 
     Rectangle {
@@ -32,6 +32,26 @@ Item {
         border.color: Appearance.colors.layer0Border
         clip: true
 
+        Behavior on width {
+            enabled: !Appearance.performanceMode
+            ElementMoveFast {}
+        }
+
+        component PillDivider: Item {
+            width: 10
+            height: 20
+            anchors.verticalCenter: parent.verticalCenter
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: 1
+                height: 18
+                radius: 0.5
+                color: Appearance.colors.outlineVariant
+                opacity: 0.55
+            }
+        }
+
         component NavPillButton: RippleButton {
             id: navBtn
             property string symbol: ""
@@ -39,34 +59,42 @@ Item {
             property bool active: false
             property bool showText: root.showLabels && !root.tight
 
+            anchors.verticalCenter: parent.verticalCenter
             height: 34
-            implicitWidth: showText && label.length > 0 ? (btnRow.implicitWidth + 20) : 36
+            implicitWidth: showText && label.length > 0 ? (btnRow.implicitWidth + 22) : 34
             padding: 0
             buttonRadius: height / 2
             colBackground: active ? Appearance.colors.primaryContainer : "transparent"
             colBackgroundHover: active ? Appearance.colors.primaryContainerHover : Appearance.colors.layer2Hover
             tooltip: label
 
-            contentItem: Row {
-                id: btnRow
-                anchors.centerIn: parent
-                spacing: 6
+            Behavior on implicitWidth {
+                enabled: !Appearance.performanceMode
+                ElementMoveFast {}
+            }
 
-                MaterialSymbol {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: navBtn.symbol
-                    iconSize: 19
-                    fill: navBtn.active ? 1 : 0
-                    color: navBtn.active ? Appearance.colors.onPrimaryContainer : Appearance.colors.onSurfaceVariant
-                }
+            contentItem: Item {
+                Row {
+                    id: btnRow
+                    anchors.centerIn: parent
+                    spacing: 6
 
-                StyledText {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: navBtn.showText && navBtn.label.length > 0
-                    text: navBtn.label
-                    font.pixelSize: Appearance.fontSize.smaller
-                    font.weight: navBtn.active ? Font.DemiBold : Font.Normal
-                    color: navBtn.active ? Appearance.colors.onPrimaryContainer : Appearance.colors.onSurface
+                    MaterialSymbol {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: navBtn.symbol
+                        iconSize: 19
+                        fill: navBtn.active ? 1 : 0
+                        color: navBtn.active ? Appearance.colors.onPrimaryContainer : Appearance.colors.onSurfaceVariant
+                    }
+
+                    StyledText {
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: navBtn.showText && navBtn.label.length > 0
+                        text: navBtn.label
+                        font.pixelSize: Appearance.fontSize.smaller
+                        font.weight: navBtn.active ? Font.DemiBold : Font.Normal
+                        color: navBtn.active ? Appearance.colors.onPrimaryContainer : Appearance.colors.onSurface
+                    }
                 }
             }
         }
@@ -74,38 +102,37 @@ Item {
         Row {
             id: pillRow
             anchors.centerIn: parent
-            spacing: 2
+            height: parent.height
+            spacing: 4
 
             // User avatar pill
             RippleButton {
+                anchors.verticalCenter: parent.verticalCenter
                 width: 34
                 height: 34
-                padding: 3
+                padding: 2
                 buttonRadius: width / 2
                 colBackground: "transparent"
                 colBackgroundHover: Appearance.colors.layer2Hover
                 tooltip: backend.loggedIn ? (backend.userName || "Профиль") : "Войти / Настройки"
                 onClicked: UiState.settingsRequested()
 
-                contentItem: ArtworkImage {
-                    anchors.fill: parent
-                    circular: true
-                    squiggly: false
-                    source: backend.userHasAvatar ? backend.userAvatar : ""
-                    placeholderSymbol: "person"
-                    borderWidth: 1
-                    borderColor: Appearance.colors.layer0Border
+                contentItem: Item {
+                    ArtworkImage {
+                        anchors.centerIn: parent
+                        width: 28
+                        height: 28
+                        circular: true
+                        squiggly: false
+                        source: backend.userHasAvatar ? backend.userAvatar : ""
+                        placeholderSymbol: "person"
+                        borderWidth: 1
+                        borderColor: Appearance.colors.layer0Border
+                    }
                 }
             }
 
-            Rectangle {
-                anchors.verticalCenter: parent.verticalCenter
-                width: 1
-                height: 18
-                radius: 0.5
-                color: Appearance.colors.outlineVariant
-                opacity: 0.6
-            }
+            PillDivider {}
 
             NavPillButton {
                 symbol: "waves"
@@ -170,14 +197,7 @@ Item {
                 }
             }
 
-            Rectangle {
-                anchors.verticalCenter: parent.verticalCenter
-                width: 1
-                height: 18
-                radius: 0.5
-                color: Appearance.colors.outlineVariant
-                opacity: 0.6
-            }
+            PillDivider {}
 
             NavPillButton {
                 symbol: "settings"

@@ -53,6 +53,7 @@ class ModManager : public QObject {
     Q_PROPERTY(int activeModCount READ activeModCount NOTIFY modsChanged FINAL)
     Q_PROPERTY(int activeOverrideCount READ activeOverrideCount NOTIFY modsChanged FINAL)
     Q_PROPERTY(bool overridesNeedRestart READ overridesNeedRestart NOTIFY modsChanged FINAL)
+    Q_PROPERTY(bool pendingRestartPrompt READ pendingRestartPrompt NOTIFY modsChanged FINAL)
     Q_PROPERTY(QVariantList mods READ modsVariantList NOTIFY modsChanged FINAL)
     Q_PROPERTY(QVariantList logs READ logsVariantList NOTIFY logsChanged FINAL)
     Q_PROPERTY(QVariantList trackMenuActions READ trackMenuActionsVariantList NOTIFY trackMenuActionsChanged FINAL)
@@ -77,6 +78,8 @@ public:
     int activeModCount() const;
     int activeOverrideCount() const { return m_interceptor.count(); }
     bool overridesNeedRestart() const { return m_overridesNeedRestart; }
+    bool pendingRestartPrompt() const { return m_pendingRestartPrompt; }
+    bool restartRequested() const { return m_restartRequested; }
 
     QVariantList modsVariantList() const;
     QVariantList logsVariantList() const;
@@ -86,6 +89,8 @@ public:
     Q_INVOKABLE ymusic::mods::ModApi *apiForMod(const QString &modId) const;
     Q_INVOKABLE void setModEnabled(const QString &modId, bool enabled);
     Q_INVOKABLE void reloadMods();
+    Q_INVOKABLE void dismissRestartPrompt();
+    Q_INVOKABLE void requestAppRestart();
     Q_INVOKABLE void triggerTrackMenuAction(const QString &modId,
                                             const QString &actionId,
                                             const QString &trackId,
@@ -131,6 +136,8 @@ private:
     bool m_safeMode = false;
     int m_reloadRevision = 0;
     bool m_overridesNeedRestart = false;
+    bool m_pendingRestartPrompt = false;
+    bool m_restartRequested = false;
 
     QList<ModManifest> m_manifests;
     QHash<QString, QStringList> m_overrideConflicts;
