@@ -99,6 +99,18 @@ Item {
             tooltip: qsTr("Назад")
         }
 
+        ModSlotHost {
+            id: topBarCenterSlot
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            x: Math.max(back.visible ? back.x + back.width + 12 : 148, 148)
+            width: Math.max(0, search.x - x - 12)
+            z: 5
+            visible: !search.editing && width >= 180
+            slotName: "topbar.center"
+            slotContext: ({ topBarWidth: root.width, compact: root.compact })
+        }
+
         Row {
             id: rightControls
             anchors.right: parent.right

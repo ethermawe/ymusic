@@ -72,6 +72,7 @@
 Каждый QML-файл слота получает свойства `property var modApi` и `property var slotContext`:
 
 - `window.backdrop` — слой под интерфейсом главного окна (`Main.qml`).
+- `topbar.center` — центральная зона верхней панели (`TopBar.qml`) между заголовком и строкой поиска.
 - `sidebar.page` — собственная страница приложения (появляется в секции «Моды» в сайдбаре).
 - `immersive.backdrop` — фоновый слой в полноэкранном плеере (`ImmersivePlayer.qml`).
 - `immersive.overlay` — верхний слой виджетов/визуализаторов в полноэкранном плеере (`ImmersivePlayer.qml`).
