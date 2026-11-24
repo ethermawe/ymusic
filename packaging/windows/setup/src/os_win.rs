@@ -157,7 +157,7 @@ pub fn apply_window_chrome() {
                 &dark as *const i32 as *const c_void,
                 std::mem::size_of::<i32>() as u32,
             );
-            let corner: i32 = DWMWCP_ROUND;
+            let corner: i32 = DWMWCP_ROUND as i32;
             let _ = DwmSetWindowAttribute(
                 hwnd,
                 DWMWA_WINDOW_CORNER_PREFERENCE as u32,
