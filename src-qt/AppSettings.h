@@ -44,10 +44,6 @@ class AppSettings : public QObject {
     Q_PROPERTY(QString customSchemeVariant READ customSchemeVariant WRITE setCustomSchemeVariant NOTIFY themeChanged)
     Q_PROPERTY(QString customFontFamily READ customFontFamily WRITE setCustomFontFamily NOTIFY appearanceChanged)
     Q_PROPERTY(double roundingScale READ roundingScale WRITE setRoundingScale NOTIFY appearanceChanged)
-    Q_PROPERTY(QString windowBackgroundPath READ windowBackgroundPath WRITE setWindowBackgroundPath NOTIFY appearanceChanged)
-    Q_PROPERTY(double windowBackgroundOpacity READ windowBackgroundOpacity WRITE setWindowBackgroundOpacity NOTIFY appearanceChanged)
-    Q_PROPERTY(double windowBackgroundBlur READ windowBackgroundBlur WRITE setWindowBackgroundBlur NOTIFY appearanceChanged)
-    Q_PROPERTY(double surfaceOpacity READ surfaceOpacity WRITE setSurfaceOpacity NOTIFY appearanceChanged)
     Q_PROPERTY(QString graphicsBackend READ graphicsBackend WRITE setGraphicsBackend NOTIFY changed)
 
     Q_PROPERTY(bool visualizersEnabled READ visualizersEnabled WRITE setVisualizersEnabled NOTIFY visualizersEnabledChanged)
@@ -145,10 +141,6 @@ public:
     }
     QString customFontFamily() const { return m_store.value("ui/customFontFamily", "").toString(); }
     double roundingScale() const { return std::clamp(m_store.value("ui/roundingScale", 1.0).toDouble(), 0.0, 1.6); }
-    QString windowBackgroundPath() const { return m_store.value("ui/windowBackgroundPath", "").toString(); }
-    double windowBackgroundOpacity() const { return std::clamp(m_store.value("ui/windowBackgroundOpacity", 0.40).toDouble(), 0.05, 1.0); }
-    double windowBackgroundBlur() const { return std::clamp(m_store.value("ui/windowBackgroundBlur", 16.0).toDouble(), 0.0, 48.0); }
-    double surfaceOpacity() const { return std::clamp(m_store.value("ui/surfaceOpacity", 1.0).toDouble(), 0.55, 1.0); }
     QString graphicsBackend() const {
         const QString backend = m_store.value("ui/graphicsBackend", "auto").toString();
         return backend == "vulkan" || backend == "opengl" ? backend : "auto";
@@ -314,35 +306,6 @@ public:
         const double clamped = std::clamp(value, 0.0, 1.6);
         if (std::abs(clamped - roundingScale()) > 0.005) {
             save("ui/roundingScale", clamped);
-            emit appearanceChanged();
-        }
-    }
-    void setWindowBackgroundPath(const QString &value) {
-        QString cleaned = value.trimmed();
-        if (QUrl(cleaned).isLocalFile()) cleaned = QUrl(cleaned).toLocalFile();
-        if (cleaned != windowBackgroundPath()) {
-            save("ui/windowBackgroundPath", cleaned);
-            emit appearanceChanged();
-        }
-    }
-    void setWindowBackgroundOpacity(double value) {
-        const double clamped = std::clamp(value, 0.05, 1.0);
-        if (std::abs(clamped - windowBackgroundOpacity()) > 0.005) {
-            save("ui/windowBackgroundOpacity", clamped);
-            emit appearanceChanged();
-        }
-    }
-    void setWindowBackgroundBlur(double value) {
-        const double clamped = std::clamp(value, 0.0, 48.0);
-        if (std::abs(clamped - windowBackgroundBlur()) > 0.1) {
-            save("ui/windowBackgroundBlur", clamped);
-            emit appearanceChanged();
-        }
-    }
-    void setSurfaceOpacity(double value) {
-        const double clamped = std::clamp(value, 0.55, 1.0);
-        if (std::abs(clamped - surfaceOpacity()) > 0.005) {
-            save("ui/surfaceOpacity", clamped);
             emit appearanceChanged();
         }
     }

@@ -352,18 +352,6 @@ void applyBundleToSettings(AppSettings *settings, const QJsonObject &obj)
     if (obj.contains(QStringLiteral("roundingScale"))) {
         settings->setRoundingScale(obj.value(QStringLiteral("roundingScale")).toDouble(1.0));
     }
-    if (obj.contains(QStringLiteral("backgroundPath"))) {
-        settings->setWindowBackgroundPath(obj.value(QStringLiteral("backgroundPath")).toString());
-    }
-    if (obj.contains(QStringLiteral("backgroundOpacity"))) {
-        settings->setWindowBackgroundOpacity(obj.value(QStringLiteral("backgroundOpacity")).toDouble(0.40));
-    }
-    if (obj.contains(QStringLiteral("backgroundBlur"))) {
-        settings->setWindowBackgroundBlur(obj.value(QStringLiteral("backgroundBlur")).toDouble(16.0));
-    }
-    if (obj.contains(QStringLiteral("surfaceOpacity"))) {
-        settings->setSurfaceOpacity(obj.value(QStringLiteral("surfaceOpacity")).toDouble(1.0));
-    }
 }
 
 QJsonObject bundleFromSettings(const AppSettings *settings, const QString &name)
@@ -390,10 +378,6 @@ QJsonObject bundleFromSettings(const AppSettings *settings, const QString &name)
     obj.insert(QStringLiteral("schemeVariant"), settings->customSchemeVariant());
     obj.insert(QStringLiteral("fontFamily"), settings->customFontFamily());
     obj.insert(QStringLiteral("roundingScale"), settings->roundingScale());
-    obj.insert(QStringLiteral("backgroundPath"), settings->windowBackgroundPath());
-    obj.insert(QStringLiteral("backgroundOpacity"), settings->windowBackgroundOpacity());
-    obj.insert(QStringLiteral("backgroundBlur"), settings->windowBackgroundBlur());
-    obj.insert(QStringLiteral("surfaceOpacity"), settings->surfaceOpacity());
     return obj;
 }
 
@@ -835,10 +819,6 @@ void Theme::resetThemeDefaults()
     m_settings->setCustomSchemeVariant(QStringLiteral("tonal_spot"));
     m_settings->setCustomFontFamily(QString());
     m_settings->setRoundingScale(1.0);
-    m_settings->setWindowBackgroundPath(QString());
-    m_settings->setWindowBackgroundOpacity(0.40);
-    m_settings->setWindowBackgroundBlur(16.0);
-    m_settings->setSurfaceOpacity(1.0);
     reload();
 }
 

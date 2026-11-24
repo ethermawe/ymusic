@@ -62,8 +62,6 @@ int main(int argc, char *argv[]) {
     settings.setCustomAccentColor(QStringLiteral("#3b82f6"));
     settings.setCustomSchemeVariant(QStringLiteral("vibrant"));
     settings.setRoundingScale(1.35);
-    settings.setSurfaceOpacity(0.85);
-    settings.setWindowBackgroundBlur(24.0);
 
     const QString exportedPath = tmpDir.path() + QStringLiteral("/neon.ymtheme");
     const QVariantMap exportRes = theme.exportThemeFile(QUrl::fromLocalFile(exportedPath));
@@ -71,15 +69,12 @@ int main(int argc, char *argv[]) {
 
     theme.resetThemeDefaults();
     CHECK(qFuzzyCompare(settings.roundingScale(), 1.0));
-    CHECK(qFuzzyCompare(settings.surfaceOpacity(), 1.0));
 
     const QVariantMap importRes = theme.importThemeFile(QUrl::fromLocalFile(exportedPath), true);
     CHECK(importRes.value(QStringLiteral("ok")).toBool());
     CHECK(settings.customAccentColor() == QStringLiteral("#3b82f6"));
     CHECK(settings.customSchemeVariant() == QStringLiteral("vibrant"));
     CHECK(qFuzzyCompare(settings.roundingScale(), 1.35));
-    CHECK(qFuzzyCompare(settings.surfaceOpacity(), 0.85));
-    CHECK(qFuzzyCompare(settings.windowBackgroundBlur(), 24.0));
     CHECK(settings.themePreset().startsWith(QStringLiteral("user:")));
 
     CHECK(theme.deleteUserTheme(settings.themePreset()));

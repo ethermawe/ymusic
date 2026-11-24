@@ -54,12 +54,6 @@ Item {
         return idx >= 0 ? idx : 0;
     }
 
-    function fileBaseLabel(path: string): string {
-        if (!path || path.length === 0) return "Не выбрано";
-        const parts = path.split(/[\\/]/);
-        return parts.length > 0 ? parts[parts.length - 1] : path;
-    }
-
     Component.onCompleted: {
         fontOptions = ["По умолчанию (Google Sans Flex / система)"].concat(Theme.availableFonts());
     }
@@ -426,80 +420,6 @@ Item {
             }
 
             ContentSection {
-                title: "Фон окна и прозрачность"
-                symbol: "wallpaper"
-
-                RowLayout {
-                    x: 8
-                    width: parent.width - 16
-                    spacing: 8
-
-                    Column {
-                        Layout.fillWidth: true
-                        spacing: 2
-                        StyledText {
-                            width: parent.width
-                            text: "Фоновое изображение окна"
-                            elide: Text.ElideRight
-                        }
-                        StyledText {
-                            width: parent.width
-                            text: root.fileBaseLabel(appSettings.windowBackgroundPath)
-                            font.pixelSize: Appearance.fontSize.smaller
-                            color: Appearance.colors.onSurfaceVariant
-                            elide: Text.ElideMiddle
-                        }
-                    }
-
-                    TextButton {
-                        variant: TextButton.Tonal
-                        symbol: "file_open"
-                        text: "Выбрать…"
-                        onClicked: bgImageDialog.open()
-                    }
-                    TextButton {
-                        visible: appSettings.windowBackgroundPath.length > 0
-                        variant: TextButton.Outlined
-                        symbol: "close"
-                        text: "Убрать"
-                        onClicked: appSettings.windowBackgroundPath = ""
-                    }
-                }
-
-                ConfigSlider {
-                    text: "Видимость фона"
-                    enabled: appSettings.windowBackgroundPath.length > 0
-                    from: 0.05
-                    to: 1.0
-                    stepSize: 0.05
-                    value: appSettings.windowBackgroundOpacity
-                    valueText: Math.round(appSettings.windowBackgroundOpacity * 100) + "%"
-                    onMoved: (value) => appSettings.windowBackgroundOpacity = Number(value.toFixed(2))
-                }
-
-                ConfigSlider {
-                    text: "Размытие фона"
-                    enabled: appSettings.windowBackgroundPath.length > 0
-                    from: 0
-                    to: 48
-                    stepSize: 1
-                    value: appSettings.windowBackgroundBlur
-                    valueText: Math.round(appSettings.windowBackgroundBlur) + " px"
-                    onMoved: (value) => appSettings.windowBackgroundBlur = Math.round(value)
-                }
-
-                ConfigSlider {
-                    text: "Непрозрачность панелей"
-                    from: 0.55
-                    to: 1.0
-                    stepSize: 0.02
-                    value: appSettings.surfaceOpacity
-                    valueText: Math.round(appSettings.surfaceOpacity * 100) + "%"
-                    onMoved: (value) => appSettings.surfaceOpacity = Number(value.toFixed(2))
-                }
-            }
-
-            ContentSection {
                 title: "Темы пользователей и обмен (.ymtheme)"
                 symbol: "save"
 
@@ -560,7 +480,7 @@ Item {
                 }
 
                 NoteText {
-                    text: "Экспортированный файл .ymtheme хранит палитру, стиль M3, шрифт, скругление, фон и прозрачность панелей."
+                    text: "Экспортированный файл .ymtheme хранит палитру, стиль M3, шрифт и скругление углов."
                 }
             }
 
@@ -1531,14 +1451,6 @@ Item {
         id: accentColorDialog
         title: "Выбор акцентного цвета"
         onAccepted: appSettings.customAccentColor = String(selectedColor)
-    }
-
-    FileDialog {
-        id: bgImageDialog
-        title: "Выберите изображение для фона окна"
-        fileMode: FileDialog.OpenFile
-        nameFilters: ["Изображения (*.png *.jpg *.jpeg *.webp *.bmp)"]
-        onAccepted: appSettings.windowBackgroundPath = String(selectedFile)
     }
 
     FileDialog {
