@@ -49,6 +49,17 @@ Item {
         border.width: 1
         border.color: Qt.rgba(root.scheme.outlineVariant.r, root.scheme.outlineVariant.g, root.scheme.outlineVariant.b, 0.4)
 
+        ModSlotHost {
+            anchors.fill: parent
+            z: 0
+            slotName: "playerBar.overlay"
+            slotContext: ({
+                scheme: root.scheme,
+                compact: root.compact,
+                twoRow: root.twoRow
+            })
+        }
+
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.RightButton

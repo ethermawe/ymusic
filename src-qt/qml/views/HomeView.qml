@@ -122,6 +122,14 @@ Flickable {
             font.weight: Font.Bold
         }
 
+        ModSlotHost {
+            layoutMode: "column"
+            width: parent.width
+            visible: implicitHeight > 0
+            slotName: "home.top"
+            slotContext: ({ narrow: root.narrow })
+        }
+
         // Now Playing Spotlight Hero
         Rectangle {
             id: spotlightCard
@@ -540,6 +548,14 @@ Flickable {
             items: root.uncategorizedCards
             showsSeeAll: true
             onSeeAllClicked: backend.loadPlaylists()
+        }
+
+        ModSlotHost {
+            layoutMode: "column"
+            width: parent.width
+            visible: implicitHeight > 0
+            slotName: "home.sections"
+            slotContext: ({ narrow: root.narrow })
         }
 
         EmptyState {

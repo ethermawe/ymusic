@@ -367,6 +367,23 @@ QVariantList ModManager::slotEntries(const QString &slotName) const
     return entries;
 }
 
+bool ModManager::hasSlot(const QString &slotName) const
+{
+    if (!modsEnabled() || slotName.isEmpty()) return false;
+    const QStringList enabledIds = m_settings ? m_settings->enabledModIds() : QStringList();
+    for (const ModManifest &m : m_manifests) {
+        if (!m.valid || !enabledIds.contains(m.id)) continue;
+        if (slotName == QLatin1StringView("background.host")) {
+            if (!m.scriptEntry.isEmpty()) return true;
+        } else if (slotName == QLatin1StringView("settings")) {
+            if (!m.settingsEntry.isEmpty()) return true;
+        } else if (m.hasPermission(QStringLiteral("ui:slots")) && m.slotsMap.contains(slotName)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 ModApi *ModManager::apiForMod(const QString &modId) const
 {
     return m_apis.value(modId).data();

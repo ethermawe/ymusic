@@ -71,9 +71,10 @@ Item {
             model: root.layoutMode === "column" ? root.entries : []
             delegate: ModEntryLoader {
                 required property var modelData
+                readonly property Item loadedItem: item as Item
                 entryData: modelData
                 width: colHost.width
-                height: item ? Math.max(item.implicitHeight, item.height) : 0
+                height: loadedItem ? Math.max(loadedItem.implicitHeight, loadedItem.height) : 0
             }
         }
     }
@@ -88,10 +89,11 @@ Item {
             model: root.layoutMode === "row" ? root.entries : []
             delegate: ModEntryLoader {
                 required property var modelData
+                readonly property Item loadedItem: item as Item
                 entryData: modelData
                 anchors.verticalCenter: parent.verticalCenter
-                width: item ? Math.max(item.implicitWidth, item.width) : 0
-                height: item ? Math.max(item.implicitHeight, item.height) : rowHost.height
+                width: loadedItem ? Math.max(loadedItem.implicitWidth, loadedItem.width) : 0
+                height: loadedItem ? Math.max(loadedItem.implicitHeight, loadedItem.height) : rowHost.height
             }
         }
     }

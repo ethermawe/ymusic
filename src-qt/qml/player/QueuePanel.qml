@@ -45,6 +45,19 @@ Item {
             color: root.scheme.onSurfaceVariant
         }
 
+        ModSlotHost {
+            layoutMode: "row"
+            Layout.preferredWidth: implicitWidth
+            Layout.preferredHeight: 32
+            spacing: 4
+            visible: implicitWidth > 0
+            slotName: "queue.header"
+            slotContext: ({
+                scheme: root.scheme,
+                count: backend.queue.count
+            })
+        }
+
         IconButton {
             visible: backend.queue.count > 0
             symbol: "delete_sweep"

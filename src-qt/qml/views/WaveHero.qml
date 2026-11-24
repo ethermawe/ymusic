@@ -1291,6 +1291,13 @@ FocusScope {
         }
     }
 
+    ModSlotHost {
+        anchors.fill: parent
+        z: 15
+        slotName: "wave.overlay"
+        slotContext: ({ inWave: root.inWave, applying: root.applying })
+    }
+
     Connections {
         target: backend
         function onLoggedInChanged() {

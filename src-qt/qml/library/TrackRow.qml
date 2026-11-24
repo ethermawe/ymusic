@@ -285,6 +285,26 @@ T.AbstractButton {
                 onClicked: root.openTrackMenu()
             }
 
+            Loader {
+                anchors.verticalCenter: parent.verticalCenter
+                active: ModManager.reloadRevision >= 0 && ModManager.hasSlot("trackRow.badges")
+                visible: active && width > 0
+                width: item ? (item as Item).implicitWidth : 0
+                height: 28
+                sourceComponent: ModSlotHost {
+                    layoutMode: "row"
+                    height: 28
+                    spacing: 4
+                    slotName: "trackRow.badges"
+                    slotContext: ({
+                        track: root.model,
+                        index: root.index,
+                        isCurrent: root.isCurrent,
+                        hovered: root.hovered
+                    })
+                }
+            }
+
             IconButton {
                 id: likeButton
                 anchors.verticalCenter: parent.verticalCenter

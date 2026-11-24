@@ -265,6 +265,20 @@ Item {
                 tooltip: "Удалить плейлист"
                 onClicked: deletePlaylistDialog.open()
             }
+
+            ModSlotHost {
+                layoutMode: "row"
+                height: 40
+                spacing: 8
+                visible: implicitWidth > 0
+                slotName: "collection.actions"
+                slotContext: ({
+                    title: root.title,
+                    isArtist: root.isArtist,
+                    kind: backend.collectionKind,
+                    playlistKey: backend.activePlaylistKey
+                })
+            }
         }
     }
 

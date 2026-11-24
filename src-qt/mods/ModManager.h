@@ -86,6 +86,7 @@ public:
     QVariantList trackMenuActionsVariantList() const;
 
     Q_INVOKABLE QVariantList slotEntries(const QString &slotName) const;
+    Q_INVOKABLE bool hasSlot(const QString &slotName) const;
     Q_INVOKABLE ymusic::mods::ModApi *apiForMod(const QString &modId) const;
     Q_INVOKABLE void setModEnabled(const QString &modId, bool enabled);
     Q_INVOKABLE void reloadMods();

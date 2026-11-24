@@ -71,6 +71,23 @@ Item {
             color: root.scheme.onSurface
         }
 
+        ModSlotHost {
+            layoutMode: "row"
+            anchors.right: jumpButton.visible ? jumpButton.left : parent.right
+            anchors.rightMargin: jumpButton.visible ? 8 : 0
+            anchors.verticalCenter: parent.verticalCenter
+            height: 28
+            spacing: 4
+            visible: implicitWidth > 0
+            slotName: "lyrics.header"
+            slotContext: ({
+                scheme: root.scheme,
+                trackId: UiState.lyricsTrackId,
+                synced: UiState.lyricsSynced,
+                wordSynced: UiState.lyricsWordSynced
+            })
+        }
+
         Rectangle {
             id: jumpButton
             anchors.right: parent.right
