@@ -78,11 +78,24 @@ T.Menu {
         spacing: 2
     }
 
-    background: Rectangle {
+    background: Item {
         implicitWidth: 220
-        radius: Appearance.rounding.normal
-        color: root.scheme.surfaceContainer
-        border.width: 1
-        border.color: root.scheme.layer0Border
+
+        SoftShadow {
+            anchors.fill: panel
+            radius: panel.radius
+            blur: 22
+            offset: Qt.vector2d(0, 8)
+            color: Qt.rgba(0, 0, 0, root.scheme.dark ? 0.38 : 0.16)
+        }
+
+        Rectangle {
+            id: panel
+            anchors.fill: parent
+            radius: Appearance.rounding.normal
+            color: root.scheme.surfaceContainerHigh
+            border.width: 1
+            border.color: root.scheme.layer0Border
+        }
     }
 }

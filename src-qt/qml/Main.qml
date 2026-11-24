@@ -150,12 +150,13 @@ ApplicationWindow {
             const s = Math.max(0.01, window.zoom);
             const lx = x / s;
             const ly = y / s;
-            const menuH = Math.max(380, trackMenu.implicitHeight + 16);
-            const clampedX = Math.max(12, Math.min(lx - trackMenu.width, window.layoutWidth - trackMenu.width - 12));
-            const clampedY = Math.max(12, Math.min(ly, window.layoutHeight - menuH));
-            trackMenu.x = clampedX;
-            trackMenu.y = clampedY;
-            trackMenu.popup();
+            const menuW = Math.max(240, trackMenu.implicitWidth);
+            const menuH = Math.max(260, trackMenu.implicitHeight);
+            const fitsRight = lx + menuW <= window.layoutWidth - 12;
+            const clampedX = Math.max(12, Math.min(fitsRight ? lx : lx - menuW, window.layoutWidth - menuW - 12));
+            const fitsDown = ly + menuH <= window.layoutHeight - 12;
+            const clampedY = Math.max(12, Math.min(fitsDown ? ly : ly - menuH, window.layoutHeight - menuH - 12));
+            trackMenu.popup(null, clampedX, clampedY);
         }
     }
 

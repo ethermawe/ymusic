@@ -34,7 +34,8 @@ T.MenuItem {
 
     implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset,
                             implicitContentWidth + leftPadding + rightPadding)
-    implicitHeight: 40
+    implicitHeight: visible ? 40 : 0
+    height: visible ? implicitHeight : 0
     leftPadding: 12
     rightPadding: subMenu !== null || trailingSymbol.length > 0 ? 36 : 16
     spacing: 12

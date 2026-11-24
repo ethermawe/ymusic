@@ -30,10 +30,13 @@ T.AbstractButton {
     leftPadding: 14
     rightPadding: 14
 
-    function openTrackMenu() {
+    function openTrackMenu(lx, ly) {
         const appWindow = root.Window.window;
         if (appWindow && root.model) {
-            const position = root.mapToItem(appWindow.contentItem, root.width - 36, root.height);
+            const hasCursor = lx !== undefined && ly !== undefined;
+            const position = hasCursor
+                ? root.mapToItem(appWindow.contentItem, lx, ly)
+                : moreButton.mapToItem(appWindow.contentItem, moreButton.width, moreButton.height);
             backend.requestTrackMenu(root.model.id, root.model.title, root.model.available, position.x, position.y);
         }
     }
@@ -273,6 +276,7 @@ T.AbstractButton {
             }
 
             IconButton {
+                id: moreButton
                 anchors.verticalCenter: parent.verticalCenter
                 symbol: "more_horiz"
                 size: 28
@@ -359,6 +363,6 @@ T.AbstractButton {
 
     TapHandler {
         acceptedButtons: Qt.RightButton
-        onTapped: root.openTrackMenu()
+        onTapped: (eventPoint) => root.openTrackMenu(eventPoint.position.x, eventPoint.position.y)
     }
 }
