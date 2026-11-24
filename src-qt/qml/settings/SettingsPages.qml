@@ -234,10 +234,11 @@ Item {
                                 id: swatchBtn
                                 required property string modelData
                                 readonly property bool isCurrent: appSettings.customAccentColor.toLowerCase() === modelData.toLowerCase()
-                                width: 32
-                                height: 32
+                                width: 36
+                                height: 36
                                 padding: 0
-                                buttonRadius: width / 2
+                                buttonRadius: Appearance.rounding.small
+                                buttonRadiusPressed: Appearance.rounding.verySmall
                                 colBackground: modelData
                                 colBackgroundHover: modelData
                                 backgroundItem.border.width: isCurrent ? 2 : 1
@@ -420,7 +421,7 @@ Item {
             }
 
             ContentSection {
-                title: "Темы пользователей и обмен (.ymtheme)"
+                title: "Пользовательские темы"
                 symbol: "save"
 
                 RowLayout {
