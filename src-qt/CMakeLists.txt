@@ -112,6 +112,8 @@ set(YMUSIC_CPP_SOURCES
     app/Fonts.cpp
     app/Paths.h
     app/Paths.cpp
+    app/QrImageProvider.h
+    app/QrImageProvider.cpp
     app/UpdateChecker.h
     app/UpdateChecker.cpp
     app/WindowController.h

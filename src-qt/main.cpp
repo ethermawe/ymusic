@@ -38,6 +38,7 @@
 
 #include "YMusicBackend.h"
 #include "TrackModel.h"
+#include "app/QrImageProvider.h"
 #include "CardModel.h"
 #include "ThemeManager.h"
 #include "AppSettings.h"
@@ -302,6 +303,7 @@ int main(int argc, char *argv[]) {
     engine.addUrlInterceptor(modManager.urlInterceptor());
     engine.setNetworkAccessManagerFactory(new CustomNamFactory);
     engine.addImageProvider(QStringLiteral("art"), new ymusic::ArtworkImageProvider);
+    engine.addImageProvider(QStringLiteral("qr"), new ymusic::QrImageProvider);
     engine.rootContext()->setContextProperty("backend", &backend);
     engine.rootContext()->setContextProperty("themeManager", &ThemeManager::instance());
     engine.rootContext()->setContextProperty("appSettings", &settings);
