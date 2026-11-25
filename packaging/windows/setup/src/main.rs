@@ -325,9 +325,16 @@ fn main() {
     });
 
     let weak_drag = ui.as_weak();
+    let native_drag_active = std::cell::Cell::new(false);
     ui.on_drag_requested(move |dx, dy| {
         if dx == 0.0 && dy == 0.0 {
-            let _ = os_impl::begin_native_drag();
+            native_drag_active.set(os_impl::begin_native_drag());
+            return;
+        }
+        // On Windows, WM_NCLBUTTONDOWN(HTCAPTION) handles the entire drag natively
+        // and consumes WM_LBUTTONUP, so Slint's TouchArea may stay `pressed` afterward.
+        // Never run the manual set_position fallback once native drag took over.
+        if native_drag_active.get() {
             return;
         }
         if let Some(u) = weak_drag.upgrade() {
