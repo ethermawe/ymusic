@@ -7,7 +7,7 @@ use std::process::Command;
 use std::ptr::{null, null_mut};
 use std::time::{Duration, Instant};
 
-use windows_sys::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM, MAX_PATH, S_OK, TRUE};
+use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, MAX_PATH, S_OK, TRUE};
 use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
 use windows_sys::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
@@ -33,7 +33,7 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, IsWindowVisible, SendMessageW, HTCAPTION, WM_NCLBUTTONDOWN,
 };
-use windows_sys::core::GUID;
+use windows_sys::core::{BOOL, GUID};
 
 const UNINSTALL_REG_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\YMusic";
 const APP_DISPLAY_NAME: &str = "Yandex Music";
@@ -192,7 +192,6 @@ pub fn stop_running_app(_install_dir: &Path) -> Result<(), String> {
     let target_name = APP_EXE_NAME.to_ascii_lowercase();
 
     let wait_deadline = Instant::now() + Duration::from_secs(4);
-    let mut terminated = false;
 
     loop {
         let pids = find_pids_by_name(&target_name, my_pid);
@@ -200,8 +199,7 @@ pub fn stop_running_app(_install_dir: &Path) -> Result<(), String> {
             break;
         }
 
-        if Instant::now() >= wait_deadline && !terminated {
-            terminated = true;
+        if Instant::now() >= wait_deadline {
             for pid in pids {
                 unsafe {
                     let handle = OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid);
