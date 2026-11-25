@@ -25,39 +25,100 @@ Item {
     id: root
 
     property string text
-    function show(message: string) {
-        root.text = message
-        root.opacity = 1
-        root.scale = 1
-        hide.restart()
+    property bool shown: false
+    property real lifeProgress: 1.0
+    readonly property int durationMs: 2600
+
+    readonly property string effectiveSymbol: {
+        const lower = (root.text || "").toLowerCase()
+        if (lower.indexOf("загруз") >= 0 || lower.indexOf("скачан") >= 0) return "download_done"
+        if (lower.indexOf("скопирован") >= 0 || lower.indexOf("ссылка") >= 0) return "content_copy"
+        if (lower.indexOf("перезагруж") >= 0 || lower.indexOf("сброшен") >= 0) return "refresh"
+        if (lower.indexOf("не нравится") >= 0 || lower.indexOf("скрыт") >= 0) return "thumb_down"
+        if (lower.indexOf("удалён") >= 0 || lower.indexOf("удален") >= 0) return "delete"
+        return "check"
     }
 
-    implicitWidth: row.implicitWidth + 36
-    implicitHeight: 48
-    visible: opacity > 0
-    opacity: 0
-    scale: 0.9
+    function show(message: string) {
+        root.text = message
+        root.shown = true
+        progressAnim.stop()
+        root.lifeProgress = 1.0
+        hide.interval = root.durationMs
+        hide.restart()
+        if (!Appearance.performanceMode) {
+            progressAnim.restart()
+        }
+    }
+
+    function dismiss() {
+        hide.stop()
+        progressAnim.stop()
+        root.shown = false
+    }
+
+    implicitWidth: Math.min(520, row.implicitWidth + 32)
+    implicitHeight: 44
+    visible: opacity > 0.01
+    opacity: shown ? 1 : 0
+    scale: shown ? 1 : 0.94
+
+    property real slideY: shown ? 0 : -10
+    transform: Translate { y: root.slideY }
 
     Behavior on opacity {
-        NumberAnimation { duration: Appearance.duration(250); easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Appearance.duration(root.shown ? 200 : 160); easing.type: Easing.OutCubic }
     }
     Behavior on scale {
         ElementMoveSmall {}
     }
+    Behavior on slideY {
+        enabled: !Appearance.performanceMode
+        ElementMoveSmall {}
+    }
+
+    NumberAnimation {
+        id: progressAnim
+        target: root
+        property: "lifeProgress"
+        from: 1.0
+        to: 0.0
+        duration: root.durationMs
+        easing.type: Easing.Linear
+    }
 
     Timer {
         id: hide
-        interval: 2200
-        onTriggered: {
-            root.opacity = 0
-            root.scale = 0.9
-        }
+        interval: root.durationMs
+        onTriggered: root.dismiss()
+    }
+
+    SoftShadow {
+        anchors.fill: card
+        radius: card.radius
+        blur: 20
+        offset: Qt.vector2d(0, 6)
+        color: Qt.rgba(0, 0, 0, Appearance.colors.dark ? 0.42 : 0.14)
     }
 
     Rectangle {
+        id: card
         anchors.fill: parent
         radius: height / 2
-        color: Appearance.colors.inverseSurface
+        color: Appearance.colors.surfaceContainerHighest
+        border.width: 1
+        border.color: Qt.alpha(Appearance.colors.primary, Appearance.colors.dark ? 0.28 : 0.22)
+        clip: true
+
+        // Subtle draining accent strip at bottom
+        Rectangle {
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            height: 2
+            width: parent.width * root.lifeProgress
+            color: Qt.alpha(Appearance.colors.primary, 0.72)
+            visible: !Appearance.performanceMode && root.shown
+        }
     }
 
     Row {
@@ -67,20 +128,41 @@ Item {
 
         ShapeIcon {
             anchors.verticalCenter: parent.verticalCenter
-            size: 30
-            iconSize: 17
-            shape: "softBurst"
-            symbol: "auto_awesome"
-            color: Appearance.colors.inversePrimary
-            iconColor: Appearance.colors.inverseSurface
+            size: 28
+            iconSize: 16
+            shape: "cookie6"
+            symbol: root.effectiveSymbol
+            color: Appearance.colors.primaryContainer
+            iconColor: Appearance.colors.onPrimaryContainer
         }
 
         StyledText {
             anchors.verticalCenter: parent.verticalCenter
+            width: Math.min(implicitWidth, 440)
+            elide: Text.ElideRight
             text: root.text
-            color: Appearance.colors.inverseOnSurface
-            font.pixelSize: Appearance.fontSize.normal
-            font.weight: Font.DemiBold
+            color: Appearance.colors.onSurface
+            font.pixelSize: Appearance.fontSize.small
+            font.weight: Font.Medium
         }
+    }
+
+    HoverHandler {
+        cursorShape: Qt.PointingHandCursor
+        onHoveredChanged: {
+            if (!root.shown) return
+            if (hovered) {
+                hide.stop()
+                progressAnim.pause()
+            } else {
+                hide.interval = Math.max(600, Math.round(root.durationMs * root.lifeProgress))
+                hide.restart()
+                progressAnim.resume()
+            }
+        }
+    }
+
+    TapHandler {
+        onTapped: root.dismiss()
     }
 }

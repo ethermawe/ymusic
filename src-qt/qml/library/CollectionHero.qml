@@ -90,6 +90,7 @@ Item {
             id: cover
             anchors.fill: parent
             opacity: artworkBox.awaitingFlight ? 0 : 1
+            loading: backend.listLoading
             source: root.artworkUrl
             fallbackKey: root.title
             placeholderSymbol: root.isArtist ? "artists" : (backend.page === 2 ? "favorite" : "library_music")

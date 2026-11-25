@@ -1,4 +1,5 @@
 pragma ComponentBehavior: Bound
+import QtCore
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Dialogs
@@ -117,7 +118,12 @@ StyledMenu {
         enabled: root.trackAvailable
         onTriggered: {
             saveDialog.pendingTrackId = root.trackId;
-            saveDialog.selectedFile = "";
+            const rawName = (root.trackTitle || "track").replace(/[\\/:*?"<>|]/g, "_").trim();
+            const safeName = rawName.length > 0 ? rawName : "track";
+            const ext = backend.audioQuality === "lossless" ? "flac" : "mp3";
+            const folder = String(saveDialog.currentFolder || StandardPaths.writableLocation(StandardPaths.MusicLocation));
+            const sep = folder.endsWith("/") ? "" : "/";
+            saveDialog.selectedFile = folder + sep + safeName + "." + ext;
             saveDialog.open();
         }
     }

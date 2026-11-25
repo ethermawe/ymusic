@@ -37,10 +37,11 @@ Item {
     property string fallbackKey: source.toString().length > 0 ? source.toString() : placeholderSymbol
     property bool cache: true
     property bool showArtwork: true
+    property bool loading: false
     property color blankTopColor: Appearance.colors.surfaceContainerHigh
     property color blankBottomColor: Appearance.colors.surfaceContainer
     readonly property bool ready: showArtwork && front.status === Image.Ready && appSettings.coversEnabled && source.toString().length > 0
-    readonly property bool showArtPlaceholder: showArtwork && (!appSettings.coversEnabled || source.toString().length === 0 || front.status === Image.Error)
+    readonly property bool showArtPlaceholder: showArtwork && !loading && (!appSettings.coversEnabled || source.toString().length === 0 || front.status === Image.Error)
     property int maximumPixelSize: 2048
     readonly property int pixelSize: {
         const ratio = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1

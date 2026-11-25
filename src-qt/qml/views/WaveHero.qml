@@ -1,21 +1,3 @@
-/*
- * ymusic — native Yandex Music desktop client
- * Copyright (C) 2026  ethermawe
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
-
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
@@ -911,6 +893,7 @@ FocusScope {
                             squiggleColor: root.accentPrimary
                             dim: coreHover.hovered ? 0.24 : 0.34
                             Behavior on dim { ElementMoveFast {} }
+                            loading: backend.listLoading || root.applying || !root.inWave
                             source: appSettings.waveOrbArtwork && root.inWave && backend.hasCover ? backend.nowCover : ""
                             placeholderSymbol: "my_wave"
                             fallbackKey: backend.listTitle || "Моя волна"
