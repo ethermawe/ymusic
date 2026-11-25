@@ -110,14 +110,25 @@ Item {
         border.color: Qt.alpha(Appearance.colors.primary, Appearance.colors.dark ? 0.28 : 0.22)
         clip: true
 
-        // Subtle draining accent strip at bottom
-        Rectangle {
+        // Subtle draining accent strip inset inside the pill's flat bottom edge
+        Item {
             anchors.left: parent.left
+            anchors.right: parent.right
             anchors.bottom: parent.bottom
+            anchors.leftMargin: card.radius
+            anchors.rightMargin: card.radius
+            anchors.bottomMargin: 3
             height: 2
-            width: parent.width * root.lifeProgress
-            color: Qt.alpha(Appearance.colors.primary, 0.72)
             visible: !Appearance.performanceMode && root.shown
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                radius: 1
+                width: parent.width * root.lifeProgress
+                color: Qt.alpha(Appearance.colors.primary, 0.72)
+            }
         }
     }
 
