@@ -235,6 +235,32 @@ Item {
                 onClicked: backend.startArtistWave()
             }
 
+            TextButton {
+                visible: !root.isArtist && (backend.collectionKind === "album" || backend.collectionKind === "playlist" || backend.collectionKind === "own_playlist") && backend.loggedIn
+                variant: TextButton.Tonal
+                wavy: true
+                symbol: "my_wave"
+                text: "Моя волна"
+                onClicked: backend.feature({action: "start_collection_wave"})
+            }
+
+            TextButton {
+                visible: !root.isArtist && backend.page === 2 && backend.loggedIn
+                variant: TextButton.Outlined
+                symbol: "thumb_down"
+                text: "Не нравится"
+                onClicked: backend.feature({action: "open_dislikes"})
+            }
+
+            IconButton {
+                visible: root.isArtist && backend.loggedIn
+                symbol: "thumb_down"
+                size: 40
+                iconSize: 20
+                tooltip: "Не рекомендовать артиста"
+                onClicked: backend.feature({action: "dislike_artist"})
+            }
+
             IconButton {
                 visible: backend.loggedIn && backend.collectionKind !== "" && backend.collectionKind !== "own_playlist"
                 symbol: backend.collectionLiked ? "favorite" : "favorite_border"

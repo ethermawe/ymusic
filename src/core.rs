@@ -270,6 +270,8 @@ pub struct State {
     pub ai_strict_tracks: bool,
     pub show_ai_labels: bool,
     pub history_generation: Option<u64>,
+    pub current_play_id: String,
+    pub play_scrobbled: bool,
     pub view_cover_uri: Option<String>,
     pub api: Option<Api>,
     pub uid: u64,
@@ -1086,7 +1088,19 @@ impl YMusicCore {
                     Err(e) => self.send_feature("wave_error", serde_json::json!({"message": e.to_string()})),
                 }
             }
-            "history" => self.send_history_tracks(crate::history::load()),
+            "history" => {
+                self.send_history_tracks(crate::history::load());
+                if let Some(api) = self.api() {
+                    let this = self.clone();
+                    self.rt_handle.spawn(async move {
+                        if let Ok(remote) = api.music_history().await {
+                            if let Ok(merged) = tokio::task::spawn_blocking(move || crate::history::merge_remote(remote)).await.unwrap_or(Err(std::io::Error::other("join"))) {
+                                this.send_history_tracks(merged);
+                            }
+                        }
+                    });
+                }
+            }
             "clear_history" => {
                 if crate::history::clear().is_ok() { self.send_history_tracks(Vec::new()); }
                 else { self.error("Не удалось очистить историю"); }
@@ -1389,6 +1403,76 @@ impl YMusicCore {
                 let Some(id) = cmd["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string) else { return };
                 let title = cmd["title"].as_str().filter(|s| !s.is_empty()).unwrap_or("Трек").to_string();
                 self.open_similar_tracks(id, title);
+            }
+            "start_collection_wave" => {
+                let target = {
+                    let st = self.state.lock().unwrap();
+                    if let Some(album_id) = st.active_album_id.clone() {
+                        Some((format!("album:{album_id}"), format!("Волна по альбому")))
+                    } else if let Some(p) = st.active_playlist.clone() {
+                        Some((format!("playlist:{}_{}", p.uid, p.kind), format!("Волна: {}", p.title)))
+                    } else if let Some((artist_id, name)) = st.viewed_artist_id.clone() {
+                        Some((format!("artist:{artist_id}"), format!("Волна: {name}")))
+                    } else {
+                        None
+                    }
+                };
+                if let Some((seed, title)) = target {
+                    self.start_wave(seed, title);
+                }
+            }
+            "open_dislikes" => {
+                self.open_disliked_tracks();
+            }
+            "dislike_track" => {
+                let Some(id) = cmd["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string) else { return };
+                let Some(api) = self.api() else { self.error("Нужен вход в аккаунт"); return };
+                let uid = {
+                    let mut st = self.state.lock().unwrap();
+                    st.liked_ids.remove(&id);
+                    st.uid
+                };
+                let this = self.clone();
+                self.rt_handle.spawn(async move {
+                    match api.dislike_track(uid, &id).await {
+                        Ok(()) => this.notify("Трек добавлен в «Не нравится»"),
+                        Err(e) => this.error(format!("Дизлайк трека: {e}")),
+                    }
+                });
+            }
+            "undislike_track" => {
+                let Some(id) = cmd["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string) else { return };
+                let Some(api) = self.api() else { self.error("Нужен вход в аккаунт"); return };
+                let uid = self.state.lock().unwrap().uid;
+                let this = self.clone();
+                self.rt_handle.spawn(async move {
+                    match api.undislike_track(uid, &id).await {
+                        Ok(()) => {
+                            this.notify("Трек убран из «Не нравится»");
+                            let is_dislikes = this.state.lock().unwrap().active_view_key.as_deref() == Some("dislikes");
+                            if is_dislikes {
+                                this.state.lock().unwrap().views.remove("dislikes");
+                                this.open_disliked_tracks();
+                            }
+                        }
+                        Err(e) => this.error(format!("Снятие дизлайка: {e}")),
+                    }
+                });
+            }
+            "dislike_artist" => {
+                let Some(api) = self.api() else { self.error("Нужен вход в аккаунт"); return };
+                let (uid, artist) = {
+                    let st = self.state.lock().unwrap();
+                    (st.uid, st.viewed_artist_id.clone())
+                };
+                let Some((artist_id, artist_name)) = artist else { return };
+                let this = self.clone();
+                self.rt_handle.spawn(async move {
+                    match api.dislike_artist(uid, &artist_id).await {
+                        Ok(()) => this.notify(format!("Артист «{artist_name}» скрыт из рекомендаций")),
+                        Err(e) => this.error(format!("Дизлайк артиста: {e}")),
+                    }
+                });
             }
             "track_credits" => {
                 let Some(id) = cmd["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string) else { return };
@@ -2590,7 +2674,7 @@ impl YMusicCore {
 
         let st = self.state.lock().unwrap();
         if let Some(t) = current_track(&st) {
-            let cover_url = cache::resolve_track_cover_url(t, 200);
+            let cover_url = cache::resolve_track_cover_url(t, 400);
             self.send_event(EVENT_NOW_PLAYING, &NowPlayingPayload {
                 has_track: true,
                 id: t.id.clone(),
@@ -2808,6 +2892,42 @@ impl YMusicCore {
                     );
                 }
                 Err(e) => this.view_failed(view, "Похожие треки", e),
+            }
+        });
+    }
+
+    pub fn open_disliked_tracks(self: Arc<Self>) {
+        let Some(api) = self.api() else { self.error("Для просмотра скрытых треков нужен вход"); return };
+        let uid = self.state.lock().unwrap().uid;
+        let key = "dislikes";
+        let header_title = "Не нравится".to_string();
+        let view = self.begin_cached_view(
+            Some(key),
+            6,
+            header_title.clone(),
+            "Треки, исключённые из рекомендаций".into(),
+        );
+        let this = self.clone();
+        self.rt_handle.spawn(async move {
+            match api.disliked_tracks(uid).await {
+                Ok(tracks) => {
+                    let sub = if tracks.is_empty() {
+                        "Скрытых треков нет".to_string()
+                    } else {
+                        format!("{} скрытых треков", tracks.len())
+                    };
+                    this.apply_cached_view(
+                        view,
+                        Some(key),
+                        Some(header_title),
+                        Some(sub),
+                        Vec::new(),
+                        tracks,
+                        None,
+                        None,
+                    );
+                }
+                Err(e) => this.view_failed(view, "Не нравится", e),
             }
         });
     }
@@ -4143,13 +4263,14 @@ impl YMusicCore {
     }
 
     pub fn play_index_at(self: Arc<Self>, index: usize, manual_skip: bool, start_at: Option<f64>) {
-        let (prev_track, prev_played, track, next_track_id, generation, api, uid, current_idx, liked, wave, initial_pos, duration_secs, audio_quality, track_gain, ai_behavior, ai_strict, can_auto_skip) = {
+        let (prev_track, prev_played, prev_play_id, play_id, track, next_track_id, generation, api, uid, current_idx, liked, wave, initial_pos, duration_secs, audio_quality, track_gain, ai_behavior, ai_strict, can_auto_skip) = {
             let mut st = self.state.lock().unwrap();
             let Some(track) = st.queue.get(index).cloned() else { return };
             let api = st.api.clone();
             let uid = st.uid;
             let prev_track = current_track(&st).cloned();
             let prev_played = st.position_secs;
+            let prev_play_id = st.current_play_id.clone();
             let next_track_id = st.queue[index + 1..]
                 .iter()
                 .find(|t| t.available)
@@ -4166,6 +4287,13 @@ impl YMusicCore {
                     .any(|t| t.available && !crate::slopless::should_take_action_fast(t, ai_strict));
             st.current = Some(index);
             st.generation += 1;
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            let play_id = format!("{}-{}-{}", uid, st.generation, now_ms);
+            st.current_play_id = play_id.clone();
+            st.play_scrobbled = false;
             st.duration_secs = duration_secs;
             st.position_secs = initial_pos;
             st.last_saved_sec = 0;
@@ -4176,6 +4304,8 @@ impl YMusicCore {
             (
                 prev_track,
                 prev_played,
+                prev_play_id,
+                play_id,
                 track,
                 next_track_id,
                 st.generation,
@@ -4236,10 +4366,27 @@ impl YMusicCore {
                     .await;
             });
             self.clone().maybe_extend_wave(index);
-        } else if let (Some(prev), Some(api_scrobble)) = (prev_track.filter(|t| t.id != track.id && prev_played >= 5.0), api.clone()) {
+        }
+
+        // Report final play-audio/plays for previous track (including My Wave!) and start event for new track
+        if let Some(api_scrobble) = api.clone() {
+            let prev_report = prev_track
+                .filter(|t| t.id != track.id && prev_played >= 5.0 && !prev_play_id.is_empty());
+            let cur_track_clone = track.clone();
+            let cur_play_id = play_id.clone();
+            let in_wave = wave.is_some();
             self.rt_handle.spawn(async move {
+                let from = if in_wave { "desktop_win-home-radio-default" } else { "desktop_win-home-playlist_of_the_day-playlist-default" };
+                let ctx = if in_wave { Some("radio") } else { None };
+                if let Some(prev) = prev_report {
+                    let prev_cached = cache::is_track_cached(&prev.id);
+                    api_scrobble
+                        .play_audio(uid, &prev, &prev_play_id, from, prev_cached, prev_played, prev_played, ctx, None)
+                        .await;
+                }
+                let cur_cached = cache::is_track_cached(&cur_track_clone.id);
                 api_scrobble
-                    .play_audio(uid, &prev, false, prev_played, prev_played)
+                    .play_audio(uid, &cur_track_clone, &cur_play_id, from, cur_cached, 0.0, initial_pos, ctx, None)
                     .await;
             });
         }
@@ -4542,24 +4689,38 @@ impl YMusicCore {
                 self.set_playing(true, false);
             }
             Event::Position { generation, secs, paused } if generation == current => {
-                let listened = {
+                let (local_record, server_scrobble) = {
                     let mut st = self.state.lock().unwrap();
-                    if !paused && secs >= 5.0 && st.history_generation != Some(generation) {
+                    let local_rec = if !paused && secs >= 5.0 && st.history_generation != Some(generation) {
                         st.history_generation = Some(generation);
-                        current_track(&st).cloned().map(|t| (t, st.api.clone(), st.uid))
-                    } else { None }
+                        current_track(&st).cloned()
+                    } else {
+                        None
+                    };
+                    let threshold = (st.duration_secs * 0.5).clamp(5.0, 30.0);
+                    let srv = if !paused && secs >= threshold && !st.play_scrobbled && !st.current_play_id.is_empty() {
+                        st.play_scrobbled = true;
+                        current_track(&st).cloned().map(|t| (t, st.api.clone(), st.uid, st.current_play_id.clone(), st.wave.is_some()))
+                    } else {
+                        None
+                    };
+                    (local_rec, srv)
                 };
-                if let Some((track, api, uid)) = listened {
+                if let Some(track) = local_record {
                     let this = self.clone();
-                    let from_cache = cache::is_track_cached(&track.id);
                     self.rt_handle.spawn(async move {
-                        if let Some(api) = api {
-                            api.play_audio(uid, &track, from_cache, secs, secs).await;
-                        }
                         match tokio::task::spawn_blocking(move || crate::history::record(track)).await {
                             Ok(Ok(tracks)) => this.send_history_tracks(tracks),
                             _ => this.error("Не удалось сохранить историю прослушивания"),
                         }
+                    });
+                }
+                if let Some((track, Some(api), uid, play_id, in_wave)) = server_scrobble {
+                    let from_cache = cache::is_track_cached(&track.id);
+                    self.rt_handle.spawn(async move {
+                        let from = if in_wave { "desktop_win-home-radio-default" } else { "desktop_win-home-playlist_of_the_day-playlist-default" };
+                        let ctx = if in_wave { Some("radio") } else { None };
+                        api.play_audio(uid, &track, &play_id, from, from_cache, secs, secs, ctx, None).await;
                     });
                 }
                 let (duration, should_save, ignore_pos, state_changed) = {
@@ -4611,10 +4772,24 @@ impl YMusicCore {
                 });
             }
             Event::Ended(g) if g == current => {
-                let (repeat_mode, cur) = {
-                    let st = self.state.lock().unwrap();
-                    (st.repeat_mode, st.current)
+                let (repeat_mode, cur, ended_report) = {
+                    let mut st = self.state.lock().unwrap();
+                    let rep = if !st.current_play_id.is_empty() && st.duration_secs >= 5.0 {
+                        let play_id = std::mem::take(&mut st.current_play_id);
+                        current_track(&st).cloned().map(|t| (t, st.api.clone(), st.uid, play_id, st.duration_secs, st.wave.is_some()))
+                    } else {
+                        None
+                    };
+                    (st.repeat_mode, st.current, rep)
                 };
+                if let Some((track, Some(api), uid, play_id, dur, in_wave)) = ended_report {
+                    let from_cache = cache::is_track_cached(&track.id);
+                    self.rt_handle.spawn(async move {
+                        let from = if in_wave { "desktop_win-home-radio-default" } else { "desktop_win-home-playlist_of_the_day-playlist-default" };
+                        let ctx = if in_wave { Some("radio") } else { None };
+                        api.play_audio(uid, &track, &play_id, from, from_cache, dur, dur, ctx, None).await;
+                    });
+                }
                 if repeat_mode == 2 {
                     if let Some(cur_idx) = cur {
                         self.play_index(cur_idx, false);

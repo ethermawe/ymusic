@@ -546,6 +546,62 @@ impl Api {
         Ok(())
     }
 
+    pub async fn undislike_track(&self, uid: u64, track_id: &str) -> Result<()> {
+        self.post_form(
+            &format!("/users/{uid}/dislikes/tracks/remove"),
+            &[("track-ids", track_id)],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn disliked_track_entries(&self, uid: u64) -> Result<Vec<(String, String)>> {
+        let r = self
+            .get(&format!("/users/{uid}/dislikes/tracks"), &[])
+            .await?;
+        let arr = r["library"]["tracks"]
+            .as_array()
+            .or_else(|| r.as_array());
+        Ok(arr
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|t| {
+                        let id = id_str(&t["id"])?;
+                        let full = id_str(&t["albumId"])
+                            .map(|a| format!("{id}:{a}"))
+                            .unwrap_or_else(|| id.clone());
+                        Some((id, full))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    pub async fn disliked_tracks(&self, uid: u64) -> Result<Vec<Track>> {
+        let entries = self.disliked_track_entries(uid).await?;
+        let composite: Vec<String> = entries.into_iter().map(|(_, full)| full).collect();
+        self.tracks(&composite).await
+    }
+
+    pub async fn dislike_artist(&self, uid: u64, artist_id: &str) -> Result<()> {
+        self.post_form(
+            &format!("/users/{uid}/dislikes/artists/add-multiple"),
+            &[("artist-ids", artist_id)],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn undislike_artist(&self, uid: u64, artist_id: &str) -> Result<()> {
+        self.post_form(
+            &format!("/users/{uid}/dislikes/artists/remove"),
+            &[("artist-ids", artist_id)],
+        )
+        .await?;
+        Ok(())
+    }
+
     pub async fn tracks(&self, ids: &[String]) -> Result<Vec<Track>> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -1030,23 +1086,37 @@ impl Api {
         &self,
         uid: u64,
         track: &Track,
+        play_id: &str,
+        from: &str,
         from_cache: bool,
         total_played_seconds: f64,
         end_position_seconds: f64,
+        context: Option<&str>,
+        context_item: Option<&str>,
     ) {
         let now_iso = format_iso8601_utc(SystemTime::now());
         let track_len_secs = (track.duration_ms / 1000).to_string();
-        let played_str = format!("{:.1}", total_played_seconds.max(0.0));
-        let end_str = format!("{:.1}", end_position_seconds.max(0.0));
+        let played_val = total_played_seconds.max(0.0);
+        let end_val = end_position_seconds.max(0.0);
+        let played_str = format!("{:.1}", played_val);
+        let end_str = format!("{:.1}", end_val);
         let uid_str = uid.to_string();
-        let cache_str = if from_cache { "True" } else { "False" };
+        let cache_str = if from_cache { "true" } else { "false" };
         let album_id = track.album_id.as_deref().unwrap_or("");
-        let play_id = format!("ymusic-{}-{}", uid, random_device_id());
+        let fallback_play_id;
+        let effective_play_id = if play_id.is_empty() {
+            fallback_play_id = format!("ymusic-{}-{}", uid, random_device_id());
+            fallback_play_id.as_str()
+        } else {
+            play_id
+        };
+        let effective_from = if from.is_empty() { "desktop_win-home-playlist_of_the_day-playlist-default" } else { from };
+
         let mut form = vec![
             ("track-id", track.id.as_str()),
             ("from-cache", cache_str),
-            ("from", "ymusic-desktop"),
-            ("play-id", play_id.as_str()),
+            ("from", effective_from),
+            ("play-id", effective_play_id),
             ("uid", uid_str.as_str()),
             ("timestamp", now_iso.as_str()),
             ("client-now", now_iso.as_str()),
@@ -1057,7 +1127,127 @@ impl Api {
         if !album_id.is_empty() {
             form.push(("album-id", album_id));
         }
-        let _ = self.post_form("/play-audio", &form).await;
+        if let Some(ctx) = context.filter(|s| !s.is_empty()) {
+            form.push(("context", ctx));
+        }
+        if let Some(item) = context_item.filter(|s| !s.is_empty()) {
+            form.push(("context-item", item));
+        }
+
+        if let Err(e) = self.post_form("/play-audio", &form).await {
+            eprintln!("play-audio error (track {}): {e:#}", track.id);
+        }
+
+        // Also submit to modern /plays JSON endpoint used by official Yandex Music desktop/mobile apps
+        let mut play_obj = json!({
+            "playId": effective_play_id,
+            "trackId": track.id,
+            "from": effective_from,
+            "fromCache": from_cache,
+            "timestamp": now_iso,
+            "trackLengthSeconds": track.duration_ms / 1000,
+            "totalPlayedSeconds": (played_val * 10.0).round() / 10.0,
+            "endPositionSeconds": (end_val * 10.0).round() / 10.0,
+            "restored": false,
+        });
+        if !album_id.is_empty() {
+            play_obj["albumId"] = json!(album_id);
+        }
+        if let Some(ctx) = context.filter(|s| !s.is_empty()) {
+            play_obj["context"] = json!(ctx);
+        }
+        if let Some(item) = context_item.filter(|s| !s.is_empty()) {
+            play_obj["contextItem"] = json!(item);
+        }
+        let body = json!({ "plays": [play_obj] });
+        let rb = self
+            .http
+            .post(format!("{BASE}/plays"))
+            .header("Authorization", format!("OAuth {}", self.token))
+            .header("X-Yandex-Music-Client", DESKTOP_CLIENT_HEADER)
+            .header("Accept-Language", "ru")
+            .json(&body);
+        if let Err(e) = Self::result(rb).await {
+            eprintln!("POST /plays error (track {}): {e:#}", track.id);
+        }
+    }
+
+    pub async fn music_history(&self) -> Result<Vec<Track>> {
+        let rb = self
+            .http
+            .get(format!("{BASE}/music-history"))
+            .header("Authorization", format!("OAuth {}", self.token))
+            .header("X-Yandex-Music-Client", DESKTOP_CLIENT_HEADER)
+            .header("Accept-Language", "ru")
+            .query(&[("fullModelsCount", "40")]);
+        let r = match Self::result(rb).await {
+            Ok(v) => v,
+            Err(_) => self.get("/music-history", &[("fullModelsCount", "40")]).await?,
+        };
+
+        let mut tracks = Vec::new();
+        let mut missing_ids = Vec::new();
+        let mut seen = HashSet::new();
+
+        let collect_item = |item: &Value,
+                            tracks: &mut Vec<Track>,
+                            missing_ids: &mut Vec<String>,
+                            seen: &mut HashSet<String>| {
+            let candidates = [
+                &item["data"]["fullModel"],
+                &item["data"]["track"],
+                &item["track"],
+                item,
+            ];
+            for cand in candidates {
+                if let Some(t) = parse_track(cand) {
+                    if seen.insert(t.id.clone()) {
+                        tracks.push(t);
+                    }
+                    return;
+                }
+            }
+            if let Some(id) = id_str(&item["data"]["itemId"]["trackId"])
+                .or_else(|| id_str(&item["itemId"]["trackId"]))
+                .or_else(|| id_str(&item["trackId"]))
+            {
+                if seen.insert(id.clone()) {
+                    missing_ids.push(id);
+                }
+            }
+        };
+
+        if let Some(tabs) = r["historyTabs"].as_array() {
+            for tab in tabs {
+                if let Some(groups) = tab["items"].as_array() {
+                    for group in groups {
+                        if let Some(sub_items) = group["items"].as_array() {
+                            for sub in sub_items {
+                                collect_item(sub, &mut tracks, &mut missing_ids, &mut seen);
+                            }
+                        } else {
+                            collect_item(group, &mut tracks, &mut missing_ids, &mut seen);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(arr) = r["tracks"].as_array() {
+            for item in arr {
+                collect_item(item, &mut tracks, &mut missing_ids, &mut seen);
+            }
+        }
+
+        if !missing_ids.is_empty() {
+            missing_ids.truncate(50);
+            if let Ok(fetched) = self.tracks(&missing_ids).await {
+                for t in fetched {
+                    tracks.push(t);
+                }
+            }
+        }
+        tracks.truncate(100);
+        Ok(tracks)
     }
 
     pub async fn own_playlists(&self, uid: u64) -> Result<Vec<PlaylistCard>> {

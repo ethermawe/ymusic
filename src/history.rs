@@ -29,6 +29,27 @@ pub fn record(track: Track) -> std::io::Result<Vec<Track>> {
     Ok(tracks)
 }
 
+pub fn merge_remote(remote: Vec<Track>) -> std::io::Result<Vec<Track>> {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let local = load();
+    if remote.is_empty() {
+        return Ok(local);
+    }
+    let mut merged = Vec::with_capacity(LIMIT);
+    let mut seen = std::collections::HashSet::new();
+    // Remote server history is authoritative for cross-device recency, followed by local-only entries
+    for t in remote.into_iter().chain(local.into_iter()) {
+        if seen.insert(t.id.clone()) {
+            merged.push(t);
+            if merged.len() >= LIMIT {
+                break;
+            }
+        }
+    }
+    save(&merged)?;
+    Ok(merged)
+}
+
 fn save(tracks: &[Track]) -> std::io::Result<()> {
     let p = path().ok_or_else(|| std::io::Error::other("нет каталога данных"))?;
     fs::create_dir_all(p.parent().unwrap())?;

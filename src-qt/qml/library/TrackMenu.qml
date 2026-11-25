@@ -57,6 +57,20 @@ StyledMenu {
         onTriggered: backend.feature({action: "similar_tracks", id: root.trackId, title: root.trackTitle})
     }
     StyledMenuItem {
+        text: "Не нравится"
+        symbol: "thumb_down"
+        visible: !(backend.page === 6 && backend.listTitle === "Не нравится")
+        enabled: backend.loggedIn && root.trackId !== ""
+        onTriggered: backend.feature({action: "dislike_track", id: root.trackId})
+    }
+    StyledMenuItem {
+        text: "Убрать из «Не нравится»"
+        symbol: "thumb_up"
+        visible: backend.page === 6 && backend.listTitle === "Не нравится"
+        enabled: backend.loggedIn && root.trackId !== ""
+        onTriggered: backend.feature({action: "undislike_track", id: root.trackId})
+    }
+    StyledMenuItem {
         text: "Авторы и информация…"
         symbol: "info"
         enabled: backend.loggedIn && root.trackId !== ""
