@@ -67,6 +67,8 @@ jobs:
         run: cmake --build build-qt
 
       - name: Run Qt unit tests
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build-qt --output-on-failure
 
   build-windows:

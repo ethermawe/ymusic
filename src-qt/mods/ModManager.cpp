@@ -18,6 +18,7 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <limits>
 
 namespace ymusic::mods {
 

@@ -29,6 +29,7 @@
 #include <QSGMaterialShader>
 #include <QSGOpacityNode>
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
