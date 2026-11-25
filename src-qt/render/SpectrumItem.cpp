@@ -21,6 +21,7 @@
 #include "AppSettings.h"
 #include "render/SpectrumSource.h"
 #include "theme/PlayerStyle.h"
+#include "theme/Theme.h"
 
 #include <QQuickWindow>
 #include <QSGFlatColorMaterial>
@@ -252,6 +253,13 @@ SpectrumItem::SpectrumItem(QQuickItem *parent)
             update();
         });
     }
+    if (Theme *theme = Theme::instance()) {
+        connect(theme, &Theme::schemeChanged, this, [this] {
+            applyPalette();
+            m_geometryDirty = true;
+            update();
+        });
+    }
     rebuildStyle();
 }
 
@@ -372,8 +380,31 @@ void SpectrumItem::applyPalette()
     if (colors.isEmpty()) {
         colors = {QColor(0xff, 0x3d, 0x8a), QColor(0xd6, 0x24, 0x6c)};
     }
-    const Rgba first = rgba(colors.first());
-    const Rgba second = rgba(colors.size() > 1 ? colors.at(1) : colors.first());
+    auto liftForLight = [](QColor c) -> QColor {
+        QColor hsv = c.toHsv();
+        float h = hsv.hsvHueF();
+        float s = hsv.hsvSaturationF();
+        float v = hsv.valueF();
+        if (h < 0.0f) {
+            // Achromatic/gray cover color: tint cleanly with theme accent
+            if (Theme *t = Theme::instance(); t && t->colors()) {
+                return t->colors()->primary();
+            }
+            return QColor::fromHsvF(0.05f, 0.65f, 0.86f);
+        }
+        s = std::clamp(std::max(s * 1.15f, 0.52f), 0.52f, 0.88f);
+        v = std::clamp(std::max(v * 1.25f, 0.76f), 0.76f, 0.94f);
+        return QColor::fromHsvF(h, s, v, c.alphaF()).toRgb();
+    };
+    const bool lightTheme = Theme::instance() && !Theme::instance()->dark();
+    QColor c0 = colors.first();
+    QColor c1 = colors.size() > 1 ? colors.at(1) : colors.first();
+    if (lightTheme && (m_kind == Kind::Ring || m_kind == Kind::Compact)) {
+        c0 = liftForLight(c0);
+        c1 = liftForLight(c1);
+    }
+    const Rgba first = rgba(c0);
+    const Rgba second = rgba(c1);
 
     QList<Rgba> palette;
     palette.reserve(count);
