@@ -369,6 +369,15 @@ pub fn trim_track_cache() {
     if let Some(dir) = cache_root().map(|p| p.join("tracks")) { trim_cache(&dir); }
 }
 
+pub fn clear_track_cache() {
+    let Some(dir) = cache_root().map(|p| p.join("tracks")) else { return };
+    if let Ok(rd) = fs::read_dir(&dir) {
+        for entry in rd.flatten() {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 #[cfg(test)]
 mod download_tests {
     use super::*;

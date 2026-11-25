@@ -120,7 +120,9 @@ StyledMenu {
             saveDialog.pendingTrackId = root.trackId;
             const rawName = (root.trackTitle || "track").replace(/[\\/:*?"<>|]/g, "_").trim();
             const safeName = rawName.length > 0 ? rawName : "track";
-            const ext = backend.audioQuality === "lossless" ? "flac" : "mp3";
+            const useFlac = backend.downloadQuality === "flac"
+                || (backend.downloadQuality === "match" && backend.audioQuality === "lossless");
+            const ext = useFlac ? "flac" : "mp3";
             const folder = String(saveDialog.currentFolder || StandardPaths.writableLocation(StandardPaths.MusicLocation));
             const sep = folder.endsWith("/") ? "" : "/";
             saveDialog.selectedFile = folder + sep + safeName + "." + ext;
@@ -157,7 +159,7 @@ StyledMenu {
             title: "Сохранить аудиофайл"
             fileMode: FileDialog.SaveFile
             nameFilters: ["Аудиофайлы (*.mp3 *.flac *.m4a)"]
-            defaultSuffix: backend.audioQuality === "lossless" ? "flac" : "mp3"
+            defaultSuffix: (backend.downloadQuality === "flac" || (backend.downloadQuality === "match" && backend.audioQuality === "lossless")) ? "flac" : "mp3"
             onAccepted: backend.downloadTrack(pendingTrackId, selectedFile)
         },
         PlaylistPicker {

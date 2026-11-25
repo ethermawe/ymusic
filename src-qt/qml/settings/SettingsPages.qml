@@ -35,6 +35,7 @@ Item {
 
     readonly property list<string> fades: ["none", "finalSeconds", "entire"]
     readonly property list<string> qualities: ["nq", "hq", "lossless"]
+    readonly property list<string> downloadFormats: ["mp3", "flac", "match"]
     readonly property list<string> aiBehaviors: ["skip_if_not_liked", "dislike_if_not_liked", "skip", "dislike", "nothing"]
     readonly property list<string> themeModes: ["auto", "light", "dark"]
     readonly property list<string> schemeVariantIds: ["tonal_spot", "expressive", "vibrant", "fidelity", "monochrome", "neutral"]
@@ -771,6 +772,16 @@ Item {
                         Segment { text: "Lossless (FLAC)" }
                     ]
                     onActivated: (index) => backend.feature({action: "set_audio_quality", quality: root.qualities[index]})
+                }
+                ConfigSelection {
+                    text: "Формат скачивания на ПК"
+                    currentIndex: Math.max(0, root.downloadFormats.indexOf(backend.downloadQuality))
+                    segments: [
+                        Segment { text: "MP3 (320 kbps)" },
+                        Segment { text: "FLAC (Lossless)" },
+                        Segment { text: "Как в плеере" }
+                    ]
+                    onActivated: (index) => backend.feature({action: "set_download_quality", quality: root.downloadFormats[index]})
                 }
                 ConfigSwitch {
                     text: "Выравнивание громкости (EBU R128)"

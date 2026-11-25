@@ -471,7 +471,7 @@ ApplicationWindow {
                     Loader {
                         id: searchView
                         anchors.fill: parent
-                        active: backend.loggedIn && searchPage.everShown
+                        active: backend.loggedIn && searchPage.visible
                         sourceComponent: SearchView {}
                     }
                 }
@@ -485,7 +485,7 @@ ApplicationWindow {
                     Loader {
                         id: waveStageView
                         anchors.fill: parent
-                        active: backend.loggedIn && wavePage.everShown
+                        active: backend.loggedIn && wavePage.visible
                         sourceComponent: WaveHero {}
                     }
                 }

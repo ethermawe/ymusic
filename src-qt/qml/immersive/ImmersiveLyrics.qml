@@ -172,7 +172,7 @@ Item {
         leftMargin: 8
         rightMargin: 8
         boundsBehavior: Flickable.DragAndOvershootBounds
-        cacheBuffer: 1200
+        cacheBuffer: 400
         clip: true
         FastWheel {
             id: lyricsWheel

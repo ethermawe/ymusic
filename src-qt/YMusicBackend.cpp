@@ -144,6 +144,7 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
             m_collectionKind = obj["collection_kind"].toString();
             m_collectionLiked = obj["collection_liked"].toBool();
             if (obj.contains("audio_quality")) m_audioQuality = obj["audio_quality"].toString("hq");
+            if (obj.contains("download_quality")) m_downloadQuality = obj["download_quality"].toString("mp3");
             if (obj.contains("normalize_volume")) m_normalizeVolume = obj["normalize_volume"].toBool(true);
             if (obj.contains("ai_music_behavior")) m_aiMusicBehavior = obj["ai_music_behavior"].toString("skip_if_not_liked");
             if (obj.contains("ai_strict_tracks")) m_aiStrictTracks = obj["ai_strict_tracks"].toBool(false);

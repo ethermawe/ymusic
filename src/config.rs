@@ -428,6 +428,8 @@ pub struct UserSettings {
     pub pinned_playlists: Vec<PinnedPlaylist>,
     #[serde(default = "default_audio_quality")]
     pub audio_quality: String,
+    #[serde(default = "default_download_quality")]
+    pub download_quality: String,
     #[serde(default = "default_normalize_volume")]
     pub normalize_volume: bool,
     #[serde(default = "default_ai_music_behavior")]
@@ -466,6 +468,10 @@ fn default_audio_quality() -> String {
     "hq".to_string()
 }
 
+fn default_download_quality() -> String {
+    "mp3".to_string()
+}
+
 fn default_normalize_volume() -> bool {
     true
 }
@@ -490,6 +496,7 @@ impl Default for UserSettings {
             shuffle: false,
             pinned_playlists: Vec::new(),
             audio_quality: default_audio_quality(),
+            download_quality: default_download_quality(),
             normalize_volume: default_normalize_volume(),
             ai_music_behavior: default_ai_music_behavior(),
             ai_strict_tracks: false,

@@ -191,7 +191,7 @@ FocusScope {
         hideSource: true
         visible: false
         smooth: true
-        live: true
+        live: !root.auroraActive && root.visible && waveBackdropSource.status === Image.Ready
     }
 
     // Horizontal blur pass so artwork_backdrop's vertical blur does not leave vertical stripes
@@ -215,7 +215,7 @@ FocusScope {
         visible: false
         smooth: true
         textureSize: Qt.size(32, 32)
-        live: true
+        live: !root.auroraActive && root.visible && waveBackdropSource.status === Image.Ready
     }
 
     // Ambient cover wash matching HomeView spotlight card
@@ -235,6 +235,10 @@ FocusScope {
         anchors.fill: parent
         visible: root.auroraActive
         fragmentShader: "qrc:/shaders/wave_aurora.frag.qsb"
+        // Render soft aura at 0.5x resolution with bilinear upscale (4x lower GPU/CPU load)
+        layer.enabled: root.auroraActive && root.visible && width > 64 && height > 64
+        layer.smooth: true
+        layer.textureSize: Qt.size(Math.max(1, Math.round(width * 0.5)), Math.max(1, Math.round(height * 0.5)))
 
         property size itemSize: Qt.size(width, height)
         property point orbCenter: Qt.point(
@@ -750,7 +754,8 @@ FocusScope {
                     const c = toneIdx === 0
                         ? root.accentPrimary
                         : (toneIdx === 1 ? root.accentSecondary : Appearance.colors.tertiary);
-                    return Qt.alpha(c, alphaVal);
+                    const scaled = Appearance.colors.dark ? alphaVal : alphaVal * 0.46;
+                    return Qt.alpha(c, scaled);
                 }
 
                 Repeater {

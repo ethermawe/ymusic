@@ -130,7 +130,7 @@ void main()
     vec2 pos = qt_TexCoord0 * itemSize;
     float bgLum = dot(bgColor.rgb, vec3(0.2126, 0.7152, 0.0722));
     bool isDark = bgLum < 0.45;
-    float tone = isDark ? 1.0 : 0.65;
+    float tone = isDark ? 1.0 : 0.36;
 
     float subBass = energy.x;
     float bass = energy.y;
@@ -139,9 +139,9 @@ void main()
     float beat = clamp(subBass * 0.45 + bass * 0.55, 0.0, 1.5);
     float shimmer = clamp(vocal * 0.55 + lead * 0.65, 0.0, 1.5);
 
-    vec3 colA = vividColor(c0.rgb, 0.93,  0.00, 0.72, 0.94);
-    vec3 colB = vividColor(c1.rgb, 0.74, -0.14, 0.76, 0.94);
-    vec3 colC = vividColor(c2.rgb, 0.56, -0.26, 0.70, 0.92);
+    vec3 colA = vividColor(c0.rgb, 0.93,  0.00, isDark ? 0.72 : 0.58, isDark ? 0.94 : 0.98);
+    vec3 colB = vividColor(c1.rgb, 0.74, isDark ? -0.14 : -0.06, isDark ? 0.76 : 0.55, isDark ? 0.94 : 0.98);
+    vec3 colC = vividColor(c2.rgb, 0.56, isDark ? -0.26 :  0.07, isDark ? 0.70 : 0.52, isDark ? 0.92 : 0.98);
 
     vec2 rel = pos - orbCenter;
     float dp = length(rel);
@@ -174,8 +174,12 @@ void main()
     float colorSpin = 0.5 + 0.5 * sin(angle + time * 0.32 + distFromEdge * 0.45);
     float colorSpin2 = 0.5 + 0.5 * cos(angle * 2.0 - time * 0.24);
     vec3 outerCol = mix(colA, colB, colorSpin);
-    outerCol = mix(outerCol, colC, colorSpin2 * clamp(distFromEdge * 0.45 + 0.22, 0.0, 0.85));
+    outerCol = mix(outerCol, colC, colorSpin2 * clamp(distFromEdge * 0.45 + 0.22, 0.0, isDark ? 0.85 : 0.55));
     outerCol = mix(outerCol, mix(colA, vec3(1.0), 0.35), exp(-distFromEdge * 12.0) * 0.45);
+    if (!isDark) {
+        // Keep light-theme studio aura airy and pastel instead of dark/muddy
+        outerCol = mix(outerCol, vec3(1.0), 0.34);
+    }
 
     vec2 uv = qt_TexCoord0;
     float stageFade = smoothstep(0.0, 0.06, uv.x) * smoothstep(1.0, 0.94, uv.x)

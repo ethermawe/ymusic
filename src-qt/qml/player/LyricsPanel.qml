@@ -164,7 +164,7 @@ Item {
         rightMargin: 14
         clip: true
         boundsBehavior: Flickable.DragAndOvershootBounds
-        cacheBuffer: 2000
+        cacheBuffer: 400
         signal stepped(real delta)
 
         property bool autoScrolling: false

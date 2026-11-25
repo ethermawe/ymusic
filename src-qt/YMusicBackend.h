@@ -92,6 +92,7 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(QString collectionKind READ collectionKind NOTIFY featuresChanged)
     Q_PROPERTY(bool collectionLiked READ collectionLiked NOTIFY featuresChanged)
     Q_PROPERTY(QString audioQuality READ audioQuality NOTIFY featuresChanged)
+    Q_PROPERTY(QString downloadQuality READ downloadQuality NOTIFY featuresChanged)
     Q_PROPERTY(bool normalizeVolume READ normalizeVolume NOTIFY featuresChanged)
     Q_PROPERTY(QString aiMusicBehavior READ aiMusicBehavior NOTIFY featuresChanged)
     Q_PROPERTY(bool aiStrictTracks READ aiStrictTracks NOTIFY featuresChanged)
@@ -197,6 +198,7 @@ public:
     QString collectionKind() const { return m_collectionKind; }
     bool collectionLiked() const { return m_collectionLiked; }
     QString audioQuality() const { return m_audioQuality; }
+    QString downloadQuality() const { return m_downloadQuality; }
     bool normalizeVolume() const { return m_normalizeVolume; }
     QString aiMusicBehavior() const { return m_aiMusicBehavior; }
     bool aiStrictTracks() const { return m_aiStrictTracks; }
@@ -324,6 +326,7 @@ private:
     QString m_collectionKind;
     bool m_collectionLiked = false;
     QString m_audioQuality = "hq";
+    QString m_downloadQuality = "mp3";
     bool m_normalizeVolume = true;
     QString m_aiMusicBehavior = "skip_if_not_liked";
     bool m_aiStrictTracks = false;

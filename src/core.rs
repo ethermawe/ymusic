@@ -265,6 +265,7 @@ pub struct State {
     pub liked_artist_ids: HashSet<String>,
     pub liked_playlist_keys: HashSet<String>,
     pub audio_quality: String,
+    pub download_quality: String,
     pub normalize_volume: bool,
     pub ai_music_behavior: String,
     pub ai_strict_tracks: bool,
@@ -1181,9 +1182,39 @@ impl YMusicCore {
                     "nq" => "nq",
                     _ => "hq",
                 };
-                self.state.lock().unwrap().audio_quality = q.to_string();
+                let (changed, reload_target) = {
+                    let mut st = self.state.lock().unwrap();
+                    let changed = st.audio_quality != q;
+                    st.audio_quality = q.to_string();
+                    let target = if changed && st.playing {
+                        st.current.map(|idx| (idx, st.position_secs))
+                    } else {
+                        None
+                    };
+                    (changed, target)
+                };
                 let q_owned = q.to_string();
                 config::update_settings(|s| s.audio_quality = q_owned);
+                self.send_view_feature();
+                if changed {
+                    let this = self.clone();
+                    self.rt_handle.spawn(async move {
+                        let _ = tokio::task::spawn_blocking(cache::clear_track_cache).await;
+                        if let Some((idx, pos)) = reload_target {
+                            this.play_index_at(idx, false, Some(pos));
+                        }
+                    });
+                }
+            }
+            "set_download_quality" => {
+                let q = match cmd["quality"].as_str().unwrap_or("mp3") {
+                    "flac" => "flac",
+                    "match" => "match",
+                    _ => "mp3",
+                };
+                self.state.lock().unwrap().download_quality = q.to_string();
+                let q_owned = q.to_string();
+                config::update_settings(|s| s.download_quality = q_owned);
                 self.send_view_feature();
             }
             "set_normalize_volume" => {
@@ -1754,6 +1785,11 @@ impl YMusicCore {
             } else {
                 "hq".to_string()
             };
+            st.download_quality = if ["mp3", "flac", "match"].contains(&settings.download_quality.as_str()) {
+                settings.download_quality
+            } else {
+                "mp3".to_string()
+            };
             st.normalize_volume = settings.normalize_volume;
             st.ai_music_behavior = if [
                 "dislike",
@@ -2272,7 +2308,7 @@ impl YMusicCore {
     }
 
     pub fn send_view_feature(&self) {
-        let (downloadable, playlist_key, playlist_pinned, is_own_playlist, collection_kind, collection_liked, audio_quality, normalize_volume, ai_music_behavior, ai_strict_tracks, show_ai_labels) = {
+        let (downloadable, playlist_key, playlist_pinned, is_own_playlist, collection_kind, collection_liked, audio_quality, download_quality, normalize_volume, ai_music_behavior, ai_strict_tracks, show_ai_labels) = {
             let st = self.state.lock().unwrap();
             let (key, pinned, own) = match &st.active_playlist {
                 Some(p) => (
@@ -2296,8 +2332,9 @@ impl YMusicCore {
                 ("", false)
             };
             let aq = if st.audio_quality.is_empty() { "hq".to_string() } else { st.audio_quality.clone() };
+            let dq = if st.download_quality.is_empty() { "mp3".to_string() } else { st.download_quality.clone() };
             let ai_beh = if st.ai_music_behavior.is_empty() { "skip_if_not_liked".to_string() } else { st.ai_music_behavior.clone() };
-            (st.collection_downloadable, key, pinned, own, c_kind.to_string(), c_liked, aq, st.normalize_volume, ai_beh, st.ai_strict_tracks, st.show_ai_labels)
+            (st.collection_downloadable, key, pinned, own, c_kind.to_string(), c_liked, aq, dq, st.normalize_volume, ai_beh, st.ai_strict_tracks, st.show_ai_labels)
         };
         self.send_feature(
             "view",
@@ -2309,6 +2346,7 @@ impl YMusicCore {
                 "collection_kind": collection_kind,
                 "collection_liked": collection_liked,
                 "audio_quality": audio_quality,
+                "download_quality": download_quality,
                 "normalize_volume": normalize_volume,
                 "ai_music_behavior": ai_music_behavior,
                 "ai_strict_tracks": ai_strict_tracks,
@@ -3810,7 +3848,16 @@ impl YMusicCore {
         }
         let (api, audio_quality) = {
             let st = self.state.lock().unwrap();
-            (st.api.clone(), st.audio_quality.clone())
+            let q = if destination.is_some() {
+                match st.download_quality.as_str() {
+                    "flac" => "lossless".to_string(),
+                    "match" => st.audio_quality.clone(),
+                    _ => "hq".to_string(),
+                }
+            } else {
+                st.audio_quality.clone()
+            };
+            (st.api.clone(), q)
         };
         let Some(api) = api else { return };
         self.notify(format!("Скачиваем «{}»…", track.title));
