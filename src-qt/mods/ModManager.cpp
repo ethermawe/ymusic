@@ -610,7 +610,7 @@ void ModManager::setLyricSubtitles(const QString &modId, const QString &trackId,
 
 void ModManager::clearLyricSubtitlesForMod(const QString &modId)
 {
-    if (m_lyricSubtitles.remove(modId) > 0) {
+    if (m_lyricSubtitles.remove(modId)) {
         ++m_lyricSubtitlesRevision;
         emit lyricSubtitlesChanged();
     }
