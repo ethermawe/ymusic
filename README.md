@@ -13,7 +13,11 @@
 [![Platforms](https://img.shields.io/badge/Linux_%7C_Windows-x86__64-3584e4?style=flat-square)](https://github.com/ethermawe/ymusic/releases)
 [![License](https://img.shields.io/github/license/ethermawe/ymusic?style=flat-square)](LICENSE)
 
-[Установка](#установка) · [Возможности](#возможности) · [Моддинг](docs/MODDING.md) · [Сборка](#сборка-из-исходников) · [Клавиши](#горячие-клавиши)
+[Установка](#установка) · [Скриншоты](#скриншоты) · [Возможности](#возможности) · [Моддинг](docs/MODDING.md) · [Сборка](#сборка-из-исходников) · [Клавиши](#горячие-клавиши)
+
+<br>
+
+<img src="docs/screenshots/imersive-player.png" width="100%" alt="Имерсивный плеер ymusic">
 
 </div>
 
@@ -22,6 +26,16 @@
 **ymusic** — быстрый нативный клиент вместо Electron-обёртки: асинхронное ядро на Rust (`tokio`, `reqwest`, `rodio`) и GPU-интерфейс на Qt Quick в стиле Material 3 Expressive с GLSL-шейдерами.
 
 > Работает через неофициальное API Яндекс Музыки (эндпоинты сверены с [MarshalX/yandex-music-api](https://github.com/MarshalX/yandex-music-api)).
+
+## Скриншоты
+
+| «Моя волна» | «Моя волна» и синхронный текст |
+|---|---|
+| ![Моя волна](docs/screenshots/wave-dark.png) | ![Моя волна с текстом](docs/screenshots/wave-dark-subs.png) |
+
+| Плейлист, AI-метки и «Моя волна» по коллекции | Имерсивный плеер |
+|---|---|
+| ![Плейлист](docs/screenshots/playlist.png) | ![Имерсивный плеер](docs/screenshots/imersive-player.png) |
 
 ## Возможности
 
