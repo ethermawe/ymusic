@@ -84,6 +84,12 @@ StyledMenu {
     }
     StyledMenuSeparator {}
     StyledMenuItem {
+        text: qsTr("Скрытые треки")
+        symbol: "visibility_off"
+        visible: backend.loggedIn
+        onTriggered: backend.feature({action: "open_dislikes"})
+    }
+    StyledMenuItem {
         text: qsTr("Настройки…")
         symbol: "settings"
         onTriggered: UiState.settingsRequested()

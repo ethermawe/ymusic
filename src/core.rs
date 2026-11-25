@@ -1407,8 +1407,10 @@ impl YMusicCore {
             "start_collection_wave" => {
                 let target = {
                     let st = self.state.lock().unwrap();
-                    if let Some(album_id) = st.active_album_id.clone() {
-                        Some((format!("album:{album_id}"), format!("Волна по альбому")))
+                    if st.page == 2 && st.uid > 0 {
+                        Some((format!("playlist:{}_3", st.uid), "Волна: Мне нравится".to_string()))
+                    } else if let Some(album_id) = st.active_album_id.clone() {
+                        Some((format!("album:{album_id}"), "Волна по альбому".to_string()))
                     } else if let Some(p) = st.active_playlist.clone() {
                         Some((format!("playlist:{}_{}", p.uid, p.kind), format!("Волна: {}", p.title)))
                     } else if let Some((artist_id, name)) = st.viewed_artist_id.clone() {

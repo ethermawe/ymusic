@@ -236,20 +236,12 @@ Item {
             }
 
             TextButton {
-                visible: !root.isArtist && (backend.collectionKind === "album" || backend.collectionKind === "playlist" || backend.collectionKind === "own_playlist") && backend.loggedIn
+                visible: !root.isArtist && (backend.page === 2 || backend.collectionKind === "album" || backend.collectionKind === "playlist" || backend.collectionKind === "own_playlist") && backend.loggedIn
                 variant: TextButton.Tonal
                 wavy: true
                 symbol: "my_wave"
                 text: "Моя волна"
                 onClicked: backend.feature({action: "start_collection_wave"})
-            }
-
-            TextButton {
-                visible: !root.isArtist && backend.page === 2 && backend.loggedIn
-                variant: TextButton.Outlined
-                symbol: "thumb_down"
-                text: "Не нравится"
-                onClicked: backend.feature({action: "open_dislikes"})
             }
 
             IconButton {
