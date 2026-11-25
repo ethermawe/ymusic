@@ -319,13 +319,14 @@ Item {
 
                     delegate: NavigationItem {
                         required property var modelData
+                        readonly property string entryKey: modelData.entryId || modelData.modId
                         width: parent.width
                         compact: root.isCompact
                         text: modelData.title || modelData.modName || ""
-                        iconShape: "gem"
+                        iconShape: modelData.shape || "gem"
                         symbol: modelData.symbol || "extension"
-                        selected: UiState.activeModPageId === modelData.modId
-                        onClicked: UiState.openModPage(modelData.modId)
+                        selected: UiState.activeModPageId === entryKey
+                        onClicked: UiState.openModPage(entryKey)
                     }
                 }
             }

@@ -9,12 +9,12 @@
     "script": "main.qml",
     "settings": "ui/Settings.qml"
   },
-  "sidebar": {
-    "title": "Hello Mod",
-    "symbol": "auto_awesome"
-  },
-  "slots": {
-    "sidebar.page": "ui/Page.qml",
+  "ui": {
+    "sidebar.page": {
+      "file": "ui/Page.qml",
+      "title": "Hello Mod",
+      "symbol": "auto_awesome"
+    },
     "immersive.overlay": "ui/ImmersiveBadge.qml"
   },
   "permissions": [

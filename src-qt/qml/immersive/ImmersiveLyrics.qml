@@ -362,6 +362,9 @@ Item {
             readonly property bool isPast: UiState.lyricsSynced && UiState.activeLyricIndex >= 0 && index < UiState.activeLyricIndex
             readonly property bool active: isCurrent
             readonly property bool isHovered: mouseArea.containsMouse
+            readonly property string modSubtitle: ModManager.lyricSubtitlesRevision >= 0
+                ? ModManager.lyricSubtitleFor(UiState.lyricsTrackId, index)
+                : ""
             property bool highlighted: false
             property real glowStrength: !UiState.lyricsSynced ? 0.5 : (active ? 1.0 : 0.0)
 
@@ -370,7 +373,7 @@ Item {
             }
 
             width: list.width - list.leftMargin - list.rightMargin
-            height: label.implicitHeight + 28
+            height: label.implicitHeight + (immersiveSubtitle.visible ? immersiveSubtitle.implicitHeight + 6 : 0) + 28
 
             property real lag: 0
             transform: Translate { y: line.lag }
@@ -444,28 +447,44 @@ Item {
                     shadowVerticalOffset: 0
                 }
 
-                KaraokeLyricLine {
-                    id: label
-                    objectName: "lyricText"
+                Column {
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.leftMargin: 26
                     anchors.rightMargin: immersiveTimeBadge.visible ? immersiveTimeBadge.implicitWidth + 30 : 24
-                    lineText: line.words
-                    wordTimings: line.wordList
-                    wordKaraokeActive: line.isCurrent && UiState.lyricsWordSynced && appSettings.lyricsWordKaraoke && line.wordList.length > 0
-                    isCurrent: line.isCurrent
-                    synced: UiState.lyricsSynced
-                    isPast: line.isPast
-                    isHovered: line.isHovered
-                    hasTime: line.hasTime
-                    fontPixelSize: 28
-                    fontWeight: Font.Bold
-                    textColor: "white"
-                    accentColor: PlayerStyle.primary
-                    dimAlpha: 0.28
-                    glowAmount: Appearance.performanceMode ? 0.0 : line.glowStrength
+                    spacing: 6
+
+                    KaraokeLyricLine {
+                        id: label
+                        objectName: "lyricText"
+                        width: parent.width
+                        lineText: line.words
+                        wordTimings: line.wordList
+                        wordKaraokeActive: line.isCurrent && UiState.lyricsWordSynced && appSettings.lyricsWordKaraoke && line.wordList.length > 0
+                        isCurrent: line.isCurrent
+                        synced: UiState.lyricsSynced
+                        isPast: line.isPast
+                        isHovered: line.isHovered
+                        hasTime: line.hasTime
+                        fontPixelSize: 28
+                        fontWeight: Font.Bold
+                        textColor: "white"
+                        accentColor: PlayerStyle.primary
+                        dimAlpha: 0.28
+                        glowAmount: Appearance.performanceMode ? 0.0 : line.glowStrength
+                    }
+
+                    StyledText {
+                        id: immersiveSubtitle
+                        width: parent.width
+                        visible: line.modSubtitle.length > 0
+                        text: line.modSubtitle
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: 16
+                        font.weight: Font.Medium
+                        color: line.isCurrent ? Qt.rgba(1, 1, 1, 0.80) : Qt.rgba(1, 1, 1, 0.42)
+                    }
                 }
             }
 

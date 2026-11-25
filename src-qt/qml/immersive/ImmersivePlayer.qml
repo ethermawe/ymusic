@@ -444,11 +444,11 @@ FocusScope {
                 model: root.modPanels
                 delegate: IconButton {
                     required property var modelData
-                    readonly property string panelKey: "mod:" + modelData.modId
+                    readonly property string panelKey: "mod:" + (modelData.entryId || modelData.modId)
                     readonly property bool selected: root.panel === panelKey
                     scheme: root.scheme
-                    symbol: modelData.immersivePanelSymbol || "extension"
-                    tooltip: modelData.immersivePanelTitle || modelData.modName || ""
+                    symbol: modelData.symbol || modelData.immersivePanelSymbol || "extension"
+                    tooltip: modelData.title || modelData.immersivePanelTitle || modelData.modName || ""
                     size: 32
                     iconSize: 19
                     toggled: selected
@@ -569,7 +569,7 @@ FocusScope {
         id: modPanelComponent
         ModSlotHost {
             slotName: "immersive.panel"
-            filterModId: root.shownPanel.startsWith("mod:") ? root.shownPanel.slice(4) : ""
+            filterEntryId: root.shownPanel.startsWith("mod:") ? root.shownPanel.slice(4) : ""
             slotContext: ({ scheme: root.scheme })
         }
     }

@@ -388,9 +388,12 @@ Item {
             readonly property bool isCurrent: UiState.lyricsSynced && UiState.activeLyricIndex === index
             readonly property bool isPast: UiState.lyricsSynced && UiState.activeLyricIndex >= 0 && index < UiState.activeLyricIndex
             readonly property bool isHovered: mouseArea.containsMouse
+            readonly property string modSubtitle: ModManager.lyricSubtitlesRevision >= 0
+                ? ModManager.lyricSubtitleFor(UiState.lyricsTrackId, index)
+                : ""
 
             width: list.width - list.leftMargin - list.rightMargin
-            height: text.implicitHeight + 22
+            height: text.implicitHeight + (subtitleText.visible ? subtitleText.implicitHeight + 4 : 0) + 22
 
             property real lag: 0
             transform: Translate { y: line.lag }
@@ -430,7 +433,7 @@ Item {
                 anchors.rightMargin: UiState.lyricsSynced && line.hasTime
                     ? Math.max(48, timeBadge.implicitWidth + 22)
                     : 14
-                height: text.implicitHeight
+                height: text.implicitHeight + (subtitleText.visible ? subtitleText.implicitHeight + 4 : 0)
                 transformOrigin: Item.Left
 
                 property real springing: {
@@ -466,6 +469,21 @@ Item {
                     accentColor: root.scheme.primary
                     dimAlpha: 0.34
                     glowAmount: Appearance.performanceMode ? 0.0 : 0.85
+                }
+
+                StyledText {
+                    id: subtitleText
+                    anchors.top: text.bottom
+                    anchors.topMargin: 4
+                    width: parent.width
+                    visible: line.modSubtitle.length > 0
+                    text: line.modSubtitle
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 13
+                    font.weight: Font.Medium
+                    color: line.isCurrent
+                        ? Qt.alpha(root.scheme.onSurface, 0.78)
+                        : Qt.alpha(root.scheme.onSurfaceVariant, 0.56)
                 }
             }
 

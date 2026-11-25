@@ -143,6 +143,15 @@ void ModManager::destroyAllApis()
         m_trackMenuActions.clear();
         emit trackMenuActionsChanged();
     }
+    if (!m_shortcuts.isEmpty()) {
+        m_shortcuts.clear();
+        emit shortcutsChanged();
+    }
+    if (!m_lyricSubtitles.isEmpty()) {
+        m_lyricSubtitles.clear();
+        ++m_lyricSubtitlesRevision;
+        emit lyricSubtitlesChanged();
+    }
 }
 
 void ModManager::scanAndSync(bool initialStartup)
@@ -318,6 +327,7 @@ QVariantList ModManager::modsVariantList() const
         item.insert(QStringLiteral("permissions"), m.permissions);
         item.insert(QStringLiteral("hasOverrides"), !m.overridesMap.isEmpty());
         item.insert(QStringLiteral("overrideCount"), static_cast<int>(m.overridesMap.size()));
+        item.insert(QStringLiteral("overrideTargets"), QStringList(m.overridesMap.keys()));
         item.insert(QStringLiteral("hasSettings"), !m.settingsEntry.isEmpty());
         item.insert(QStringLiteral("settingsUrl"), m.settingsEntry.isEmpty() ? QUrl() : QUrl::fromLocalFile(m.settingsEntry));
         item.insert(QStringLiteral("conflicts"), m_overrideConflicts.value(m.id));
@@ -336,33 +346,52 @@ QVariantList ModManager::slotEntries(const QString &slotName) const
     const QStringList enabledIds = m_settings ? m_settings->enabledModIds() : QStringList();
     for (const ModManifest &m : m_manifests) {
         if (!m.valid || !enabledIds.contains(m.id)) continue;
-        QString filePath;
-        if (slotName == QLatin1StringView("background.host")) {
-            filePath = m.scriptEntry;
-        } else if (slotName == QLatin1StringView("settings")) {
-            filePath = m.settingsEntry;
-        } else {
-            if (!m.hasPermission(QStringLiteral("ui:slots"))) continue;
-            filePath = m.slotsMap.value(slotName);
-        }
-        if (filePath.isEmpty()) continue;
-
         ModApi *api = m_apis.value(m.id).data();
         if (!api) continue;
 
-        QVariantMap entry;
-        entry.insert(QStringLiteral("modId"), m.id);
-        entry.insert(QStringLiteral("modName"), m.name);
-        entry.insert(QStringLiteral("sourceUrl"), QUrl::fromLocalFile(filePath));
-        entry.insert(QStringLiteral("title"), m.sidebarTitle);
-        entry.insert(QStringLiteral("symbol"), m.sidebarSymbol);
-        entry.insert(QStringLiteral("settingsTabTitle"), m.settingsTabTitle);
-        entry.insert(QStringLiteral("settingsTabSymbol"), m.settingsTabSymbol);
-        entry.insert(QStringLiteral("settingsTabShape"), m.settingsTabShape);
-        entry.insert(QStringLiteral("immersivePanelTitle"), m.immersivePanelTitle);
-        entry.insert(QStringLiteral("immersivePanelSymbol"), m.immersivePanelSymbol);
-        entry.insert(QStringLiteral("api"), QVariant::fromValue(static_cast<QObject *>(api)));
-        entries.append(entry);
+        if (slotName == QLatin1StringView("background.host")) {
+            if (m.scriptEntry.isEmpty()) continue;
+            QVariantMap entry;
+            entry.insert(QStringLiteral("entryId"), m.id);
+            entry.insert(QStringLiteral("modId"), m.id);
+            entry.insert(QStringLiteral("modName"), m.name);
+            entry.insert(QStringLiteral("sourceUrl"), QUrl::fromLocalFile(m.scriptEntry));
+            entry.insert(QStringLiteral("api"), QVariant::fromValue(static_cast<QObject *>(api)));
+            entries.append(entry);
+            continue;
+        }
+        if (slotName == QLatin1StringView("settings")) {
+            if (m.settingsEntry.isEmpty()) continue;
+            QVariantMap entry;
+            entry.insert(QStringLiteral("entryId"), m.id);
+            entry.insert(QStringLiteral("modId"), m.id);
+            entry.insert(QStringLiteral("modName"), m.name);
+            entry.insert(QStringLiteral("sourceUrl"), QUrl::fromLocalFile(m.settingsEntry));
+            entry.insert(QStringLiteral("api"), QVariant::fromValue(static_cast<QObject *>(api)));
+            entries.append(entry);
+            continue;
+        }
+
+        if (!m.hasPermission(QStringLiteral("ui:slots"))) continue;
+        const auto items = m.slotsMap.value(slotName);
+        for (const ModSlotItem &s : items) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("entryId"), s.entryId);
+            entry.insert(QStringLiteral("modId"), m.id);
+            entry.insert(QStringLiteral("modName"), m.name);
+            entry.insert(QStringLiteral("sourceUrl"), QUrl::fromLocalFile(s.file));
+            entry.insert(QStringLiteral("title"), s.title);
+            entry.insert(QStringLiteral("symbol"), s.symbol);
+            entry.insert(QStringLiteral("shape"), s.shape);
+            // Legacy alias keys kept for compatibility
+            entry.insert(QStringLiteral("settingsTabTitle"), s.title);
+            entry.insert(QStringLiteral("settingsTabSymbol"), s.symbol);
+            entry.insert(QStringLiteral("settingsTabShape"), s.shape);
+            entry.insert(QStringLiteral("immersivePanelTitle"), s.title);
+            entry.insert(QStringLiteral("immersivePanelSymbol"), s.symbol);
+            entry.insert(QStringLiteral("api"), QVariant::fromValue(static_cast<QObject *>(api)));
+            entries.append(entry);
+        }
     }
     return entries;
 }
@@ -377,7 +406,7 @@ bool ModManager::hasSlot(const QString &slotName) const
             if (!m.scriptEntry.isEmpty()) return true;
         } else if (slotName == QLatin1StringView("settings")) {
             if (!m.settingsEntry.isEmpty()) return true;
-        } else if (m.hasPermission(QStringLiteral("ui:slots")) && m.slotsMap.contains(slotName)) {
+        } else if (m.hasPermission(QStringLiteral("ui:slots")) && !m.slotsMap.value(slotName).isEmpty()) {
             return true;
         }
     }
@@ -454,6 +483,108 @@ void ModManager::triggerTrackMenuAction(const QString &modId,
     if (ModApi *api = m_apis.value(modId).data()) {
         api->notifyTrackMenuAction(actionId, trackId, trackTitle);
     }
+}
+
+void ModManager::registerShortcut(const QString &modId,
+                                  const QString &actionId,
+                                  const QString &sequence,
+                                  const QString &description)
+{
+    for (ModShortcutEntry &existing : m_shortcuts) {
+        if (existing.modId == modId && existing.actionId == actionId) {
+            existing.sequence = sequence;
+            existing.description = description;
+            emit shortcutsChanged();
+            return;
+        }
+    }
+    m_shortcuts.append({modId, actionId, sequence, description});
+    emit shortcutsChanged();
+}
+
+void ModManager::unregisterShortcut(const QString &modId, const QString &actionId)
+{
+    const auto before = m_shortcuts.size();
+    m_shortcuts.removeIf([&](const ModShortcutEntry &s) {
+        return s.modId == modId && s.actionId == actionId;
+    });
+    if (m_shortcuts.size() != before) {
+        emit shortcutsChanged();
+    }
+}
+
+void ModManager::clearShortcutsForMod(const QString &modId)
+{
+    const auto before = m_shortcuts.size();
+    m_shortcuts.removeIf([&](const ModShortcutEntry &s) {
+        return s.modId == modId;
+    });
+    if (m_shortcuts.size() != before) {
+        emit shortcutsChanged();
+    }
+}
+
+QVariantList ModManager::shortcutsVariantList() const
+{
+    QVariantList list;
+    list.reserve(m_shortcuts.size());
+    for (const ModShortcutEntry &s : m_shortcuts) {
+        QVariantMap map;
+        map.insert(QStringLiteral("modId"), s.modId);
+        map.insert(QStringLiteral("actionId"), s.actionId);
+        map.insert(QStringLiteral("sequence"), s.sequence);
+        map.insert(QStringLiteral("description"), s.description);
+        list.append(map);
+    }
+    return list;
+}
+
+void ModManager::triggerShortcut(const QString &modId, const QString &actionId)
+{
+    if (ModApi *api = m_apis.value(modId).data()) {
+        api->notifyShortcut(actionId);
+    }
+}
+
+void ModManager::syncLyricsState(const QString &trackId, bool synced, const QVariantList &lines)
+{
+    m_lyricsTrackId = trackId;
+    m_lyricsSynced = synced;
+    m_lyricsLines = lines;
+    for (const QPointer<ModApi> &api : m_apis) {
+        if (api) {
+            api->notifyLyricsChanged();
+        }
+    }
+}
+
+void ModManager::setLyricSubtitles(const QString &modId, const QString &trackId, const QStringList &subtitles)
+{
+    m_lyricSubtitles.insert(modId, qMakePair(trackId, subtitles));
+    ++m_lyricSubtitlesRevision;
+    emit lyricSubtitlesChanged();
+}
+
+void ModManager::clearLyricSubtitlesForMod(const QString &modId)
+{
+    if (m_lyricSubtitles.remove(modId) > 0) {
+        ++m_lyricSubtitlesRevision;
+        emit lyricSubtitlesChanged();
+    }
+}
+
+QString ModManager::lyricSubtitleFor(const QString &trackId, int lineIndex) const
+{
+    if (trackId.isEmpty() || lineIndex < 0 || m_lyricSubtitles.isEmpty()) {
+        return {};
+    }
+    for (auto it = m_lyricSubtitles.constBegin(); it != m_lyricSubtitles.constEnd(); ++it) {
+        if (it.value().first == trackId && lineIndex < it.value().second.size()) {
+            const QString &text = it.value().second.at(lineIndex);
+            if (!text.isEmpty()) return text;
+        }
+    }
+    return {};
 }
 
 void ModManager::reportModError(const QString &modId, const QString &message)

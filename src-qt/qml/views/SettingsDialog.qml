@@ -171,7 +171,8 @@ T.Popup {
                     delegate: RippleButton {
                         id: modDest
                         required property var modelData
-                        readonly property bool selected: root.activeModTabId === modelData.modId
+                        readonly property string tabKey: modelData.entryId || modelData.modId
+                        readonly property bool selected: root.activeModTabId === tabKey
 
                         width: rail.width
                         implicitHeight: 68
@@ -179,7 +180,7 @@ T.Popup {
                         colBackground: "transparent"
                         colBackgroundHover: "transparent"
                         rippleEnabled: false
-                        onClicked: root.activeModTabId = modelData.modId
+                        onClicked: root.activeModTabId = tabKey
 
                         contentItem: Column {
                             spacing: 4
@@ -198,7 +199,7 @@ T.Popup {
                                 MaterialSymbol {
                                     anchors.centerIn: parent
                                     Reveal.shown: !modDest.selected
-                                    text: modDest.modelData.settingsTabSymbol || "widgets"
+                                    text: modDest.modelData.symbol || modDest.modelData.settingsTabSymbol || "widgets"
                                     iconSize: 22
                                     color: Appearance.colors.onSurfaceVariant
                                 }
@@ -208,8 +209,8 @@ T.Popup {
                                     Reveal.overshoot: 2.4
                                     size: 38
                                     iconSize: 20
-                                    shape: modDest.modelData.settingsTabShape || "flower"
-                                    symbol: modDest.modelData.settingsTabSymbol || "widgets"
+                                    shape: modDest.modelData.shape || modDest.modelData.settingsTabShape || "flower"
+                                    symbol: modDest.modelData.symbol || modDest.modelData.settingsTabSymbol || "widgets"
                                     hovered: modDest.hovered
                                 }
                             }
@@ -219,7 +220,7 @@ T.Popup {
                                 width: rail.width
                                 horizontalAlignment: Text.AlignHCenter
                                 elide: Text.ElideRight
-                                text: modDest.modelData.settingsTabTitle || modDest.modelData.modName || ""
+                                text: modDest.modelData.title || modDest.modelData.settingsTabTitle || modDest.modelData.modName || ""
                                 font.pixelSize: Appearance.fontSize.smaller
                                 font.weight: modDest.selected ? Font.DemiBold : Font.Normal
                                 color: modDest.selected ? Appearance.colors.onSurface : Appearance.colors.onSurfaceVariant

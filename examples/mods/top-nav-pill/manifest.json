@@ -8,7 +8,7 @@
   "entry": {
     "settings": "ui/Settings.qml"
   },
-  "slots": {
+  "ui": {
     "topbar.center": "ui/TopNavPill.qml"
   },
   "overrides": {

@@ -1365,6 +1365,9 @@ Item {
                         + (ModManager.activeOverrideCount > 0 ? (" • UI-оверрайдов: " + ModManager.activeOverrideCount) : "")
                         + ". Безопасный запуск без модов: ymusic-qml --safe-mode или удержание Shift при старте."
                 }
+                NoteText {
+                    text: "Моды выполняются на движке QML внутри интерфейса клиента. Устанавливайте моды только из надёжных источников."
+                }
             }
 
             ContentSection {
@@ -1476,6 +1479,15 @@ Item {
                                 wrapMode: Text.WordWrap
                                 font.pixelSize: Appearance.fontSize.smaller
                                 color: Appearance.colors.error
+                            }
+
+                            StyledText {
+                                width: parent.width
+                                visible: (modCard.modelData.overrideTargets || []).length > 0
+                                text: "Подмена UI: " + (modCard.modelData.overrideTargets || []).join(", ")
+                                wrapMode: Text.WordWrap
+                                font.pixelSize: Appearance.fontSize.smaller
+                                color: Appearance.colors.tertiary
                             }
 
                             StyledText {
@@ -1811,7 +1823,7 @@ Item {
                 layoutMode: "column"
                 width: parent.width
                 slotName: "settings.tab"
-                filterModId: root.activeModTabId
+                filterEntryId: root.activeModTabId
             }
         }
     }

@@ -7,6 +7,7 @@ Item {
 
     property string slotName: ""
     property string filterModId: ""
+    property string filterEntryId: ""
     property var slotContext: ({})
     /// "fill" (overlay/full-area), "column" (vertical flow, e.g. settings), or "row" (horizontal flow, e.g. playerBar)
     property string layoutMode: "fill"
@@ -16,8 +17,13 @@ Item {
         const _rev = ModManager.reloadRevision;
         if (!root.slotName || root.slotName.length === 0) return [];
         const list = ModManager.slotEntries(root.slotName);
-        if (!root.filterModId || root.filterModId.length === 0) return list;
-        return list.filter(item => item.modId === root.filterModId);
+        if (root.filterEntryId && root.filterEntryId.length > 0) {
+            return list.filter(item => (item.entryId || item.modId) === root.filterEntryId);
+        }
+        if (root.filterModId && root.filterModId.length > 0) {
+            return list.filter(item => item.modId === root.filterModId);
+        }
+        return list;
     }
 
     implicitWidth: layoutMode === "row" ? rowHost.implicitWidth : 0
@@ -30,7 +36,7 @@ Item {
 
         function loadEntry() {
             if (!entryData || !entryData.sourceUrl) return;
-            const key = entryData.modId + "|" + String(entryData.sourceUrl) + "|" + ModManager.reloadRevision;
+            const key = (entryData.entryId || entryData.modId) + "|" + String(entryData.sourceUrl) + "|" + ModManager.reloadRevision;
             if (key === loadedKey) return;
             loadedKey = key;
             setSource(entryData.sourceUrl, {

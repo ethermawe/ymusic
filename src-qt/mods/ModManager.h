@@ -8,6 +8,7 @@
 #include <QList>
 #include <QObject>
 #include <QPointer>
+#include <QStringList>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
@@ -35,6 +36,13 @@ struct ModTrackMenuAction {
     bool destructive = false;
 };
 
+struct ModShortcutEntry {
+    QString modId;
+    QString actionId;
+    QString sequence;
+    QString description;
+};
+
 struct ModLogEntry {
     QString time;
     QString modId;
@@ -57,6 +65,8 @@ class ModManager : public QObject {
     Q_PROPERTY(QVariantList mods READ modsVariantList NOTIFY modsChanged FINAL)
     Q_PROPERTY(QVariantList logs READ logsVariantList NOTIFY logsChanged FINAL)
     Q_PROPERTY(QVariantList trackMenuActions READ trackMenuActionsVariantList NOTIFY trackMenuActionsChanged FINAL)
+    Q_PROPERTY(QVariantList shortcuts READ shortcutsVariantList NOTIFY shortcutsChanged FINAL)
+    Q_PROPERTY(int lyricSubtitlesRevision READ lyricSubtitlesRevision NOTIFY lyricSubtitlesChanged FINAL)
 
 public:
     explicit ModManager(AppSettings *settings,
@@ -80,10 +90,12 @@ public:
     bool overridesNeedRestart() const { return m_overridesNeedRestart; }
     bool pendingRestartPrompt() const { return m_pendingRestartPrompt; }
     bool restartRequested() const { return m_restartRequested; }
+    int lyricSubtitlesRevision() const { return m_lyricSubtitlesRevision; }
 
     QVariantList modsVariantList() const;
     QVariantList logsVariantList() const;
     QVariantList trackMenuActionsVariantList() const;
+    QVariantList shortcutsVariantList() const;
 
     Q_INVOKABLE QVariantList slotEntries(const QString &slotName) const;
     Q_INVOKABLE bool hasSlot(const QString &slotName) const;
@@ -96,6 +108,9 @@ public:
                                             const QString &actionId,
                                             const QString &trackId,
                                             const QString &trackTitle);
+    Q_INVOKABLE void triggerShortcut(const QString &modId, const QString &actionId);
+    Q_INVOKABLE void syncLyricsState(const QString &trackId, bool synced, const QVariantList &lines);
+    Q_INVOKABLE QString lyricSubtitleFor(const QString &trackId, int lineIndex) const;
     Q_INVOKABLE void reportModError(const QString &modId, const QString &message);
     Q_INVOKABLE void clearLogs();
     Q_INVOKABLE bool openModsFolder() const;
@@ -115,14 +130,30 @@ public:
     void unregisterTrackMenuAction(const QString &modId, const QString &actionId);
     void clearTrackMenuActionsForMod(const QString &modId);
 
+    void registerShortcut(const QString &modId,
+                          const QString &actionId,
+                          const QString &sequence,
+                          const QString &description);
+    void unregisterShortcut(const QString &modId, const QString &actionId);
+    void clearShortcutsForMod(const QString &modId);
+
+    QString lyricsTrackId() const { return m_lyricsTrackId; }
+    bool lyricsSynced() const { return m_lyricsSynced; }
+    QVariantList lyricsLines() const { return m_lyricsLines; }
+    void setLyricSubtitles(const QString &modId, const QString &trackId, const QStringList &subtitles);
+    void clearLyricSubtitlesForMod(const QString &modId);
+
 signals:
     void modsChanged();
     void reloadRevisionChanged();
     void logsChanged();
     void trackMenuActionsChanged();
+    void shortcutsChanged();
+    void lyricSubtitlesChanged();
     void toastRequested(const QString &message);
     void immersiveRequested(bool open);
     void settingsRequested();
+    void createPlaylistRequested();
 
 private:
     void scanAndSync(bool initialStartup);
@@ -145,7 +176,15 @@ private:
     QHash<QString, QString> m_startupOverrides;
     QHash<QString, QPointer<ModApi>> m_apis;
     QList<ModTrackMenuAction> m_trackMenuActions;
+    QList<ModShortcutEntry> m_shortcuts;
     QList<ModLogEntry> m_logs;
+
+    QString m_lyricsTrackId;
+    bool m_lyricsSynced = false;
+    QVariantList m_lyricsLines;
+    // modId -> (trackId -> subtitle lines)
+    QHash<QString, QPair<QString, QStringList>> m_lyricSubtitles;
+    int m_lyricSubtitlesRevision = 0;
 
     ModUrlInterceptor m_interceptor;
     QFileSystemWatcher m_watcher;

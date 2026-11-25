@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QList>
 #include <QMap>
 #include <QString>
 #include <QStringList>
@@ -7,6 +8,20 @@
 namespace ymusic::mods {
 
 constexpr int kSupportedApiVersion = 1;
+
+struct ModSlotItem {
+    QString entryId; // unique across mods & multi-slot items (e.g. "my-mod" or "my-mod:stats")
+    QString file;    // resolved canonical file path
+    QString title;
+    QString symbol;
+    QString shape;
+};
+
+struct ModShortcutDef {
+    QString id;
+    QString sequence;
+    QString description;
+};
 
 struct ModManifest {
     QString id;
@@ -19,26 +34,18 @@ struct ModManifest {
 
     /// Canonical absolute directory containing manifest.json
     QString directory;
-    /// Optional headless background QML entry (relative -> resolved canonical file)
+    /// Optional headless background QML entry (resolved canonical file)
     QString scriptEntry;
-    /// Optional settings QML page (resolved canonical file)
+    /// Optional modal settings QML page (resolved canonical file)
     QString settingsEntry;
-    /// Optional sidebar page metadata when "sidebar.page" slot is present
-    QString sidebarTitle;
-    QString sidebarSymbol;
-    /// Optional settings chapter metadata when "settings.tab" slot is present
-    QString settingsTabTitle;
-    QString settingsTabSymbol;
-    QString settingsTabShape;
-    /// Optional immersive panel metadata when "immersive.panel" slot is present
-    QString immersivePanelTitle;
-    QString immersivePanelSymbol;
 
     QStringList permissions;
-    /// slot name -> resolved canonical file path
-    QMap<QString, QString> slotsMap;
+    /// slot name -> list of contributed slot items (supports string, object, or array in manifest)
+    QMap<QString, QList<ModSlotItem>> slotsMap;
     /// normalized relative qml path (e.g. "qml/player/FloatingPlayerBar.qml") -> resolved canonical file path
     QMap<QString, QString> overridesMap;
+    /// optional declarative shortcuts registered automatically when mod loads
+    QList<ModShortcutDef> shortcuts;
 
     bool valid = false;
     QString error;

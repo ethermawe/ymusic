@@ -9,9 +9,10 @@ Item {
     property var modApi: null
     property var slotContext: ({})
 
-    readonly property int activePage: UiState.activeModPageId.length > 0 ? -1 : backend.page
+    readonly property int activePage: UiState.activeModPageId.length > 0 ? -1 : (modApi ? modApi.currentPage : 0)
     readonly property bool showLabels: modApi ? Boolean(modApi.storageGet("showLabels", false)) : false
     readonly property bool tight: width < (showLabels ? 640 : 440)
+    readonly property var pinnedList: modApi ? modApi.pinnedPlaylists : []
 
     SoftShadow {
         anchors.fill: pill
@@ -114,8 +115,8 @@ Item {
                 buttonRadius: width / 2
                 colBackground: "transparent"
                 colBackgroundHover: Appearance.colors.layer2Hover
-                tooltip: backend.loggedIn ? (backend.userName || "Профиль") : "Войти / Настройки"
-                onClicked: UiState.settingsRequested()
+                tooltip: (modApi && modApi.loggedIn) ? (modApi.userName || "Профиль") : "Войти / Настройки"
+                onClicked: if (modApi) modApi.openSettings()
 
                 contentItem: Item {
                     ArtworkImage {
@@ -124,7 +125,7 @@ Item {
                         height: 28
                         circular: true
                         squiggly: false
-                        source: backend.userHasAvatar ? backend.userAvatar : ""
+                        source: modApi ? modApi.userAvatar : ""
                         placeholderSymbol: "person"
                         borderWidth: 1
                         borderColor: Appearance.colors.layer0Border
@@ -138,28 +139,28 @@ Item {
                 symbol: "waves"
                 label: "Волна"
                 active: root.activePage === 1
-                onClicked: { UiState.closeModPage(); backend.startWave(); }
+                onClicked: { UiState.closeModPage(); if (modApi) modApi.openWave(); }
             }
 
             NavPillButton {
                 symbol: "home"
                 label: "Главная"
                 active: root.activePage === 0
-                onClicked: { UiState.closeModPage(); backend.loadHome(); }
+                onClicked: { UiState.closeModPage(); if (modApi) modApi.openHome(); }
             }
 
             NavPillButton {
                 symbol: "favorite"
                 label: "Мне нравится"
                 active: root.activePage === 2
-                onClicked: { UiState.closeModPage(); backend.loadLikes(); }
+                onClicked: { UiState.closeModPage(); if (modApi) modApi.openLikes(); }
             }
 
             NavPillButton {
                 symbol: "download_done"
                 label: "Загружено"
                 active: root.activePage === 7
-                onClicked: { UiState.closeModPage(); backend.loadDownloads(); }
+                onClicked: { UiState.closeModPage(); if (modApi) modApi.openDownloads(); }
             }
 
             NavPillButton {
@@ -167,7 +168,7 @@ Item {
                 symbol: "library_music"
                 label: "Плейлисты"
                 active: root.activePage === 3 || root.activePage === 6
-                onClicked: { UiState.closeModPage(); backend.loadPlaylists(); }
+                onClicked: { UiState.closeModPage(); if (modApi) modApi.openPlaylists(); }
                 onSecondaryClicked: pinnedMenu.popup(playlistsBtn, 0, playlistsBtn.height + 6)
             }
 
@@ -175,14 +176,14 @@ Item {
                 symbol: "album"
                 label: "Альбомы"
                 active: root.activePage === 4
-                onClicked: { UiState.closeModPage(); backend.loadAlbums(); }
+                onClicked: { UiState.closeModPage(); if (modApi) modApi.openAlbums(); }
             }
 
             NavPillButton {
                 symbol: "group"
                 label: "Артисты"
                 active: root.activePage === 5
-                onClicked: { UiState.closeModPage(); backend.loadArtists(); }
+                onClicked: { UiState.closeModPage(); if (modApi) modApi.openArtists(); }
             }
 
             // Mod pages from other installed mods
@@ -190,10 +191,11 @@ Item {
                 model: ModManager.reloadRevision >= 0 ? ModManager.slotEntries("sidebar.page") : []
                 delegate: NavPillButton {
                     required property var modelData
+                    readonly property string entryKey: modelData.entryId || modelData.modId
                     symbol: modelData.symbol || "extension"
                     label: modelData.title || modelData.modName || ""
-                    active: UiState.activeModPageId === modelData.modId
-                    onClicked: UiState.openModPage(modelData.modId)
+                    active: UiState.activeModPageId === entryKey
+                    onClicked: UiState.openModPage(entryKey)
                 }
             }
 
@@ -204,7 +206,7 @@ Item {
                 label: "Настройки"
                 showText: false
                 active: false
-                onClicked: UiState.settingsRequested()
+                onClicked: if (modApi) modApi.openSettings()
             }
         }
     }
@@ -215,29 +217,30 @@ Item {
         StyledMenuItem {
             text: "Создать плейлист…"
             symbol: "playlist_add"
-            onTriggered: UiState.createPlaylistRequested()
+            onTriggered: if (modApi) modApi.openCreatePlaylist()
         }
 
         StyledMenuSeparator {
-            visible: backend.pinnedPlaylists.length > 0
+            visible: root.pinnedList.length > 0
             height: visible ? implicitHeight : 0
         }
 
         property list<QtObject> _pinnedHelper: [
             Instantiator {
-                model: backend.pinnedPlaylists
+                model: root.pinnedList
                 delegate: StyledMenuItem {
                     required property var modelData
                     text: modelData.title || "Плейлист"
                     symbol: "library_music"
                     onTriggered: {
                         UiState.closeModPage();
-                        backend.feature({
-                            action: "open_playlist",
-                            uid: modelData.uid,
-                            kind: modelData.kind,
-                            title: modelData.title || "Плейлист"
-                        });
+                        if (modApi) {
+                            modApi.openPlaylist(
+                                String(modelData.uid ?? ""),
+                                String(modelData.kind ?? ""),
+                                String(modelData.title ?? "Плейлист")
+                            );
+                        }
                     }
                 }
                 onObjectAdded: (index, object) => pinnedMenu.insertItem(pinnedMenu.count, object)

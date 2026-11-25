@@ -24,7 +24,8 @@ namespace ymusic::mods {
 class ModManager;
 
 /// Per-mod isolated API proxy. Destroying this object cleanly disconnects all
-/// signals, aborts pending HTTP requests, and cleans up registered menu actions.
+/// signals, aborts pending HTTP requests, and cleans up registered menu actions,
+/// shortcuts, and lyric subtitles.
 class ModApi : public QObject {
     Q_OBJECT
     QML_ELEMENT
@@ -54,6 +55,19 @@ class ModApi : public QObject {
     Q_PROPERTY(qreal positionSecs READ positionSecs NOTIFY positionChanged FINAL)
     Q_PROPERTY(qreal durationSecs READ durationSecs NOTIFY positionChanged FINAL)
     Q_PROPERTY(qreal progress READ progress NOTIFY positionChanged FINAL)
+
+    // Navigation & profile (requires "ui:slots" or "playback:read")
+    Q_PROPERTY(int currentPage READ currentPage NOTIFY navigationChanged FINAL)
+    Q_PROPERTY(bool canGoBack READ canGoBack NOTIFY navigationChanged FINAL)
+    Q_PROPERTY(bool loggedIn READ loggedIn NOTIFY navigationChanged FINAL)
+    Q_PROPERTY(QString userName READ userName NOTIFY navigationChanged FINAL)
+    Q_PROPERTY(QString userAvatar READ userAvatar NOTIFY navigationChanged FINAL)
+    Q_PROPERTY(QVariantList pinnedPlaylists READ pinnedPlaylists NOTIFY libraryChanged FINAL)
+
+    // Lyrics state (requires "lyrics:read")
+    Q_PROPERTY(QString lyricsTrackId READ lyricsTrackId NOTIFY lyricsChanged FINAL)
+    Q_PROPERTY(bool lyricsSynced READ lyricsSynced NOTIFY lyricsChanged FINAL)
+    Q_PROPERTY(QVariantList lyricsLines READ lyricsLines NOTIFY lyricsChanged FINAL)
 
 public:
     explicit ModApi(ModManifest manifest,
@@ -89,6 +103,17 @@ public:
     qreal durationSecs() const;
     qreal progress() const;
 
+    int currentPage() const;
+    bool canGoBack() const;
+    bool loggedIn() const;
+    QString userName() const;
+    QString userAvatar() const;
+    QVariantList pinnedPlaylists() const;
+
+    QString lyricsTrackId() const;
+    bool lyricsSynced() const;
+    QVariantList lyricsLines() const;
+
     // Playback control (requires "playback:control")
     Q_INVOKABLE bool toggle();
     Q_INVOKABLE bool next();
@@ -98,6 +123,28 @@ public:
     Q_INVOKABLE bool toggleLike();
     Q_INVOKABLE bool playNext(const QString &trackId);
     Q_INVOKABLE bool addToQueue(const QString &trackId);
+
+    // Navigation (requires "ui:slots")
+    Q_INVOKABLE bool openHome();
+    Q_INVOKABLE bool openWave();
+    Q_INVOKABLE bool openLikes();
+    Q_INVOKABLE bool openDownloads();
+    Q_INVOKABLE bool openPlaylists();
+    Q_INVOKABLE bool openAlbums();
+    Q_INVOKABLE bool openArtists();
+    Q_INVOKABLE bool openSearch(const QString &query);
+    Q_INVOKABLE bool openPlaylist(const QString &uid, const QString &kind, const QString &title = QString());
+    Q_INVOKABLE bool goBack();
+    Q_INVOKABLE bool openCreatePlaylist();
+
+    // Library & queue snapshots (requires "library:read")
+    Q_INVOKABLE QVariantList queueTracks() const;
+    Q_INVOKABLE QVariantList currentTracks() const;
+    Q_INVOKABLE QVariantList historyTracks() const;
+
+    // Lyrics transformation (requires "lyrics:transform")
+    Q_INVOKABLE bool setLyricSubtitles(const QString &trackId, const QVariantList &subtitles);
+    Q_INVOKABLE void clearLyricSubtitles();
 
     // Spectrum data (requires "spectrum:read")
     Q_INVOKABLE QVariantList spectrumLevels() const;
@@ -109,7 +156,7 @@ public:
     Q_INVOKABLE bool storageRemove(const QString &key);
     Q_INVOKABLE QVariantMap storageAll() const;
 
-    // UI helpers (requires "ui:slots")
+    // UI helpers & shortcuts (requires "ui:slots")
     Q_INVOKABLE bool showToast(const QString &message);
     Q_INVOKABLE bool openImmersive();
     Q_INVOKABLE bool closeImmersive();
@@ -119,6 +166,10 @@ public:
                                              const QString &symbol = QStringLiteral("extension"),
                                              bool destructive = false);
     Q_INVOKABLE void unregisterTrackMenuAction(const QString &actionId);
+    Q_INVOKABLE bool registerShortcut(const QString &actionId,
+                                      const QString &sequence,
+                                      const QString &description = QString());
+    Q_INVOKABLE void unregisterShortcut(const QString &actionId);
 
     // Clipboard & external web URLs
     Q_INVOKABLE bool copyText(const QString &text);
@@ -126,19 +177,30 @@ public:
 
     // Allowlisted async HTTP (requires "network:<host>")
     Q_INVOKABLE bool httpGet(const QString &url, const QString &requestId);
+    Q_INVOKABLE bool httpRequest(const QString &method,
+                                 const QString &url,
+                                 const QVariantMap &headers,
+                                 const QString &body,
+                                 const QString &requestId);
 
     // Logging to Mod Console
     Q_INVOKABLE void log(const QString &message);
     Q_INVOKABLE void warn(const QString &message);
 
     void notifyTrackMenuAction(const QString &actionId, const QString &trackId, const QString &trackTitle);
+    void notifyShortcut(const QString &actionId);
+    void notifyLyricsChanged();
 
 signals:
     void trackChanged();
     void playbackChanged();
     void positionChanged();
+    void navigationChanged();
+    void libraryChanged();
+    void lyricsChanged();
     void spectrumUpdated();
     void trackMenuActionTriggered(const QString &actionId, const QString &trackId, const QString &trackTitle);
+    void shortcutTriggered(const QString &actionId);
     void httpFinished(const QString &requestId, int statusCode, const QString &body, const QString &error);
 
 private:

@@ -52,30 +52,30 @@
     "settings": "ui/Settings.qml"
   },
 
-  "sidebar": {
-    "title": "Мой экран",
-    "symbol": "auto_awesome"
-  },
-
-  "settingsTab": {
-    "title": "Мой мод",
-    "symbol": "tune",
-    "shape": "flower"
-  },
-
-  "immersivePanel": {
-    "title": "Анализатор",
-    "symbol": "graphic_eq"
-  },
-
-  "slots": {
-    "sidebar.page": "ui/Page.qml",
+  "ui": {
+    "sidebar.page": [
+      { "id": "main", "file": "ui/Page.qml", "title": "Мой экран", "symbol": "auto_awesome", "shape": "gem" },
+      { "id": "stats", "file": "ui/Stats.qml", "title": "Статистика", "symbol": "bar_chart" }
+    ],
     "topbar.center": "ui/TopWidget.qml",
     "playerBar.controls": "ui/PlayerButton.qml",
-    "immersive.panel": "ui/ImmersivePanel.qml",
-    "settings.tab": "ui/SettingsTab.qml",
+    "immersive.panel": {
+      "file": "ui/ImmersivePanel.qml",
+      "title": "Анализатор",
+      "symbol": "graphic_eq"
+    },
+    "settings.tab": {
+      "file": "ui/SettingsTab.qml",
+      "title": "Мой мод",
+      "symbol": "tune",
+      "shape": "flower"
+    },
     "settings.section.player": "ui/PlayerSettingsSection.qml"
   },
+
+  "shortcuts": [
+    { "id": "toggle-panel", "sequence": "Ctrl+Alt+T", "description": "Переключить панель мода" }
+  ],
 
   "overrides": {
     "qml/sidebar/Sidebar.qml": "overrides/Sidebar.qml"
@@ -84,6 +84,9 @@
   "permissions": [
     "playback:read",
     "playback:control",
+    "library:read",
+    "lyrics:read",
+    "lyrics:transform",
     "spectrum:read",
     "ui:slots",
     "ui:override",
@@ -94,26 +97,38 @@
 }
 ```
 
+### Как работает блок `"ui"` (и обратная совместимость)
+Для любого слота в `"ui"` (старый ключ `"slots"` также поддерживается) можно указать:
+- **строку** — просто путь к QML: `"topbar.center": "ui/TopWidget.qml"`;
+- **объект** — путь + метаданные (`id`, `file`, `title`, `symbol`, `shape`), особенно удобно для `sidebar.page`, `settings.tab`, `immersive.panel`;
+- **массив** строк и/или объектов — один мод может добавить сразу несколько страниц, глав настроек, кнопок в плеере или иммерсивных панелей.
+
 ### Ограничения валидации
 - `id`: только `^[a-z0-9][a-z0-9_-]{1,47}$`.
 - `apiVersion`: сейчас строго `1`.
-- Все пути в `entry`, `slots` и `overrides` обязаны быть относительными и строго внутри папки мода (`..` и симлинки наружу блокируются).
+- `minAppVersion`: если указана (например, `"0.3.0"`), сравнивается с текущей версией клиента через `QVersionNumber`; при несовместимости мод не загружается и показывает понятную ошибку в списке.
+- Все пути в `entry`, `ui`/`slots` и `overrides` обязаны быть относительными и строго внутри папки мода (`..` и симлинки наружу блокируются).
 - Использование `overrides` без разрешения `"ui:override"` отклоняется на этапе парсинга манифеста.
 
 ---
 
 ## 4. Таблица разрешений (`permissions`)
 
+> **Модель безопасности:** моды выполняются на движке QML внутри интерфейса клиента. Разрешения определяют контракт `ModApi` и прозрачно отображаются пользователю в карточке мода (вместе со списком подменяемых файлов `overrideTargets`), но не являются жёсткой изоляцией уровня ОС.
+
 | Разрешение | Что открывает | Ограничения безопасности |
 |---|---|---|
-| `playback:read` | Чтение свойств текущего трека, состояния плеера, прогресса, громкости, темпа | Без OAuth-токена и данных аккаунта |
+| `playback:read` | Чтение свойств текущего трека, состояния плеера, прогресса, громкости, темпа | Без OAuth-токена |
 | `playback:control` | `toggle()`, `next()`, `prev()`, `seek()`, `setVolume()`, `toggleLike()`, `playNext()`, `addToQueue()` | Нет доступа к выходу/настройкам аккаунта |
+| `library:read` | `queueTracks()`, `currentTracks()`, `historyTracks()`, сигнал `libraryChanged` | Только чтение снимков списков треков |
+| `lyrics:read` | `lyricsTrackId`, `lyricsSynced`, `lyricsLines`, сигнал `lyricsChanged` | Только чтение загруженного текста |
+| `lyrics:transform` | `setLyricSubtitles(trackId, lines)`, `clearLyricSubtitles()` | Добавляет подстрочник (перевод/транслит) под строками текста |
 | `spectrum:read` | `spectrumLevels()` (48 FFT-полос), `spectrumEnergies()` (5 полос), сигнал `spectrumUpdated` | 60 Hz, без доступа к сырому PCM |
-| `ui:slots` | Встраивание в UI-слоты, `showToast()`, `openImmersive()`, `closeImmersive()`, `openSettings()`, `openExternalUrl()`, `registerTrackMenuAction()` | `openExternalUrl` разрешает только `http://` и `https://` |
+| `ui:slots` | Встраивание в UI-слоты, навигация (`openHome`, `openPlaylist` и др.), `showToast()`, `openImmersive()`, `openSettings()`, `openCreatePlaylist()`, `openExternalUrl()`, `registerTrackMenuAction()`, `registerShortcut()` | `openExternalUrl` разрешает только `http://` и `https://` |
 | `ui:override` | Подмена любых `.qml` модуля `ymusic.ui` через `ModUrlInterceptor` | Требует перезапуска клиента; автокарантин при падении старта |
 | `storage` | `storageGet`, `storageSet`, `storageRemove`, `storageAll` | Изолированный файл `mod-data/<mod-id>.json` |
 | `clipboard` | `copyText(text)` | Только запись в буфер |
-| `network:<host>` | `httpGet(url, requestId)` + сигнал `httpFinished(...)` | Только HTTPS (или `http://localhost` / `127.0.0.1`), без кук Яндекса, лимит 4 МБ, таймаут 15 сек |
+| `network:<host>` | `httpGet(url, requestId)` и `httpRequest(method, url, headers, body, requestId)` + сигнал `httpFinished(...)` | Только HTTPS (или `http://localhost` / `127.0.0.1`), методы `GET/POST/PUT/PATCH/DELETE`, заголовки `Host`/`Cookie`/`Content-Length` фильтруются, лимит 4 МБ, таймаут 15 сек |
 
 ---
 
@@ -158,17 +173,26 @@
 - Идентификация: `modId`, `modName`, `permissions`, `hasPermission(perm)`
 - Трек (`playback:read`): `hasTrack`, `trackId`, `trackTitle`, `trackArtists`, `trackAlbum`, `trackCover`, `trackLiked`, `trackIsAi`
 - Плеер (`playback:read`): `playing`, `buffering`, `volume` (`0..1`), `shuffle`, `repeatMode` (`0`=выкл, `1`=все, `2`=один), `tempo`, `positionSecs`, `durationSecs`, `progress` (`0..1`)
+- Навигация и профиль: `currentPage`, `canGoBack`, `loggedIn`, `userName`, `userAvatar`, `pinnedPlaylists`
+- Текст песни (`lyrics:read`): `lyricsTrackId`, `lyricsSynced`, `lyricsLines` (массив `{ text, time, words }`)
 
 ### Сигналы
 - `trackChanged()` — сменился текущий трек или его метаданные/лайк
 - `playbackChanged()` — play/pause, buffering, volume, shuffle, repeat, tempo
 - `positionChanged()` — обновление позиции трека
+- `navigationChanged()` — смена страницы, статуса входа или закреплённых плейлистов
+- `libraryChanged()` — обновление очереди, текущего списка треков или истории (`library:read`)
+- `lyricsChanged()` — загружен или очищен текст текущей песни (`lyrics:read`)
 - `spectrumUpdated()` — 60 Hz обновление FFT-буфера (только при `spectrum:read`)
 - `trackMenuActionTriggered(actionId, trackId, trackTitle)` — клик по вашему пункту в `TrackMenu`
-- `httpFinished(requestId, statusCode, body, error)` — завершение `httpGet(...)`
+- `shortcutTriggered(actionId)` — сработала горячая клавиша мода (из `manifest.json` или `registerShortcut`)
+- `httpFinished(requestId, statusCode, body, error)` — завершение `httpGet(...)` / `httpRequest(...)`
 
 ### Методы
 - **Управление (`playback:control`):** `toggle()`, `next()`, `prev()`, `seek(0..1)`, `setVolume(0..1)`, `toggleLike()`, `playNext(trackId)`, `addToQueue(trackId)`
+- **Навигация (`ui:slots`):** `openHome()`, `openWave()`, `openLikes()`, `openDownloads()`, `openPlaylists()`, `openAlbums()`, `openArtists()`, `openSearch(query)`, `openPlaylist(uid, kind, title)`, `goBack()`, `openCreatePlaylist()`
+- **Библиотека (`library:read`):** `queueTracks()`, `currentTracks()`, `historyTracks()` → массивы `{ id, title, artists, album, durationSecs, coverUrl, liked, available, isAi }`
+- **Субтитры текста (`lyrics:transform`):** `setLyricSubtitles(trackId, subtitles)` (массив строк по индексу), `clearLyricSubtitles()`
 - **Спектр (`spectrum:read`):** `spectrumLevels()` → `number[48]`, `spectrumEnergies()` → `number[5]` (от саб-баса к верхам)
 - **Хранилище (`storage`):** `storageGet(key, fallback)`, `storageSet(key, value)`, `storageRemove(key)`, `storageAll()`
 - **Интерфейс (`ui:slots`):**
@@ -177,8 +201,11 @@
   - `openSettings()`
   - `openExternalUrl(url)`
   - `registerTrackMenuAction(actionId, label, symbol, destructive)` / `unregisterTrackMenuAction(actionId)`
+  - `registerShortcut(actionId, sequence, description)` / `unregisterShortcut(actionId)`
 - **Буфер (`clipboard`):** `copyText(text)`
-- **Сеть (`network:<host>`):** `httpGet(url, requestId)`
+- **Сеть (`network:<host>`):**
+  - `httpGet(url, requestId)`
+  - `httpRequest(method, url, headers, body, requestId)` — поддержка `GET`, `POST`, `PUT`, `PATCH`, `DELETE` и JSON/текстовых заголовков и тела
 - **Логи:** `log(message)`, `warn(message)`
 
 ---
@@ -318,23 +345,49 @@ ShaderEffect {
 }
 ```
 
-### Рецепт 5: Асинхронный HTTP-запрос (`network:<host>`)
+### Рецепт 5: Асинхронный HTTP-запрос (`GET` / `POST`) и скробблинг
 
 ```qml
-// В manifest.json: "permissions": ["network:api.github.com", "ui:slots"]
-Component.onCompleted: {
-    modApi.httpGet("https://api.github.com/zen", "zen-1")
+// В manifest.json: "permissions": ["network:api.listenbrainz.org", "playback:read", "ui:slots"]
+function submitListen(artist, track) {
+    const payload = JSON.stringify({
+        listen_type: "playing_now",
+        payload: [{ track_metadata: { artist_name: artist, track_name: track } }]
+    })
+    modApi.httpRequest(
+        "POST",
+        "https://api.listenbrainz.org/1/submit-listens",
+        { "Content-Type": "application/json", "Authorization": "Token " + myToken },
+        payload,
+        "lb-now"
+    )
 }
 
 Connections {
     target: root.modApi
     function onHttpFinished(requestId, statusCode, body, error) {
-        if (requestId === "zen-1" && statusCode === 200) {
-            modApi.showToast(body)
+        if (requestId === "lb-now" && statusCode !== 200) {
+            modApi.warn("ListenBrainz HTTP " + statusCode + ": " + error)
         }
     }
 }
 ```
+
+### Рецепт 6: Перевод / транслитерация текста песни (`lyrics:read` + `lyrics:transform`)
+
+```qml
+// В manifest.json: "permissions": ["lyrics:read", "lyrics:transform", "ui:slots"]
+Connections {
+    target: root.modApi
+    function onLyricsChanged() {
+        const lines = root.modApi.lyricsLines
+        if (!lines || lines.length === 0) return
+        const subs = lines.map(l => myTransliterate(l.text || ""))
+        root.modApi.setLyricSubtitles(root.modApi.lyricsTrackId, subs)
+    }
+}
+```
+Подстрочник автоматически отобразится и в боковой панели `LyricsPanel`, и в полноэкранном `ImmersiveLyrics`, а при выключении или перезагрузке мода очистится сам.
 
 ---
 

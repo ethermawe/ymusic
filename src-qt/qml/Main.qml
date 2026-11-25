@@ -18,6 +18,7 @@
  */
 
 pragma ComponentBehavior: Bound
+import QtQml
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
@@ -94,6 +95,7 @@ ApplicationWindow {
             else UiState.closeImmersive();
         }
         function onSettingsRequested() { window.openSettings(); }
+        function onCreatePlaylistRequested() { createPlaylist.open(); }
     }
 
     function openSettings() {
@@ -453,7 +455,7 @@ ApplicationWindow {
                         anchors.topMargin: Appearance.sizes.topBarHeight + 6
                         anchors.bottomMargin: Appearance.sizes.playerBarClearance
                         slotName: "sidebar.page"
-                        filterModId: UiState.activeModPageId
+                        filterEntryId: UiState.activeModPageId
                     }
                 }
 
@@ -1268,6 +1270,16 @@ ApplicationWindow {
         onActivated: {
             ModManager.reloadMods();
             toast.show("Моды перезагружены");
+        }
+    }
+
+    Instantiator {
+        model: ModManager.shortcuts
+        delegate: Shortcut {
+            required property var modelData
+            sequence: modelData.sequence || ""
+            enabled: ModManager.modsEnabled && sequence.length > 0
+            onActivated: ModManager.triggerShortcut(modelData.modId, modelData.actionId)
         }
     }
 }

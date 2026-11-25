@@ -1,5 +1,6 @@
 #include "mods/ModManifest.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -7,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QVersionNumber>
 
 namespace ymusic::mods {
 
@@ -17,6 +19,9 @@ bool isKnownPermission(const QString &perm)
     static const QStringList kSimple {
         QStringLiteral("playback:read"),
         QStringLiteral("playback:control"),
+        QStringLiteral("library:read"),
+        QStringLiteral("lyrics:read"),
+        QStringLiteral("lyrics:transform"),
         QStringLiteral("spectrum:read"),
         QStringLiteral("ui:slots"),
         QStringLiteral("ui:override"),
@@ -160,6 +165,20 @@ ModManifest parseManifest(const QString &modDirectory)
         return m;
     }
 
+    // Real minAppVersion check against running application version
+    if (!m.minAppVersion.isEmpty()) {
+        const QString appVerStr = QCoreApplication::applicationVersion().trimmed();
+        if (!appVerStr.isEmpty()) {
+            const QVersionNumber reqVer = QVersionNumber::fromString(m.minAppVersion);
+            const QVersionNumber curVer = QVersionNumber::fromString(appVerStr);
+            if (!reqVer.isNull() && !curVer.isNull() && curVer < reqVer) {
+                m.error = QStringLiteral("Требуется ymusic версии %1 или новее (текущая: %2)")
+                    .arg(m.minAppVersion, appVerStr);
+                return m;
+            }
+        }
+    }
+
     const QJsonArray perms = root.value(QStringLiteral("permissions")).toArray();
     for (const QJsonValue &val : perms) {
         const QString p = val.toString().trimmed();
@@ -193,30 +212,106 @@ ModManifest parseManifest(const QString &modDirectory)
         m.settingsEntry = resolved;
     }
 
-    const QJsonObject sidebar = root.value(QStringLiteral("sidebar")).toObject();
-    m.sidebarTitle = sidebar.value(QStringLiteral("title")).toString().trimmed();
-    m.sidebarSymbol = sidebar.value(QStringLiteral("symbol")).toString().trimmed();
+    // Legacy fallback metadata (still honored when using short string syntax in "slots")
+    const QJsonObject legacySidebar = root.value(QStringLiteral("sidebar")).toObject();
+    const QJsonObject legacySettingsTab = root.value(QStringLiteral("settingsTab")).toObject();
+    const QJsonObject legacyImmersivePanel = root.value(QStringLiteral("immersivePanel")).toObject();
 
-    const QJsonObject settingsTab = root.value(QStringLiteral("settingsTab")).toObject();
-    m.settingsTabTitle = settingsTab.value(QStringLiteral("title")).toString().trimmed();
-    m.settingsTabSymbol = settingsTab.value(QStringLiteral("symbol")).toString().trimmed();
-    m.settingsTabShape = settingsTab.value(QStringLiteral("shape")).toString().trimmed();
+    auto parseSlotContribution = [&](const QString &slotName, const QJsonValue &val, int idx, ModSlotItem &out) -> bool {
+        QString rel;
+        QString itemId;
+        if (val.isString()) {
+            rel = val.toString().trimmed();
+        } else if (val.isObject()) {
+            const QJsonObject obj = val.toObject();
+            rel = obj.value(QStringLiteral("file")).toString().trimmed();
+            itemId = obj.value(QStringLiteral("id")).toString().trimmed();
+            out.title = obj.value(QStringLiteral("title")).toString().trimmed();
+            out.symbol = obj.value(QStringLiteral("symbol")).toString().trimmed();
+            out.shape = obj.value(QStringLiteral("shape")).toString().trimmed();
+        } else {
+            return false;
+        }
 
-    const QJsonObject immersivePanel = root.value(QStringLiteral("immersivePanel")).toObject();
-    m.immersivePanelTitle = immersivePanel.value(QStringLiteral("title")).toString().trimmed();
-    m.immersivePanelSymbol = immersivePanel.value(QStringLiteral("symbol")).toString().trimmed();
-
-    const QJsonObject slotsObj = root.value(QStringLiteral("slots")).toObject();
-    for (auto it = slotsObj.constBegin(); it != slotsObj.constEnd(); ++it) {
-        const QString slotName = it.key().trimmed();
-        const QString rel = it.value().toString().trimmed();
-        if (slotName.isEmpty() || rel.isEmpty()) continue;
         const QString resolved = resolveModPath(m.directory, rel, true);
         if (resolved.isEmpty()) {
             m.error = QStringLiteral("Некорректный файл для слота '%1': %2").arg(slotName, rel);
-            return m;
+            return false;
         }
-        m.slotsMap.insert(slotName, resolved);
+        out.file = resolved;
+        if (!itemId.isEmpty()) {
+            out.entryId = m.id + u':' + itemId;
+        } else if (idx > 0) {
+            out.entryId = m.id + u':' + QString::number(idx);
+        } else {
+            out.entryId = m.id;
+        }
+
+        // Fill sensible defaults per slot type (with legacy fallback)
+        if (slotName == QLatin1StringView("sidebar.page")) {
+            if (out.title.isEmpty()) out.title = legacySidebar.value(QStringLiteral("title")).toString().trimmed();
+            if (out.symbol.isEmpty()) out.symbol = legacySidebar.value(QStringLiteral("symbol")).toString().trimmed();
+            if (out.symbol.isEmpty()) out.symbol = QStringLiteral("extension");
+        } else if (slotName == QLatin1StringView("settings.tab")) {
+            if (out.title.isEmpty()) out.title = legacySettingsTab.value(QStringLiteral("title")).toString().trimmed();
+            if (out.symbol.isEmpty()) out.symbol = legacySettingsTab.value(QStringLiteral("symbol")).toString().trimmed();
+            if (out.shape.isEmpty()) out.shape = legacySettingsTab.value(QStringLiteral("shape")).toString().trimmed();
+            if (out.symbol.isEmpty()) out.symbol = QStringLiteral("widgets");
+            if (out.shape.isEmpty()) out.shape = QStringLiteral("flower");
+        } else if (slotName == QLatin1StringView("immersive.panel")) {
+            if (out.title.isEmpty()) out.title = legacyImmersivePanel.value(QStringLiteral("title")).toString().trimmed();
+            if (out.symbol.isEmpty()) out.symbol = legacyImmersivePanel.value(QStringLiteral("symbol")).toString().trimmed();
+            if (out.symbol.isEmpty()) out.symbol = QStringLiteral("extension");
+        }
+        if (out.title.isEmpty()) out.title = m.name;
+        return true;
+    };
+
+    // Parse unified "ui" block (preferred) and legacy "slots" block
+    const auto parseSlotsObject = [&](const QJsonObject &slotsObj) -> bool {
+        for (auto it = slotsObj.constBegin(); it != slotsObj.constEnd(); ++it) {
+            const QString slotName = it.key().trimmed();
+            if (slotName.isEmpty()) continue;
+            if (it.value().isArray()) {
+                const QJsonArray arr = it.value().toArray();
+                for (int i = 0; i < arr.size(); ++i) {
+                    ModSlotItem item;
+                    if (!parseSlotContribution(slotName, arr.at(i), i, item)) {
+                        return false;
+                    }
+                    m.slotsMap[slotName].append(std::move(item));
+                }
+            } else {
+                ModSlotItem item;
+                if (!parseSlotContribution(slotName, it.value(), 0, item)) {
+                    return false;
+                }
+                m.slotsMap[slotName].append(std::move(item));
+            }
+        }
+        return true;
+    };
+
+    if (!parseSlotsObject(root.value(QStringLiteral("slots")).toObject())) {
+        return m;
+    }
+    if (!parseSlotsObject(root.value(QStringLiteral("ui")).toObject())) {
+        return m;
+    }
+
+    // Declarative shortcuts
+    const QJsonArray shortcutsArr = root.value(QStringLiteral("shortcuts")).toArray();
+    for (const QJsonValue &val : shortcutsArr) {
+        if (!val.isObject()) continue;
+        const QJsonObject obj = val.toObject();
+        const QString scId = obj.value(QStringLiteral("id")).toString().trimmed();
+        const QString seq = obj.value(QStringLiteral("sequence")).toString().trimmed();
+        if (scId.isEmpty() || seq.isEmpty()) continue;
+        m.shortcuts.append({
+            scId,
+            seq,
+            obj.value(QStringLiteral("description")).toString().trimmed(),
+        });
     }
 
     const QJsonObject overridesObj = root.value(QStringLiteral("overrides")).toObject();
@@ -238,28 +333,6 @@ ModManifest parseManifest(const QString &modDirectory)
     if (!m.overridesMap.isEmpty() && !m.hasPermission(QStringLiteral("ui:override"))) {
         m.error = QStringLiteral("Для overrides требуется разрешение 'ui:override'");
         return m;
-    }
-
-    if (m.sidebarTitle.isEmpty()) {
-        m.sidebarTitle = m.name;
-    }
-    if (m.sidebarSymbol.isEmpty()) {
-        m.sidebarSymbol = QStringLiteral("extension");
-    }
-    if (m.settingsTabTitle.isEmpty()) {
-        m.settingsTabTitle = m.name;
-    }
-    if (m.settingsTabSymbol.isEmpty()) {
-        m.settingsTabSymbol = QStringLiteral("widgets");
-    }
-    if (m.settingsTabShape.isEmpty()) {
-        m.settingsTabShape = QStringLiteral("flower");
-    }
-    if (m.immersivePanelTitle.isEmpty()) {
-        m.immersivePanelTitle = m.name;
-    }
-    if (m.immersivePanelSymbol.isEmpty()) {
-        m.immersivePanelSymbol = QStringLiteral("extension");
     }
 
     m.valid = true;

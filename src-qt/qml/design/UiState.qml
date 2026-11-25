@@ -217,6 +217,7 @@ QtObject {
         lyricsMessage = ""
         lyricsWriters = ""
         lyricsMajor = ""
+        ModManager.syncLyricsState(lyricsTrackId, false, [])
         backend.feature({
             action: "lyrics",
             id: backend.nowId,
@@ -260,6 +261,7 @@ QtObject {
                 root.lyricsMessage = result.message || ""
                 root.lyricsWriters = result.writers || ""
                 root.lyricsMajor = result.major || ""
+                ModManager.syncLyricsState(root.lyricsTrackId, root.lyricsSynced, root.lyricsLines)
             }
         }
     }
