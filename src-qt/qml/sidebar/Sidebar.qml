@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import ymusic.ui
@@ -5,15 +6,57 @@ import ymusic.ui
 Item {
     id: root
 
-    readonly property int activePage: backend.page
+    readonly property int activePage: UiState.activeModPageId.length > 0 ? -1 : backend.page
+    property bool compact: false
+    property real expandedWidth: 220
+    property bool resizing: false
+    property bool toggleVisible: true
+    readonly property bool isCompact: compact
     signal settingsRequested()
+    signal toggleCompactRequested()
 
-    implicitWidth: 220
+    implicitWidth: isCompact ? 72 : Math.max(160, Math.min(340, expandedWidth))
+
+    Behavior on implicitWidth {
+        enabled: !Appearance.performanceMode && !root.resizing
+        ElementMove {}
+    }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 12
+        anchors.margins: root.isCompact ? 10 : 12
+        spacing: 10
+
+        Item {
+            visible: root.toggleVisible
+            Layout.fillWidth: true
+            Layout.preferredHeight: 30
+
+            StyledText {
+                visible: !root.isCompact
+                anchors.left: parent.left
+                anchors.leftMargin: 6
+                anchors.right: collapseToggle.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("Навигация")
+                elide: Text.ElideRight
+                font.pixelSize: Appearance.fontSize.smaller
+                font.weight: Font.DemiBold
+                color: Appearance.colors.onSurfaceVariant
+            }
+
+            IconButton {
+                id: collapseToggle
+                x: root.isCompact ? Math.round((parent.width - width) / 2) : (parent.width - width)
+                anchors.verticalCenter: parent.verticalCenter
+                symbol: root.isCompact ? "chevron_right" : "chevron_left"
+                size: 28
+                iconSize: 18
+                tooltip: root.isCompact ? qsTr("Развернуть меню") : qsTr("Свернуть меню")
+                onClicked: root.toggleCompactRequested()
+            }
+        }
 
         // User Profile Header
         Rectangle {
@@ -22,99 +65,46 @@ Item {
             radius: Appearance.rounding.normal
             color: Appearance.colors.surfaceContainerLow
             border.width: 1
-            border.color: Qt.rgba(1, 1, 1, 0.04)
+            border.color: Appearance.colors.layer0Border
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 8
-                spacing: 10
+                anchors.leftMargin: root.isCompact ? 0 : 10
+                anchors.rightMargin: root.isCompact ? 0 : 8
+                spacing: root.isCompact ? 0 : 10
 
-                // Avatar with true circular rounding
-                RoundedImage {
+                ArtworkImage {
                     Layout.preferredWidth: 34
                     Layout.preferredHeight: 34
-                    radius: width / 2
+                    Layout.alignment: root.isCompact ? Qt.AlignHCenter | Qt.AlignVCenter : Qt.AlignVCenter
+                    circular: true
+                    squiggly: false
                     source: backend.userHasAvatar ? backend.userAvatar : ""
-                    fallbackSymbol: "person"
-                    fallbackIconSize: 20
-                    sourceSize.width: 100
-                    sourceSize.height: 100
+                    placeholderSymbol: "person"
                     borderWidth: 1
-                    borderColor: Qt.rgba(1, 1, 1, 0.08)
+                    borderColor: Appearance.colors.layer0Border
                 }
 
-                // Name
                 StyledText {
                     Layout.fillWidth: true
-                    text: backend.loggedIn ? backend.userName : "Гость"
+                    visible: !root.isCompact
+                    text: backend.loggedIn ? backend.userName : qsTr("Гость")
                     font.pixelSize: Appearance.fontSize.small
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
                 }
 
-                // Logout button
                 IconButton {
                     symbol: "logout"
                     size: 28
                     iconSize: 16
-                    iconColor: Appearance.colors.onSurfaceVariant
-                    visible: backend.loggedIn
+                    tooltip: qsTr("Выйти из аккаунта")
+                    visible: !root.isCompact && backend.loggedIn
                     onClicked: backend.logout()
                 }
             }
         }
 
-        // Search Input Field
-        Rectangle {
-            id: searchBox
-            Layout.fillWidth: true
-            Layout.preferredHeight: 38
-            radius: Appearance.rounding.full
-            color: Appearance.colors.surfaceContainerLow
-            border.width: 1
-            border.color: searchInput.activeFocus ? Appearance.colors.primary : Qt.rgba(1, 1, 1, 0.08)
-
-            Behavior on border.color { ColorAnimation { duration: 140 } }
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                spacing: 8
-
-                MaterialSymbol {
-                    text: "search"
-                    iconSize: 18
-                    color: searchInput.activeFocus ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
-                }
-
-                TextInput {
-                    id: searchInput
-                    Layout.fillWidth: true
-                    color: Appearance.colors.onSurface
-                    font.pixelSize: Appearance.fontSize.smaller
-                    selectByMouse: true
-                    clip: true
-
-                    Text {
-                        anchors.fill: parent
-                        text: "Поиск музыки…"
-                        color: Appearance.colors.onSurfaceVariant
-                        font.pixelSize: Appearance.fontSize.smaller
-                        visible: !searchInput.text && !searchInput.activeFocus
-                    }
-
-                    onAccepted: {
-                        if (text.trim().length > 0) {
-                            backend.search(text.trim());
-                        }
-                    }
-                }
-            }
-        }
-
-        // Navigation Items
         Flickable {
             id: navigationFlickable
             Layout.fillWidth: true
@@ -122,83 +112,231 @@ Item {
             contentHeight: navColumn.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
+            onContentHeightChanged: {
+                const maxY = Math.max(0, contentHeight - height);
+                if (contentY > maxY) contentY = maxY;
+            }
+
+            FastWheel { target: navigationFlickable }
 
             Column {
                 id: navColumn
                 width: parent.width
-                spacing: 4
+                spacing: 3
 
                 NavigationItem {
                     width: parent.width
-                    text: "Главная"
+                    compact: root.isCompact
+                    text: qsTr("Моя волна")
+                    iconShape: "softBurst"
+                    symbol: "waves"
+                    selected: root.activePage === 1
+                    onClicked: { UiState.closeModPage(); backend.startWave(); }
+                }
+
+                NavigationItem {
+                    width: parent.width
+                    compact: root.isCompact
+                    text: qsTr("Главная")
+                    iconShape: "cookie9"
                     symbol: "home"
                     selected: root.activePage === 0
-                    onClicked: backend.loadHome()
-                }
-
-                NavigationItem {
-                    width: parent.width
-                    text: "Моя волна"
-                    symbol: "my_wave"
-                    selected: root.activePage === 1
-                    onClicked: backend.startWave()
+                    onClicked: { UiState.closeModPage(); backend.loadHome(); }
                 }
 
                 SectionLabel {
                     width: parent.width
-                    text: "Медиатека"
+                    compact: root.isCompact
+                    text: qsTr("Медиатека")
                 }
 
                 NavigationItem {
                     width: parent.width
-                    text: "Мне нравится"
+                    compact: root.isCompact
+                    text: qsTr("Мне нравится")
+                    iconShape: "heart"
+                    keepsShape: true
                     symbol: "favorite"
                     selected: root.activePage === 2
-                    onClicked: backend.loadLikes()
+                    onClicked: { UiState.closeModPage(); backend.loadLikes(); }
                 }
 
                 NavigationItem {
                     width: parent.width
-                    text: "Загружено"
+                    compact: root.isCompact
+                    text: qsTr("Загружено")
+                    iconShape: "clamShell"
                     symbol: "download_done"
                     selected: root.activePage === 7
-                    onClicked: backend.loadDownloads()
+                    onClicked: { UiState.closeModPage(); backend.loadDownloads(); }
                 }
 
                 SectionLabel {
                     width: parent.width
-                    text: "Коллекции"
+                    compact: root.isCompact
+                    text: qsTr("Коллекции")
+                    trailing: IconButton {
+                        symbol: "add"
+                        size: 30
+                        iconSize: 18
+                        iconColor: Appearance.colors.primary
+                        tooltip: qsTr("Создать плейлист")
+                        onClicked: UiState.createPlaylistRequested()
+                    }
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: 0
+
+                    NavigationItem {
+                        width: parent.width
+                        compact: root.isCompact
+                        text: qsTr("Плейлисты")
+                        iconShape: "bun"
+                        symbol: "library_music"
+                        selected: root.activePage === 3
+                        trailing: IconButton {
+                            visible: !root.isCompact && backend.pinnedPlaylists.length > 0
+                            symbol: "expand_more"
+                            iconRotation: appSettings.pinnedPlaylistsExpanded ? 0 : -90
+                            size: 26
+                            iconSize: 18
+                            tooltip: appSettings.pinnedPlaylistsExpanded ? qsTr("Свернуть закреплённые") : qsTr("Развернуть закреплённые")
+                            onClicked: appSettings.pinnedPlaylistsExpanded = !appSettings.pinnedPlaylistsExpanded
+                        }
+                        onClicked: { UiState.closeModPage(); backend.loadPlaylists(); }
+                    }
+
+                    Item {
+                        id: pinnedSection
+                        readonly property bool expanded: appSettings.pinnedPlaylistsExpanded && backend.pinnedPlaylists.length > 0
+                        width: parent.width
+                        height: expanded ? pinnedColumn.implicitHeight + 3 : 0
+                        visible: height > 0
+                        clip: true
+                        opacity: expanded ? 1 : 0
+                        enabled: expanded
+
+                        Behavior on height {
+                            enabled: !Appearance.performanceMode
+                            ElementMove {}
+                        }
+                        Behavior on opacity {
+                            enabled: !Appearance.performanceMode
+                            NumberAnimation { duration: Appearance.duration(180); easing.type: Easing.OutCubic }
+                        }
+
+                        Column {
+                            id: pinnedColumn
+                            width: parent.width
+                            y: pinnedSection.expanded ? 3 : -Math.min(16, implicitHeight * 0.25)
+                            spacing: 3
+
+                            Behavior on y {
+                                enabled: !Appearance.performanceMode
+                                ElementMove {}
+                            }
+
+                            Repeater {
+                                model: backend.pinnedPlaylists
+
+                                NavigationItem {
+                                    id: pinnedItem
+                                    required property var modelData
+                                    width: parent.width
+                                    compact: root.isCompact
+                                    indent: 10
+                                    text: modelData.title ?? ""
+                                    fallbackKey: modelData.key ?? text
+                                    showArtwork: true
+                                    artworkUrl: (modelData.has_cover ?? false) ? (modelData.cover_url ?? "") : ""
+                                    symbol: "library_music"
+                                    selected: root.activePage === 6 && backend.activePlaylistKey === (modelData.key ?? "")
+                                    trailing: IconButton {
+                                        symbol: "close"
+                                        size: 24
+                                        iconSize: 15
+                                        opacity: pinnedItem.hovered ? 0.85 : 0
+                                        visible: opacity > 0
+                                        tooltip: qsTr("Открепить плейлист")
+                                        onClicked: backend.feature({
+                                            action: "toggle_pin_playlist",
+                                            uid: pinnedItem.modelData.uid,
+                                            kind: pinnedItem.modelData.kind
+                                        })
+                                    }
+                                    onClicked: backend.feature({
+                                        action: "open_playlist",
+                                        uid: pinnedItem.modelData.uid,
+                                        kind: pinnedItem.modelData.kind,
+                                        title: pinnedItem.modelData.title ?? "Плейлист"
+                                    })
+                                    TapHandler {
+                                        acceptedButtons: Qt.RightButton
+                                        onTapped: backend.feature({
+                                            action: "toggle_pin_playlist",
+                                            uid: pinnedItem.modelData.uid,
+                                            kind: pinnedItem.modelData.kind
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 NavigationItem {
                     width: parent.width
-                    text: "Плейлисты"
-                    symbol: "library_music"
-                    selected: root.activePage === 3
-                    onClicked: backend.loadPlaylists()
-                }
-
-                NavigationItem {
-                    width: parent.width
-                    text: "Альбомы"
+                    compact: root.isCompact
+                    text: qsTr("Альбомы")
+                    iconShape: "sunny"
                     symbol: "album"
                     selected: root.activePage === 4
-                    onClicked: backend.loadAlbums()
+                    onClicked: { UiState.closeModPage(); backend.loadAlbums(); }
                 }
 
                 NavigationItem {
                     width: parent.width
-                    text: "Артисты"
-                    symbol: "artists"
+                    compact: root.isCompact
+                    text: qsTr("Артисты")
+                    iconShape: "clover4"
+                    symbol: "group"
                     selected: root.activePage === 5
-                    onClicked: backend.loadArtists()
+                    onClicked: { UiState.closeModPage(); backend.loadArtists(); }
+                }
+
+                SectionLabel {
+                    width: parent.width
+                    compact: root.isCompact
+                    visible: modPagesRepeater.count > 0
+                    text: qsTr("Моды")
+                }
+
+                Repeater {
+                    id: modPagesRepeater
+                    model: ModManager.reloadRevision >= 0 ? ModManager.slotEntries("sidebar.page") : []
+
+                    delegate: NavigationItem {
+                        required property var modelData
+                        readonly property string entryKey: modelData.entryId || modelData.modId
+                        width: parent.width
+                        compact: root.isCompact
+                        text: modelData.title || modelData.modName || ""
+                        iconShape: modelData.shape || "gem"
+                        symbol: modelData.symbol || "extension"
+                        selected: UiState.activeModPageId === entryKey
+                        onClicked: UiState.openModPage(entryKey)
+                    }
                 }
             }
         }
 
         NavigationItem {
             Layout.fillWidth: true
-            text: "Настройки"
+            compact: root.isCompact
+            text: qsTr("Настройки")
+            iconShape: "cookie12"
             symbol: "settings"
             onClicked: root.settingsRequested()
         }

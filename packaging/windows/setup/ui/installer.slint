@@ -1,0 +1,705 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+
+component ActionButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> tonal: false;
+    in property <bool> button-enabled: true;
+    callback clicked();
+
+    height: 40px;
+    border-radius: 20px;
+    opacity: button-enabled ? 1.0 : 0.48;
+    background: danger
+        ? (ta.pressed ? #E4A29F : (ta.has-hover ? #F7C6C3 : #F2B8B5))
+        : primary
+            ? (ta.pressed ? #B69DF8 : (ta.has-hover ? #DECFFF : #D0BCFF))
+            : tonal
+                ? (ta.pressed ? #443D56 : (ta.has-hover ? #3E374E : #332D41))
+                : (ta.pressed ? #2E2A36 : (ta.has-hover ? #282430 : transparent));
+    border-width: (!primary && !danger && !tonal) ? 1px : 0px;
+    border-color: #49454F;
+
+    animate background { duration: 130ms; easing: ease-out; }
+
+    Text {
+        text: root.label;
+        font-size: 13.5px;
+        font-weight: 600;
+        color: danger ? #601410 : (primary ? #381E72 : (tonal ? #EADDFF : #E6E0E9));
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        x: 18px;
+        width: parent.width - 36px;
+        height: parent.height;
+    }
+
+    ta := TouchArea {
+        enabled: root.button-enabled;
+        mouse-cursor: root.button-enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+component MdSwitchRow inherits Rectangle {
+    in property <string> label;
+    in-out property <bool> checked: false;
+    in property <bool> danger-tint: false;
+
+    height: 36px;
+    border-radius: 12px;
+    background: ta.has-hover ? #26232D : transparent;
+    animate background { duration: 120ms; }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 12px;
+
+        Text {
+            text: root.label;
+            font-size: 13px;
+            color: #E6E0E9;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        // Material 3 Switch track
+        Rectangle {
+            width: 44px;
+            height: 24px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 12px;
+            background: root.checked
+                ? (root.danger-tint ? #F2B8B5 : #D0BCFF)
+                : #2B2930;
+            border-width: root.checked ? 0px : 1.5px;
+            border-color: #79747E;
+            animate background { duration: 150ms; easing: ease-out; }
+
+            // Thumb
+            Rectangle {
+                width: root.checked ? 18px : 14px;
+                height: root.checked ? 18px : 14px;
+                border-radius: self.width / 2;
+                x: root.checked ? (parent.width - self.width - 3px) : 5px;
+                y: (parent.height - self.height) / 2;
+                background: root.checked
+                    ? (root.danger-tint ? #601410 : #381E72)
+                    : #938F99;
+                animate x { duration: 150ms; easing: ease-out; }
+                animate width { duration: 150ms; }
+                animate height { duration: 150ms; }
+            }
+        }
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.checked = !root.checked; }
+    }
+}
+
+component TitleIconButton inherits Rectangle {
+    in property <string> glyph;
+    in property <bool> is-close: false;
+    callback clicked();
+
+    width: 30px;
+    height: 30px;
+    border-radius: 15px;
+    background: ta.pressed
+        ? (is-close ? #8C1D18 : #3A3544)
+        : (ta.has-hover ? (is-close ? #601410 : #2D2936) : transparent);
+    animate background { duration: 120ms; }
+
+    Text {
+        text: root.glyph;
+        font-size: 15px;
+        font-weight: 500;
+        color: (is-close && ta.has-hover) ? #F9DEDC : #CAC4D0;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component InstallerWindow inherits Window {
+    width: 580px;
+    height: 430px;
+    no-frame: true;
+    title: "Yandex Music Setup";
+    icon: @image-url("../../../../icon.svg");
+    background: #141218;
+
+    // Modes: "setup", "installing", "done", "uninstall", "uninstalling", "uninstalled", "error"
+    in-out property <string> screen-mode: "setup";
+    in-out property <bool> is-ru: true;
+    in-out property <string> install-dir: "";
+    in-out property <bool> opt-desktop: true;
+    in-out property <bool> opt-start-menu: true;
+    in-out property <bool> opt-launch: true;
+    in-out property <bool> opt-remove-data: false;
+    in-out property <float> progress: 0.0;
+    in-out property <image> progress-wave;
+    in-out property <string> status-text: "";
+    in-out property <string> error-text: "";
+
+    callback drag-requested(length, length);
+    callback minimize-clicked();
+    callback close-clicked();
+    callback toggle-lang-clicked();
+    callback browse-clicked();
+    callback install-clicked();
+    callback launch-clicked();
+    callback uninstall-clicked();
+
+    // Outer border & soft MD3 backdrop blobs
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #141218;
+        border-width: 1px;
+        border-color: #36323F;
+        clip: true;
+
+        // Decorative background blobs matching WaveHero aesthetic
+        Rectangle {
+            x: -60px;
+            y: -70px;
+            width: 240px;
+            height: 240px;
+            border-radius: 120px;
+            background: (screen-mode == "uninstall" || screen-mode == "uninstalling") ? #2A1618 : #211932;
+            opacity: 0.85;
+            animate background { duration: 250ms; }
+        }
+        Rectangle {
+            x: parent.width - 170px;
+            y: parent.height - 150px;
+            width: 230px;
+            height: 230px;
+            border-radius: 115px;
+            background: #1B1726;
+            opacity: 0.9;
+        }
+        Rectangle {
+            x: parent.width - 95px;
+            y: 36px;
+            width: 110px;
+            height: 110px;
+            border-radius: 55px;
+            background: #271E3C;
+            opacity: 0.55;
+        }
+
+        VerticalLayout {
+            padding-top: 10px;
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-bottom: 18px;
+            spacing: 12px;
+
+            // Custom frameless title bar
+            Rectangle {
+                height: 34px;
+                background: transparent;
+
+                drag-area := TouchArea {
+                    property <length> down-x;
+                    property <length> down-y;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                            down-x = self.mouse-x;
+                            down-y = self.mouse-y;
+                            root.drag-requested(0px, 0px);
+                        }
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.drag-requested(self.mouse-x - down-x, self.mouse-y - down-y);
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+
+                    // Product label
+                    HorizontalLayout {
+                        spacing: 8px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: "Yandex Music";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: #E6E0E9;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Language switch pill + Window controls
+                    HorizontalLayout {
+                        spacing: 4px;
+
+                        Rectangle {
+                            width: 40px;
+                            height: 26px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 13px;
+                            background: lang-ta.has-hover ? #2C2736 : #211E29;
+                            border-width: 1px;
+                            border-color: #3E3A4A;
+
+                            Text {
+                                text: root.is-ru ? "RU" : "EN";
+                                font-size: 11px;
+                                font-weight: 600;
+                                color: #CAC4D0;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            lang-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.toggle-lang-clicked(); }
+                            }
+                        }
+
+                        TitleIconButton {
+                            glyph: "–";
+                            y: (parent.height - self.height) / 2;
+                            clicked => { root.minimize-clicked(); }
+                        }
+
+                        TitleIconButton {
+                            glyph: "×";
+                            is-close: true;
+                            y: (parent.height - self.height) / 2;
+                            clicked => { root.close-clicked(); }
+                        }
+                    }
+                }
+            }
+
+            // Hero branding banner
+            HorizontalLayout {
+                padding-left: 4px;
+                padding-right: 6px;
+                spacing: 14px;
+                height: 70px;
+
+                Image {
+                    source: @image-url("../../../../icon.svg");
+                    width: 60px;
+                    height: 60px;
+                    y: (parent.height - self.height) / 2;
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+
+                    Text {
+                        text: screen-mode == "uninstall"
+                            ? (is-ru ? "Удаление Yandex Music" : "Uninstall Yandex Music")
+                            : screen-mode == "uninstalling"
+                                ? (is-ru ? "Удаление файлов…" : "Removing files…")
+                                : screen-mode == "uninstalled"
+                                    ? (is-ru ? "Приложение удалено" : "Uninstall complete")
+                                    : screen-mode == "installing"
+                                        ? (is-ru ? "Установка Yandex Music…" : "Installing Yandex Music…")
+                                        : screen-mode == "done"
+                                            ? (is-ru ? "Yandex Music установлен" : "Installation complete")
+                                            : screen-mode == "error"
+                                                ? (is-ru ? "Ошибка установки" : "Setup error")
+                                                : (is-ru ? "Установка Yandex Music" : "Install Yandex Music");
+                        font-size: 21px;
+                        font-weight: 700;
+                        color: #F4EFFA;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        text: screen-mode == "uninstall"
+                            ? (is-ru ? "Выберите параметры удаления программы" : "Choose uninstall preferences")
+                            : screen-mode == "uninstalling"
+                                ? (is-ru ? "Очистка папки и системных ярлыков" : "Cleaning up folder and shortcuts")
+                                : screen-mode == "uninstalled"
+                                    ? (is-ru ? "Все выбранные компоненты успешно удалены" : "Selected components were removed")
+                                    : screen-mode == "installing"
+                                        ? (is-ru ? "Копирование файлов и настройка ярлыков" : "Extracting files and creating shortcuts")
+                                        : screen-mode == "done"
+                                            ? (is-ru ? "Готово к прослушиванию музыки" : "Ready to play your music")
+                                            : screen-mode == "error"
+                                                ? (is-ru ? "Операция не могла быть завершена" : "The operation could not complete")
+                                                : (is-ru
+                                                    ? "Нативный Rust/QML клиент Яндекс музыки"
+                                                    : "Native Rust/QML client for Yandex Music");
+                        font-size: 13px;
+                        color: #B6B0C0;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            // Main Material 3 surface card
+            Rectangle {
+                vertical-stretch: 1;
+                border-radius: 20px;
+                background: #1D1B22;
+                border-width: 1px;
+                border-color: #34303E;
+
+                // MODE: SETUP
+                if root.screen-mode == "setup" : VerticalLayout {
+                    padding: 18px;
+                    spacing: 12px;
+
+                    VerticalLayout {
+                        spacing: 6px;
+
+                        Text {
+                            text: root.is-ru ? "Папка установки" : "Destination folder";
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: #CAC4D0;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            height: 40px;
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: 12px;
+                                background: #141218;
+                                border-width: 1px;
+                                border-color: path-input.has-focus ? #D0BCFF : #3D3849;
+
+                                path-input := TextInput {
+                                    x: 12px;
+                                    width: parent.width - 24px;
+                                    height: parent.height;
+                                    text <=> root.install-dir;
+                                    font-size: 12.5px;
+                                    color: #E6E0E9;
+                                    vertical-alignment: center;
+                                    single-line: true;
+                                }
+                            }
+
+                            ActionButton {
+                                label: root.is-ru ? "Обзор…" : "Browse…";
+                                tonal: true;
+                                width: 102px;
+                                clicked => { root.browse-clicked(); }
+                            }
+                        }
+                    }
+
+                    // Switches section
+                    VerticalLayout {
+                        spacing: 2px;
+                        vertical-stretch: 1;
+
+                        MdSwitchRow {
+                            label: root.is-ru ? "Создать ярлык на рабочем столе" : "Create Desktop shortcut";
+                            checked <=> root.opt-desktop;
+                        }
+                        MdSwitchRow {
+                            label: root.is-ru ? "Создать ярлык в меню «Пуск»" : "Create Start Menu shortcut";
+                            checked <=> root.opt-start-menu;
+                        }
+                        MdSwitchRow {
+                            label: root.is-ru ? "Запустить Yandex Music после установки" : "Launch Yandex Music after setup";
+                            checked <=> root.opt-launch;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Rectangle { horizontal-stretch: 1; }
+                        ActionButton {
+                            label: root.is-ru ? "Отмена" : "Cancel";
+                            width: 106px;
+                            clicked => { root.close-clicked(); }
+                        }
+                        ActionButton {
+                            label: root.is-ru ? "Установить" : "Install";
+                            primary: true;
+                            width: 156px;
+                            button-enabled: root.install-dir != "";
+                            clicked => { root.install-clicked(); }
+                        }
+                    }
+                }
+
+                // MODE: INSTALLING / UNINSTALLING
+                if (root.screen-mode == "installing" || root.screen-mode == "uninstalling") : VerticalLayout {
+                    padding: 24px;
+                    spacing: 16px;
+                    alignment: center;
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text {
+                            text: root.status-text;
+                            font-size: 13.5px;
+                            font-weight: 500;
+                            color: #E6E0E9;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: Math.round(root.progress * 100) + "%";
+                            font-size: 14px;
+                            font-weight: 700;
+                            color: root.screen-mode == "uninstalling" ? #F2B8B5 : #D0BCFF;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Wavy Material 3 Expressive snake progress bar
+                    Image {
+                        width: 100%;
+                        height: 22px;
+                        source: root.progress-wave;
+                        image-fit: fill;
+                    }
+
+                    Text {
+                        text: root.install-dir;
+                        font-size: 11.5px;
+                        color: #938F99;
+                        overflow: elide;
+                    }
+                }
+
+                // MODE: DONE
+                if root.screen-mode == "done" : VerticalLayout {
+                    padding: 24px;
+                    spacing: 16px;
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        border-radius: 14px;
+                        background: #17151C;
+                        border-width: 1px;
+                        border-color: #2D2938;
+
+                        HorizontalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+
+                            Rectangle {
+                                width: 42px;
+                                height: 42px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 21px;
+                                background: #381E72;
+                                border-width: 1px;
+                                border-color: #D0BCFF;
+
+                                Text {
+                                    text: "✓";
+                                    font-size: 20px;
+                                    font-weight: 700;
+                                    color: #EADDFF;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 4px;
+                                horizontal-stretch: 1;
+
+                                Text {
+                                    text: root.is-ru
+                                        ? "Файлы скопированы и ярлыки настроены"
+                                        : "Files installed and shortcuts configured";
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    color: #E6E0E9;
+                                }
+                                Text {
+                                    text: root.install-dir;
+                                    font-size: 12px;
+                                    color: #9E98A8;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Rectangle { horizontal-stretch: 1; }
+                        ActionButton {
+                            label: root.is-ru ? "Закрыть" : "Close";
+                            width: 110px;
+                            clicked => { root.close-clicked(); }
+                        }
+                        ActionButton {
+                            label: root.is-ru ? "Запустить" : "Launch";
+                            primary: true;
+                            width: 150px;
+                            clicked => { root.launch-clicked(); }
+                        }
+                    }
+                }
+
+                // MODE: UNINSTALL PROMPT
+                if root.screen-mode == "uninstall" : VerticalLayout {
+                    padding: 18px;
+                    spacing: 12px;
+
+                    Rectangle {
+                        border-radius: 14px;
+                        background: #141218;
+                        border-width: 1px;
+                        border-color: #3D3338;
+                        height: 62px;
+
+                        VerticalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            alignment: center;
+                            spacing: 3px;
+
+                            Text {
+                                text: root.is-ru ? "Будет удалена папка:" : "Installation folder to remove:";
+                                font-size: 11.5px;
+                                color: #B6B0C0;
+                            }
+                            Text {
+                                text: root.install-dir;
+                                font-size: 12.5px;
+                                font-weight: 600;
+                                color: #E6E0E9;
+                                overflow: elide;
+                            }
+                        }
+                    }
+
+                    MdSwitchRow {
+                        label: root.is-ru
+                            ? "Также удалить настройки, кэш и офлайн-треки"
+                            : "Also remove settings, cache and offline tracks";
+                        checked <=> root.opt-remove-data;
+                        danger-tint: true;
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Rectangle { horizontal-stretch: 1; }
+                        ActionButton {
+                            label: root.is-ru ? "Отмена" : "Cancel";
+                            width: 112px;
+                            clicked => { root.close-clicked(); }
+                        }
+                        ActionButton {
+                            label: root.is-ru ? "Удалить" : "Uninstall";
+                            danger: true;
+                            width: 146px;
+                            clicked => { root.uninstall-clicked(); }
+                        }
+                    }
+                }
+
+                // MODE: UNINSTALLED
+                if root.screen-mode == "uninstalled" : VerticalLayout {
+                    padding: 24px;
+                    spacing: 16px;
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        border-radius: 14px;
+                        background: #17151C;
+                        border-width: 1px;
+                        border-color: #2D2938;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            alignment: center;
+                            spacing: 6px;
+                            Text {
+                                text: root.is-ru
+                                    ? "Yandex Music полностью удалён с компьютера."
+                                    : "Yandex Music has been removed from your computer.";
+                                font-size: 14px;
+                                font-weight: 600;
+                                color: #E6E0E9;
+                            }
+                            Text {
+                                text: root.opt-remove-data
+                                    ? (root.is-ru ? "Пользовательские данные и кэш также очищены." : "User data and cache were also cleared.")
+                                    : (root.is-ru ? "Ваши настройки и офлайн-кэш сохранены." : "Your settings and offline cache were kept.");
+                                font-size: 12.5px;
+                                color: #9E98A8;
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        Rectangle { horizontal-stretch: 1; }
+                        ActionButton {
+                            label: root.is-ru ? "Готово" : "Done";
+                            primary: true;
+                            width: 140px;
+                            clicked => { root.close-clicked(); }
+                        }
+                    }
+                }
+
+                // MODE: ERROR
+                if root.screen-mode == "error" : VerticalLayout {
+                    padding: 20px;
+                    spacing: 14px;
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        border-radius: 14px;
+                        background: #261618;
+                        border-width: 1px;
+                        border-color: #601410;
+
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 6px;
+                            Text {
+                                text: root.error-text;
+                                font-size: 12.5px;
+                                color: #F9DEDC;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        Rectangle { horizontal-stretch: 1; }
+                        ActionButton {
+                            label: root.is-ru ? "Закрыть" : "Close";
+                            danger: true;
+                            width: 130px;
+                            clicked => { root.close-clicked(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

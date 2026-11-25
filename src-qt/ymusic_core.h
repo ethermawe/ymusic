@@ -30,6 +30,7 @@ void ymusic_core_free(CoreHandle *handle);
 
 void ymusic_core_login_device(CoreHandle *handle);
 void ymusic_core_login_token(CoreHandle *handle, const char *token);
+void ymusic_core_cancel_login(CoreHandle *handle);
 void ymusic_core_logout(CoreHandle *handle);
 
 void ymusic_core_load_home(CoreHandle *handle);
@@ -51,7 +52,10 @@ void ymusic_core_open_card(CoreHandle *handle, uintptr_t index);
 void ymusic_core_open_track_artist(CoreHandle *handle, uintptr_t index);
 void ymusic_core_open_track_album(CoreHandle *handle, uintptr_t index);
 void ymusic_core_open_now_artist(CoreHandle *handle);
+void ymusic_core_open_artist(CoreHandle *handle, const char *artist_id);
 void ymusic_core_open_now_album(CoreHandle *handle);
+void ymusic_core_set_discord_enabled(CoreHandle *handle, bool enabled);
+void ymusic_core_set_discord_config(CoreHandle *handle, const char *config_json);
 
 void ymusic_core_play(CoreHandle *handle, uintptr_t index);
 void ymusic_core_track_action(CoreHandle *handle, const char *id, int32_t action);
@@ -67,6 +71,8 @@ void ymusic_core_toggle_repeat(CoreHandle *handle);
 void ymusic_core_toggle_like(CoreHandle *handle, uintptr_t index);
 void ymusic_core_toggle_now_like(CoreHandle *handle);
 void ymusic_core_dislike_now(CoreHandle *handle);
+void ymusic_core_save_session(CoreHandle *handle);
+uint32_t ymusic_core_spectrum_levels(CoreHandle *handle, float *out, uint32_t capacity);
 
 #ifdef __cplusplus
 }

@@ -1,118 +1,89 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Layouts
 import ymusic.ui
 
 Item {
     id: root
 
-    property string title: ""
-    property string symbol: "auto_awesome"
-    property bool showsAction: false
-    property string actionText: "Смотреть все"
-    signal actionClicked()
+    property string title
+    property string symbol
+    property string iconShape: "cookie9"
+    property bool showsSeeAll: false
+    property string seeAllText: qsTr("Все")
+    property string seeAllSymbol: "arrow_forward"
+    signal seeAll()
 
     implicitHeight: 40
-    implicitWidth: 400
+    implicitWidth: titleText.x + titleText.implicitWidth
 
-    RowLayout {
-        anchors.fill: parent
-        spacing: 12
+    HoverHandler {
+        id: hover
+    }
 
-        RowLayout {
-            Layout.preferredWidth: implicitWidth
-            Layout.maximumWidth: implicitWidth
-            spacing: 12
+    ShapeIcon {
+        id: badge
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        visible: root.symbol.length > 0
+        size: 34
+        iconSize: 18
+        shape: root.iconShape
+        symbol: root.symbol
+        hovered: hover.hovered
+    }
 
-        // Badge with MaterialShape flower
-        Item {
-            Layout.minimumWidth: 32
-            Layout.preferredWidth: 32
-            Layout.maximumWidth: 32
-            Layout.preferredHeight: 32
-            Layout.alignment: Qt.AlignVCenter
+    TitleText {
+        id: titleText
+        objectName: "sectionTitle"
+        x: badge.visible ? badge.width + 12 : 0
+        anchors.verticalCenter: parent.verticalCenter
+        width: Math.min(implicitWidth, Math.max(0, (seeAll.visible ? seeAll.x - 12 : root.width) - x))
+        text: root.title
+        elide: Text.ElideRight
+        font.pixelSize: root.width < 320 ? Appearance.fontSize.larger : Appearance.fontSize.title
+    }
 
-            MaterialShape {
-                anchors.fill: parent
-                shape: "cookie9"
-                color: Appearance.colors.primaryContainer
-            }
+    WavyLine {
+        anchors.left: titleText.right
+        anchors.leftMargin: 16
+        anchors.right: seeAll.visible ? seeAll.left : parent.right
+        anchors.rightMargin: 14
+        anchors.verticalCenter: parent.verticalCenter
+        height: 8
+        visible: width > 24
+        color: Appearance.colors.outlineVariant
+    }
 
-            MaterialSymbol {
-                anchors.centerIn: parent
-                text: root.symbol
-                iconSize: 18
-                color: Appearance.colors.primary
-            }
-        }
-
-        // Section Title
-        TitleText {
-            id: titleItem
-            text: root.title
-            level: "title"
-            color: Appearance.colors.onSurface
-            Layout.alignment: Qt.AlignVCenter
-        }
-        }
-
-        // Expanding Wavy Line
-        WavyLine {
-            Layout.fillWidth: true
-            Layout.alignment: Qt.AlignVCenter
-            Layout.preferredHeight: 10
-            wavelength: 18
-            amplitude: 2.2
-            color: Qt.rgba(Appearance.colors.outlineVariant.r,
-                           Appearance.colors.outlineVariant.g,
-                           Appearance.colors.outlineVariant.b, 0.4)
-            // Stay in the layout even when narrow; visibility depending on
-            // allocated width causes a layout/visibility feedback loop.
-            opacity: width > 24 ? 1 : 0
-        }
-
-        // Action Pill Button
-        Rectangle {
-            id: actionPill
-            visible: root.showsAction
-            Layout.alignment: Qt.AlignVCenter
-            Layout.preferredHeight: 32
-            Layout.preferredWidth: actionRow.implicitWidth + 24
-            Layout.maximumWidth: actionRow.implicitWidth + 24
-            radius: Appearance.rounding.full
-            color: actionMouse.containsMouse ? Appearance.colors.surfaceContainerHighest : Appearance.colors.surfaceContainerHigh
-            border.width: 1
-            border.color: Qt.rgba(1, 1, 1, 0.08)
-
-            scale: actionMouse.pressed ? 0.94 : (actionMouse.containsMouse ? 1.04 : 1.0)
-            Behavior on scale { Bounce {} }
-            Behavior on color { ElementMoveFastColor {} }
-
-            RowLayout {
-                id: actionRow
-                anchors.centerIn: parent
-                spacing: 6
-
-                StyledText {
-                    text: root.actionText
-                    color: Appearance.colors.onSurface
-                    font.pixelSize: Appearance.fontSize.smaller
-                    font.weight: Font.Medium
-                }
-
-                MaterialSymbol {
-                    text: "arrow_forward"
-                    iconSize: 15
-                    color: Appearance.colors.onSurfaceVariant
-                }
-            }
-
-            MouseArea {
-                id: actionMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.actionClicked()
-            }
-        }
+    TextButton {
+        id: seeAll
+        objectName: "sectionSeeAll"
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        visible: root.showsSeeAll
+        variant: TextButton.Tonal
+        symbol: root.seeAllSymbol
+        text: root.seeAllText
+        iconOnly: root.width < titleText.x + titleText.implicitWidth + naturalWidth + 24
+        compactSize: root.width < 280 ? 32 : 40
+        onClicked: root.seeAll()
     }
 }

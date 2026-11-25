@@ -18,35 +18,133 @@ fn cache_root() -> Option<PathBuf> {
     dirs::cache_dir().map(|d| d.join("ymusic"))
 }
 
-pub fn track_path(track_id: &str) -> Option<PathBuf> {
-    let safe: String = track_id
+fn safe_track_id(track_id: &str) -> String {
+    track_id
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
-        .collect();
+        .collect()
+}
+
+pub fn track_path(track_id: &str) -> Option<PathBuf> {
+    let safe = safe_track_id(track_id);
     cache_root().map(|d| d.join("tracks").join(format!("{safe}.mp3")))
 }
 
-/// Explicit offline downloads live outside the automatically evicted cache.
-pub fn offline_track_path(track_id: &str) -> Option<PathBuf> {
+fn offline_root() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|d| d.join("ymusic").join("offline"))
+}
+
+pub fn offline_bundle_dir(track_id: &str) -> Option<PathBuf> {
+    let safe = safe_track_id(track_id);
+    if safe.is_empty() {
+        return None;
+    }
+    offline_root().map(|d| d.join(safe))
+}
+
+fn legacy_offline_track_path(track_id: &str) -> Option<PathBuf> {
     let name = format!("{:x}.mp3", md5::compute(track_id.as_bytes()));
-    dirs::data_local_dir().map(|d| d.join("ymusic/offline").join(name))
+    offline_root().map(|d| d.join(name))
+}
+
+/// Explicit offline downloads live in structured per-track bundle directories:
+/// `~/.local/share/ymusic/offline/<track_id>/{audio.mp3, metadata.json, cover.jpg}`.
+pub fn offline_track_path(track_id: &str) -> Option<PathBuf> {
+    offline_bundle_dir(track_id).map(|d| d.join("audio.mp3"))
+}
+
+pub fn offline_metadata_path(track_id: &str) -> Option<PathBuf> {
+    offline_bundle_dir(track_id).map(|d| d.join("metadata.json"))
+}
+
+pub fn offline_cover_path(track_id: &str) -> Option<PathBuf> {
+    offline_bundle_dir(track_id).map(|d| d.join("cover.jpg"))
+}
+
+pub fn offline_cover_url(track_id: &str) -> Option<String> {
+    let path = offline_cover_path(track_id)?;
+    let meta = fs::metadata(&path).ok()?;
+    if meta.is_file() && meta.len() > 128 {
+        Some(format!("file://{}", path.to_string_lossy()))
+    } else {
+        None
+    }
 }
 
 pub fn is_offline(track_id: &str) -> bool {
-    offline_track_path(track_id).and_then(|p| fs::metadata(p).ok()).is_some_and(|m| m.len() > 1024)
+    offline_track_path(track_id)
+        .and_then(|p| fs::metadata(p).ok())
+        .is_some_and(|m| m.len() > 1024)
+        || legacy_offline_track_path(track_id)
+            .and_then(|p| fs::metadata(p).ok())
+            .is_some_and(|m| m.len() > 1024)
+}
+
+/// Автоматически мигрирует старые плоские файлы `<md5>.mp3` + `<md5>.json` в пакеты `<track_id>/`.
+pub fn migrate_legacy_offline_files() {
+    let Some(root) = offline_root() else { return };
+    let Ok(entries) = fs::read_dir(&root) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() || path.extension().is_none_or(|ext| ext != "json") {
+            continue;
+        }
+        let Ok(data) = fs::read(&path) else { continue };
+        let Ok(track) = serde_json::from_slice::<crate::api::Track>(&data) else { continue };
+        let legacy_mp3 = path.with_extension("mp3");
+        let Some(bundle_dir) = offline_bundle_dir(&track.id) else { continue };
+        if fs::create_dir_all(&bundle_dir).is_err() {
+            continue;
+        }
+        let target_audio = bundle_dir.join("audio.mp3");
+        let target_meta = bundle_dir.join("metadata.json");
+        if legacy_mp3.is_file() && !target_audio.exists() {
+            let _ = fs::rename(&legacy_mp3, &target_audio);
+        } else if legacy_mp3.is_file() && target_audio.exists() {
+            let _ = fs::remove_file(&legacy_mp3);
+        }
+        if !target_meta.exists() {
+            let _ = fs::rename(&path, &target_meta);
+        } else {
+            let _ = fs::remove_file(&path);
+        }
+    }
 }
 
 pub fn save_offline_metadata(track: &crate::api::Track) -> Result<()> {
-    let path = offline_track_path(&track.id).ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?.with_extension("json");
+    let path = offline_metadata_path(&track.id).ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let tmp = path.with_extension(format!("{}-{}.json.tmp", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
-    fs::write(&tmp, serde_json::to_vec(track)?)?;
+    fs::write(&tmp, serde_json::to_vec_pretty(track)?)?;
     fs::rename(tmp, path)?;
     Ok(())
 }
 
+pub async fn download_offline_cover(http: &Client, track: &crate::api::Track) {
+    let Some(cover_dest) = offline_cover_path(&track.id) else { return };
+    if fs::metadata(&cover_dest).is_ok_and(|m| m.is_file() && m.len() > 128) {
+        return;
+    }
+    let Some(url) = track.cover_url(400) else { return };
+    if let Some(parent) = cover_dest.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    if let Ok(bytes) = fetch_cover(http, &url).await
+        && bytes.len() > 128
+    {
+        let tmp = cover_dest.with_extension("jpg.tmp");
+        if tokio::fs::write(&tmp, &bytes).await.is_ok() {
+            let _ = tokio::fs::rename(&tmp, &cover_dest).await;
+        }
+    }
+}
+
 pub fn offline_tracks() -> Result<(Vec<crate::api::Track>, u64)> {
-    let dir = offline_track_path("").ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?.parent().unwrap().to_path_buf();
+    migrate_legacy_offline_files();
+    let dir = offline_root().ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?;
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok((Vec::new(), 0)),
@@ -55,15 +153,18 @@ pub fn offline_tracks() -> Result<(Vec<crate::api::Track>, u64)> {
     let mut tracks = Vec::new();
     let mut size = 0;
     for entry in entries.flatten() {
-        if entry.path().extension().is_none_or(|ext| ext != "json") { continue; }
-        let Ok(data) = fs::read(entry.path()) else { continue };
-        let Ok(mut track) = serde_json::from_slice::<crate::api::Track>(&data) else { continue };
-        let Some(path) = offline_track_path(&track.id) else { continue };
-        let Ok(meta) = fs::metadata(path) else { continue };
-        if meta.len() <= 1024 { continue; }
-        size += meta.len();
-        track.available = true;
-        tracks.push(track);
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            let meta_path = entry_path.join("metadata.json");
+            let audio_path = entry_path.join("audio.mp3");
+            let Ok(data) = fs::read(&meta_path) else { continue };
+            let Ok(mut track) = serde_json::from_slice::<crate::api::Track>(&data) else { continue };
+            let Ok(meta) = fs::metadata(&audio_path) else { continue };
+            if meta.len() <= 1024 { continue; }
+            size += meta.len();
+            track.available = true;
+            tracks.push(track);
+        }
     }
     tracks.sort_by(|a, b| a.artists.cmp(&b.artists).then(a.title.cmp(&b.title)));
     Ok((tracks, size))
@@ -71,10 +172,24 @@ pub fn offline_tracks() -> Result<(Vec<crate::api::Track>, u64)> {
 
 /// Older downloads have audio only. Recover their metadata from cached lists.
 pub fn recover_offline_metadata(known: &[crate::api::Track]) {
+    migrate_legacy_offline_files();
     fn recover(track: &crate::api::Track) {
+        if let Some(legacy_mp3) = legacy_offline_track_path(&track.id)
+            && legacy_mp3.is_file()
+            && let Some(new_audio) = offline_track_path(&track.id)
+        {
+            if let Some(parent) = new_audio.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if !new_audio.exists() {
+                let _ = fs::rename(&legacy_mp3, &new_audio);
+            }
+        }
         if is_offline(&track.id)
-            && offline_track_path(&track.id).is_some_and(|p| !p.with_extension("json").exists())
-        { let _ = save_offline_metadata(track); }
+            && offline_metadata_path(&track.id).is_some_and(|p| !p.exists())
+        {
+            let _ = save_offline_metadata(track);
+        }
     }
     for track in known { recover(track); }
     let Some(dir) = cache_root().map(|p| p.join("views")) else { return };
@@ -91,13 +206,15 @@ pub fn recover_offline_metadata(known: &[crate::api::Track]) {
 }
 
 pub fn remove_offline(track_id: &str) -> Result<()> {
-    let path = offline_track_path(track_id).ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?;
-    match fs::remove_file(&path) {
-        Ok(()) => (),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => (),
-        Err(e) => return Err(e.into()),
+    if let Some(bundle_dir) = offline_bundle_dir(track_id)
+        && bundle_dir.exists()
+    {
+        let _ = fs::remove_dir_all(&bundle_dir);
     }
-    let _ = fs::remove_file(path.with_extension("json"));
+    if let Some(legacy_path) = legacy_offline_track_path(track_id) {
+        let _ = fs::remove_file(&legacy_path);
+        let _ = fs::remove_file(legacy_path.with_extension("json"));
+    }
     Ok(())
 }
 
@@ -138,9 +255,39 @@ pub fn read_cached_cover(url: &str) -> Option<Vec<u8>> {
     (!bytes.is_empty()).then_some(bytes)
 }
 
+/// Возвращает локальный `file://` URL обложки (из офлайн-пакета трека или дискового кэша обложек),
+/// либо исходный сетевой URL.
+pub fn resolve_track_cover_url(track: &crate::api::Track, size: u32) -> String {
+    if let Some(local) = offline_cover_url(&track.id) {
+        return local;
+    }
+    if let Some(url400) = track.cover_url(400)
+        && let Some(path) = cover_path(&url400)
+        && fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() > 128)
+    {
+        return format!("file://{}", path.to_string_lossy());
+    }
+    if let Some(url) = track.cover_url(size) {
+        if let Some(path) = cover_path(&url)
+            && fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() > 128)
+        {
+            return format!("file://{}", path.to_string_lossy());
+        }
+        return url;
+    }
+    String::new()
+}
+
 /// Если трек уже закэширован на диске — возвращает открытый файл и его длину.
 pub fn open_cached_track(track_id: &str) -> Option<(File, u64)> {
     if let Some(path) = offline_track_path(track_id)
+        && let Ok(file) = File::open(path)
+        && let Ok(meta) = file.metadata()
+        && meta.len() > 1024
+    {
+        return Some((file, meta.len()));
+    }
+    if let Some(path) = legacy_offline_track_path(track_id)
         && let Ok(file) = File::open(path)
         && let Ok(meta) = file.metadata()
         && meta.len() > 1024
@@ -159,12 +306,10 @@ pub fn open_cached_track(track_id: &str) -> Option<(File, u64)> {
 }
 
 pub fn is_track_cached(track_id: &str) -> bool {
-    offline_track_path(track_id)
-        .and_then(|p| fs::metadata(p).ok())
-        .is_some_and(|m| m.len() > 1024)
+    is_offline(track_id)
         || track_path(track_id)
-        .and_then(|p| fs::metadata(p).ok())
-        .is_some_and(|m| m.len() > 1024)
+            .and_then(|p| fs::metadata(p).ok())
+            .is_some_and(|m| m.len() > 1024)
 }
 
 pub fn save_track(track_id: &str, bytes: &[u8]) {
@@ -224,6 +369,15 @@ pub fn trim_track_cache() {
     if let Some(dir) = cache_root().map(|p| p.join("tracks")) { trim_cache(&dir); }
 }
 
+pub fn clear_track_cache() {
+    let Some(dir) = cache_root().map(|p| p.join("tracks")) else { return };
+    if let Ok(rd) = fs::read_dir(&dir) {
+        for entry in rd.flatten() {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 #[cfg(test)]
 mod download_tests {
     use super::*;
@@ -233,8 +387,9 @@ mod download_tests {
         let id = format!("offline-test-{}", std::process::id());
         let track = crate::api::Track {
             id: id.clone(), title: "Offline test".into(), artists: "Test artist".into(),
-            album_id: None, album_title: String::new(), artist_id: None,
+            album_id: None, album_title: String::new(), artist_id: None, artist_links: Vec::new(),
             duration_ms: 1000, cover_uri: None, available: false,
+            has_sync_lyrics: false, has_text_lyrics: false, r128_i: None, r128_tp: None, is_ai: false,
         };
         let path = offline_track_path(&id).unwrap();
         fs::create_dir_all(path.parent().unwrap()).unwrap();

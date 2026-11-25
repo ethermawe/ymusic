@@ -1,3 +1,23 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+pragma ComponentBehavior: Bound
 import QtQuick
 import ymusic.ui
 
@@ -5,43 +25,38 @@ Item {
     id: root
 
     property string text
+    property bool compact: false
     property alias trailing: trailingSlot.data
 
-    implicitHeight: 36
-    implicitWidth: 180
+    implicitHeight: compact ? 20 : 34
+    implicitWidth: label.implicitWidth + 32
+
+    StyledText {
+        id: label
+        visible: !root.compact
+        anchors.left: parent.left
+        anchors.leftMargin: 16
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.text
+        font.pixelSize: Appearance.fontSize.smaller
+        font.weight: Font.DemiBold
+        color: Appearance.colors.onSurfaceVariant
+    }
+
+    WavyLine {
+        anchors.left: root.compact ? parent.left : label.right
+        anchors.leftMargin: root.compact ? 12 : 10
+        anchors.right: (!root.compact && trailingSlot.width > 0) ? trailingSlot.left : parent.right
+        anchors.rightMargin: (!root.compact && trailingSlot.width > 0) ? 6 : 12
+        anchors.verticalCenter: parent.verticalCenter
+        color: Appearance.colors.outlineVariant
+    }
 
     Row {
-        anchors.fill: parent
-        anchors.leftMargin: 16
-        anchors.rightMargin: 12
-        spacing: 10
-
-        StyledText {
-            id: label
-            anchors.verticalCenter: parent.verticalCenter
-            text: root.text
-            font.pixelSize: Appearance.fontSize.smallest
-            font.weight: Font.Bold
-            font.capitalization: Font.AllUppercase
-            color: Appearance.colors.onSurfaceVariant
-            opacity: 0.85
-        }
-
-        WavyLine {
-            anchors.verticalCenter: parent.verticalCenter
-            width: Math.max(0, parent.width - label.width - trailingSlot.width - 24)
-            height: 8
-            wavelength: 14
-            amplitude: 1.8
-            color: Qt.rgba(Appearance.colors.outlineVariant.r,
-                           Appearance.colors.outlineVariant.g,
-                           Appearance.colors.outlineVariant.b, 0.5)
-            visible: width > 16
-        }
-
-        Row {
-            id: trailingSlot
-            anchors.verticalCenter: parent.verticalCenter
-        }
+        id: trailingSlot
+        visible: !root.compact
+        anchors.right: parent.right
+        anchors.rightMargin: 4
+        anchors.verticalCenter: parent.verticalCenter
     }
 }

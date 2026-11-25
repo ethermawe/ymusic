@@ -29,6 +29,27 @@ pub fn record(track: Track) -> std::io::Result<Vec<Track>> {
     Ok(tracks)
 }
 
+pub fn merge_remote(remote: Vec<Track>) -> std::io::Result<Vec<Track>> {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let local = load();
+    if remote.is_empty() {
+        return Ok(local);
+    }
+    let mut merged = Vec::with_capacity(LIMIT);
+    let mut seen = std::collections::HashSet::new();
+    // Remote server history is authoritative for cross-device recency, followed by local-only entries
+    for t in remote.into_iter().chain(local.into_iter()) {
+        if seen.insert(t.id.clone()) {
+            merged.push(t);
+            if merged.len() >= LIMIT {
+                break;
+            }
+        }
+    }
+    save(&merged)?;
+    Ok(merged)
+}
+
 fn save(tracks: &[Track]) -> std::io::Result<()> {
     let p = path().ok_or_else(|| std::io::Error::other("нет каталога данных"))?;
     fs::create_dir_all(p.parent().unwrap())?;
@@ -47,7 +68,8 @@ mod tests {
     use super::*;
     fn track(id: &str) -> Track { Track {
         id: id.into(), title: id.into(), artists: String::new(), album_id: None,
-        album_title: String::new(), artist_id: None, duration_ms: 1000, cover_uri: None, available: true,
+        album_title: String::new(), artist_id: None, artist_links: Vec::new(), duration_ms: 1000, cover_uri: None, available: true,
+        has_sync_lyrics: false, has_text_lyrics: false, r128_i: None, r128_tp: None, is_ai: false,
     } }
     #[test]
     fn history_is_recent_unique_and_bounded() {

@@ -7,20 +7,33 @@
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QCryptographicHash>
-#include <QFileInfo>
+#include <QDesktopServices>
 #include <QDir>
+#include <QFileInfo>
+#include <QUrl>
+#include <algorithm>
+#include <cmath>
 
 YMusicBackend::YMusicBackend(QObject *parent)
     : QObject(parent) {
+    s_instance = this;
+    m_sleepTimer.setInterval(250);
+    connect(&m_sleepTimer, &QTimer::timeout, this, &YMusicBackend::sleepTimerTick);
     m_core = ymusic_core_new(&YMusicBackend::cCallback, this);
     feature({{"action", "history"}});
 }
 
 YMusicBackend::~YMusicBackend() {
+    if (s_instance == this) s_instance = nullptr;
     if (m_core) {
         ymusic_core_free(m_core);
         m_core = nullptr;
     }
+}
+
+int YMusicBackend::spectrumLevels(float *out, int count) const {
+    if (!m_core || !out || count <= 0) return 0;
+    return static_cast<int>(ymusic_core_spectrum_levels(m_core, out, static_cast<uint32_t>(count)));
 }
 
 void YMusicBackend::cCallback(int32_t eventType, const char *jsonData, void *userData) {
@@ -57,16 +70,23 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         break;
     }
     case EVENT_LOGIN_DEVICE_CODE: {
+        if (!m_loginBusy) break;
         m_loginCode = obj["user_code"].toString();
         m_loginUrl = obj["verification_url"].toString();
         emit authChanged();
         break;
     }
     case EVENT_NOW_PLAYING: {
-        m_hasTrack = obj["has_track"].toBool();
-        m_nowId = obj["id"].toString();
+        const QString nextId = obj["id"].toString();
+        const bool nextHasTrack = obj["has_track"].toBool();
+        if (nextId != m_nowId || nextHasTrack != m_hasTrack) {
+            ++m_trackInstanceId;
+        }
+        m_hasTrack = nextHasTrack;
+        m_nowId = nextId;
         m_nowTitle = obj["title"].toString();
         m_nowArtists = obj["artists"].toString();
+        m_nowArtistLinks = obj["artist_links"].toArray().toVariantList();
         m_nowAlbum = obj["album"].toString();
         m_nowCover = obj["cover_url"].toString();
         m_hasCover = obj["has_cover"].toBool();
@@ -74,6 +94,7 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
         m_nowLiked = obj["liked"].toBool();
         m_nowHasArtist = obj["has_artist"].toBool();
         m_nowHasAlbum = obj["has_album"].toBool();
+        m_nowIsAi = obj["is_ai"].toBool();
         emit nowPlayingChanged();
         break;
     }
@@ -115,13 +136,70 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
     case EVENT_FEATURE: {
         const auto type = obj["type"].toString();
         if (type == "history") m_historyModel.setTracks(obj["tracks"].toArray(), -1);
-        else if (type == "view") m_collectionDownloadable = obj["downloadable"].toBool();
+        else if (type == "view") {
+            m_collectionDownloadable = obj["downloadable"].toBool();
+            m_activePlaylistKey = obj["playlist_key"].toString();
+            m_activePlaylistPinned = obj["playlist_pinned"].toBool();
+            m_isOwnPlaylist = obj["is_own_playlist"].toBool();
+            m_collectionKind = obj["collection_kind"].toString();
+            m_collectionLiked = obj["collection_liked"].toBool();
+            if (obj.contains("audio_quality")) m_audioQuality = obj["audio_quality"].toString("hq");
+            if (obj.contains("download_quality")) m_downloadQuality = obj["download_quality"].toString("mp3");
+            if (obj.contains("normalize_volume")) m_normalizeVolume = obj["normalize_volume"].toBool(true);
+            if (obj.contains("ai_music_behavior")) m_aiMusicBehavior = obj["ai_music_behavior"].toString("skip_if_not_liked");
+            if (obj.contains("ai_strict_tracks")) m_aiStrictTracks = obj["ai_strict_tracks"].toBool(false);
+            if (obj.contains("show_ai_labels")) m_showAiLabels = obj["show_ai_labels"].toBool(true);
+        }
+        else if (type == "search_suggest") {
+            m_searchSuggestions = obj["suggestions"].toArray().toVariantList();
+            m_searchQuickTracks = obj["tracks"].toArray().toVariantList();
+            m_searchSuggestBest = obj["best"].isObject() ? obj["best"].toObject().toVariantMap() : QVariantMap();
+            if (obj.contains("history")) m_searchHistory = obj["history"].toArray().toVariantList();
+        }
+        else if (type == "search_history") {
+            m_searchHistory = obj["history"].toArray().toVariantList();
+        }
+        else if (type == "pinned_playlists") m_pinnedPlaylists = obj["playlists"].toArray().toVariantList();
         else if (type == "search") {
             m_searchQuery = obj["query"].toString();
             m_searchFilter = obj["filter"].toString("all");
+            if (obj.contains("best")) {
+                m_searchBest = obj["best"].isObject() ? obj["best"].toObject().toVariantMap() : QVariantMap();
+            }
+            if (obj.contains("has_more")) m_searchHasMore = obj["has_more"].toBool(false);
+            if (obj.contains("loading_more")) m_searchLoadingMore = obj["loading_more"].toBool(false);
+            if (obj.contains("history")) m_searchHistory = obj["history"].toArray().toVariantList();
         } else if (type == "batch") m_batch = obj.toVariantMap();
         else if (type == "wave_settings") m_waveSettings = obj.toVariantMap();
         else if (type == "wave_applied") m_waveSettings["selected"] = obj["selected"].toObject().toVariantMap();
+        else if (type == "copy_track_link") copyText(obj["url"].toString());
+        else if (type == "discord_status") {
+            m_discordConnected = obj["connected"].toBool(false);
+            m_discordStatus = obj["text"].toString();
+            if (!m_discordConnected && obj["is_error"].toBool(false)) {
+                qWarning().noquote() << "Discord RPC:" << m_discordStatus;
+            }
+        }
+        else if (type == "lastfm_status") {
+            m_lastfmHasBuiltinKeys = obj["has_builtin_keys"].toBool(false);
+            m_lastfmConfigured = obj["configured"].toBool(false);
+            m_lastfmConnected = obj["connected"].toBool(false);
+            m_lastfmAuthorizing = obj["authorizing"].toBool(false);
+            m_lastfmUsername = obj["username"].toString();
+            m_lastfmStatus = obj["text"].toString();
+            m_lastfmIsError = obj["is_error"].toBool(false);
+            m_lastfmPendingCount = obj["pending_count"].toInt(0);
+            m_lastfmEnabled = obj["enabled"].toBool(true);
+            m_lastfmNowPlaying = obj["now_playing"].toBool(true);
+            m_lastfmLoveOnLike = obj["love_on_like"].toBool(false);
+            m_lastfmSkipAi = obj["skip_ai"].toBool(true);
+            m_lastfmCustomApiKey = obj["custom_api_key"].toString();
+            m_lastfmHasCustomSecret = obj["has_custom_secret"].toBool(false);
+            const QString authUrl = obj["auth_url"].toString();
+            if (!authUrl.isEmpty()) {
+                QDesktopServices::openUrl(QUrl(authUrl));
+            }
+        }
         emit featuresChanged();
         emit featureResult(obj.toVariantMap());
         break;
@@ -172,11 +250,22 @@ void YMusicBackend::loginDevice() {
 }
 
 void YMusicBackend::loginToken(const QString &token) {
-    if (m_loginBusy || token.trimmed().isEmpty()) return;
+    if (token.trimmed().isEmpty()) return;
     clearStatus();
+    m_loginCode.clear();
+    m_loginUrl.clear();
     m_loginBusy = true;
     emit authChanged();
     if (m_core) ymusic_core_login_token(m_core, token.toUtf8().constData());
+}
+
+void YMusicBackend::cancelLogin() {
+    m_loginCode.clear();
+    m_loginUrl.clear();
+    m_loginBusy = false;
+    clearStatus();
+    emit authChanged();
+    if (m_core) ymusic_core_cancel_login(m_core);
 }
 
 void YMusicBackend::logout() {
@@ -212,9 +301,21 @@ void YMusicBackend::removeDownload(const QString &id) {
 bool YMusicBackend::isDownloaded(const QString &id) const {
     QString base = qEnvironmentVariable("XDG_DATA_HOME");
     if (base.isEmpty()) base = QDir::homePath() + "/.local/share";
+    QString safeId = id;
+    for (QChar &ch : safeId) {
+        if (!ch.isLetterOrNumber() && ch != u'_' && ch != u'-') {
+            ch = u'_';
+        }
+    }
+    if (!safeId.isEmpty()) {
+        const QFileInfo bundleAudio(base + "/ymusic/offline/" + safeId + "/audio.mp3");
+        if (bundleAudio.isFile() && bundleAudio.size() > 1024) {
+            return true;
+        }
+    }
     const auto hash = QCryptographicHash::hash(id.toUtf8(), QCryptographicHash::Md5).toHex();
-    const QFileInfo info(base + "/ymusic/offline/" + QString::fromLatin1(hash) + ".mp3");
-    return info.isFile() && info.size() > 1024;
+    const QFileInfo legacyInfo(base + "/ymusic/offline/" + QString::fromLatin1(hash) + ".mp3");
+    return legacyInfo.isFile() && legacyInfo.size() > 1024;
 }
 
 void YMusicBackend::loadPlaylists() {
@@ -271,8 +372,35 @@ void YMusicBackend::openNowArtist() {
     if (m_core) ymusic_core_open_now_artist(m_core);
 }
 
+void YMusicBackend::openArtist(const QString &artistId) {
+    if (m_core && !artistId.isEmpty()) {
+        ymusic_core_open_artist(m_core, artistId.toUtf8().constData());
+    }
+}
+
 void YMusicBackend::openNowAlbum() {
     if (m_core) ymusic_core_open_now_album(m_core);
+}
+
+void YMusicBackend::setDiscordRpcEnabled(bool enabled) {
+    if (m_core) ymusic_core_set_discord_enabled(m_core, enabled);
+}
+
+void YMusicBackend::setDiscordRpcConfig(bool enabled, const QString &display, const QString &activityType,
+                                        bool showWhenPaused, bool showCover, bool showAlbum,
+                                        bool showTimestamps, bool showButton) {
+    if (!m_core) return;
+    QJsonObject obj;
+    obj.insert(QStringLiteral("enabled"), enabled);
+    obj.insert(QStringLiteral("status_display"), display);
+    obj.insert(QStringLiteral("activity_type"), activityType);
+    obj.insert(QStringLiteral("show_when_paused"), showWhenPaused);
+    obj.insert(QStringLiteral("show_cover"), showCover);
+    obj.insert(QStringLiteral("show_album"), showAlbum);
+    obj.insert(QStringLiteral("show_timestamps"), showTimestamps);
+    obj.insert(QStringLiteral("show_button"), showButton);
+    const QByteArray json = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    ymusic_core_set_discord_config(m_core, json.constData());
 }
 
 void YMusicBackend::play(int index) {
@@ -294,6 +422,10 @@ void YMusicBackend::downloadTrack(const QString &id, const QUrl &destination) {
 
 void YMusicBackend::copyText(const QString &text) {
     QGuiApplication::clipboard()->setText(text);
+}
+
+QString YMusicBackend::clipboardText() const {
+    return QGuiApplication::clipboard()->text();
 }
 
 void YMusicBackend::toggle() {
@@ -345,6 +477,71 @@ void YMusicBackend::clearStatus() {
     emit statusChanged();
 }
 
+void YMusicBackend::saveSession() {
+    if (m_core) {
+        ymusic_core_save_session(m_core);
+    }
+}
+
 void YMusicBackend::feature(const QVariantMap &command) {
     if (m_core) ymusic_core_feature(m_core, QJsonDocument(QJsonObject::fromVariantMap(command)).toJson(QJsonDocument::Compact).constData());
+}
+
+void YMusicBackend::setTempo(qreal speed) {
+    const qreal clamped = std::clamp(speed, 0.5, 2.0);
+    if (!qFuzzyCompare(clamped + 1.0, m_tempo + 1.0)) {
+        m_tempo = clamped;
+        emit tempoChanged();
+    }
+    feature({{"action", "set_speed"}, {"speed", clamped}});
+}
+
+void YMusicBackend::startSleepTimer(int seconds, const QString &fadeMode) {
+    cancelSleepTimer();
+    if (seconds <= 0) return;
+    m_sleepTimerDeadline = QDateTime::currentDateTimeUtc().addSecs(seconds);
+    m_sleepTimerTotalSecs = seconds;
+    m_sleepFade = ymusic::sleepFadeFromString(fadeMode);
+    m_lastSleepFadeGain = 1.0;
+    m_sleepTimer.start();
+    emit sleepTimerChanged();
+}
+
+void YMusicBackend::cancelSleepTimer() {
+    m_sleepTimer.stop();
+    const bool wasRunning = m_sleepTimerDeadline.isValid();
+    if (std::abs(m_lastSleepFadeGain - 1.0) > 1e-4) {
+        m_lastSleepFadeGain = 1.0;
+        feature({{"action", "set_sleep_fade"}, {"gain", 1.0}});
+    }
+    m_sleepTimerDeadline = {};
+    m_sleepTimerTotalSecs = 0;
+    m_sleepFade = ymusic::SleepFade::None;
+    if (wasRunning) emit sleepTimerChanged();
+}
+
+void YMusicBackend::sleepTimerTick() {
+    if (!m_sleepTimerDeadline.isValid()) {
+        m_sleepTimer.stop();
+        return;
+    }
+    const double remaining = QDateTime::currentDateTimeUtc().msecsTo(m_sleepTimerDeadline) / 1000.0;
+    if (remaining > 0.0) {
+        if (m_sleepFade != ymusic::SleepFade::None) {
+            const double gain = ymusic::sleepFadeLevel(m_sleepFade, remaining, m_sleepTimerTotalSecs);
+            if (std::abs(gain - m_lastSleepFadeGain) > 0.005) {
+                m_lastSleepFadeGain = gain;
+                feature({{"action", "set_sleep_fade"}, {"gain", gain}});
+            }
+        }
+        return;
+    }
+    m_sleepTimer.stop();
+    feature({{"action", "pause_playback"}});
+    m_lastSleepFadeGain = 1.0;
+    feature({{"action", "set_sleep_fade"}, {"gain", 1.0}});
+    m_sleepTimerDeadline = {};
+    m_sleepTimerTotalSecs = 0;
+    m_sleepFade = ymusic::SleepFade::None;
+    emit sleepTimerChanged();
 }

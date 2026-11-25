@@ -1,64 +1,105 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Templates as T
 import ymusic.ui
 
-T.AbstractButton {
+RippleButton {
     id: root
 
-    property string symbol: ""
-    property real iconSize: 20
-    property real size: 36
-    property color iconColor: Appearance.colors.onSurface
-    property color activeIconColor: Appearance.colors.primary
-    property bool toggled: false
-    property bool heartBurst: false
-    property string tooltip: ""
+    enum Variant {
+        Standard,
+        Filled,
+        Tonal,
+        Outlined
+    }
+
+    property int variant: IconButton.Standard
+    property string burst
+    property string symbol
+    property real iconSize: 24
+    property real iconRotation: 0
+    property real size: 40
+    property bool fillWhenToggled: true
+    property bool alwaysFilled: false
+    property bool toggleable: false
+    property color iconColor: {
+        switch (variant) {
+        case IconButton.Filled:
+            return toggled || !toggleable ? scheme.onPrimary : scheme.primary
+        case IconButton.Tonal:
+            return toggled ? scheme.onSecondaryContainer : scheme.onSurfaceVariant
+        default:
+            return toggled ? scheme.primary : scheme.onSurfaceVariant
+        }
+    }
 
     implicitWidth: size
     implicitHeight: size
-    hoverEnabled: true
+    padding: 0
+    buttonRadius: Appearance.rounding.full
+    colBackground: {
+        switch (variant) {
+        case IconButton.Filled:
+            return toggled || !toggleable ? scheme.primary : scheme.surfaceContainerHighest
+        case IconButton.Tonal:
+            return toggled ? scheme.secondaryContainer : scheme.surfaceContainerHighest
+        default:
+            return "transparent"
+        }
+    }
+    colBackgroundHover: {
+        switch (variant) {
+        case IconButton.Filled:
+            return toggled || !toggleable ? scheme.primaryHover : scheme.surfaceContainerHighestHover
+        case IconButton.Tonal:
+            return toggled ? scheme.secondaryContainerHover : scheme.surfaceContainerHighestHover
+        default:
+            return scheme.layer1Hover
+        }
+    }
+    colBackgroundToggled: variant === IconButton.Standard || variant === IconButton.Outlined ? "transparent" : colBackground
+    colBackgroundToggledHover: variant === IconButton.Standard || variant === IconButton.Outlined ? scheme.layer1Hover : colBackgroundHover
+    colRipple: variant === IconButton.Filled ? scheme.primaryActive : scheme.layer1Active
+    colRippleToggled: colRipple
+    backgroundItem.border.width: variant === IconButton.Outlined && !toggled ? 1 : (visualFocus ? 2 : 0)
+    backgroundItem.border.color: variant === IconButton.Outlined && !visualFocus ? scheme.outlineVariant : scheme.secondary
 
-    scale: down ? 0.90 : (hovered ? 1.06 : 1.0)
-    Behavior on scale {
-        NumberAnimation {
-            duration: 180
-            easing.type: Easing.OutBack
-            easing.overshoot: 1.8
+    contentItem: Item {
+        MaterialSymbol {
+            anchors.centerIn: parent
+            text: root.symbol
+            iconSize: root.iconSize
+            fill: root.alwaysFilled || (root.toggled && root.fillWhenToggled) ? 1 : 0
+            color: root.iconColor
+            rotation: root.iconRotation
+
+            Behavior on color {
+                ElementMoveFastColor {}
+            }
+            Behavior on rotation {
+                enabled: !Appearance.performanceMode
+                ElementMoveSmall {}
+            }
         }
     }
 
-    background: Rectangle {
-        anchors.fill: parent
-        radius: root.size / 2
-        color: root.toggled
-               ? Qt.rgba(Appearance.colors.primary.r, Appearance.colors.primary.g, Appearance.colors.primary.b, 0.18)
-               : (root.hovered ? Qt.rgba(1, 1, 1, 0.09) : "transparent")
-
-        Behavior on color {
-            ColorAnimation { duration: 140 }
-        }
-    }
-
-    contentItem: MaterialSymbol {
-        anchors.centerIn: parent
-        text: root.symbol
-        iconSize: root.iconSize
-        color: root.toggled ? root.activeIconColor : root.iconColor
-
-        Behavior on color {
-            ColorAnimation { duration: 140 }
-        }
-    }
-
-    LikeBurst {
-        id: likeBurst
-        anchors.centerIn: parent
-        color: root.activeIconColor
-    }
-
-    onClicked: {
-        if (root.heartBurst && !root.toggled) {
-            likeBurst.trigger();
-        }
-    }
+    onClicked: if (burst.length > 0) UiState.burst(root, burst)
 }

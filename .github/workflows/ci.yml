@@ -55,6 +55,9 @@ jobs:
         run: cargo test --locked --lib
 
       - name: Build Rust core (release)
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_API_SECRET: ${{ secrets.LASTFM_API_SECRET }}
         run: cargo build --release --locked --lib
 
       - name: Configure Qt frontend
@@ -62,6 +65,11 @@ jobs:
 
       - name: Build Qt frontend
         run: cmake --build build-qt
+
+      - name: Run Qt unit tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build-qt --output-on-failure
 
   build-windows:
     runs-on: windows-2022
@@ -75,6 +83,10 @@ jobs:
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            packaging/windows/setup
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
@@ -89,24 +101,68 @@ jobs:
         run: cargo test --locked --lib
 
       - name: Build Rust core (release)
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_API_SECRET: ${{ secrets.LASTFM_API_SECRET }}
         run: cargo build --release --locked --lib
 
       - name: Configure and build Qt frontend
         run: |
           cmake -S src-qt -B build-qt -A x64
           cmake --build build-qt --config Release
+          ctest --test-dir build-qt -C Release --output-on-failure
           cmake --install build-qt --config Release --prefix dist
 
       - name: Deploy Qt runtime (windeployqt)
         shell: pwsh
         run: |
-          windeployqt --qmldir src-qt/qml --release --no-translations --no-opengl-sw dist/ymusic-qml.exe
+          windeployqt --qmldir src-qt/qml --release --no-translations --no-opengl-sw --no-compiler-runtime dist/ymusic-qml.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Remove-Item -Recurse -Force dist/qmltooling -ErrorAction SilentlyContinue
+
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          if (-not $vsPath) { throw "Could not locate Visual Studio installation via vswhere.exe" }
+          $crtDir = Get-ChildItem -Path "$vsPath\VC\Redist\MSVC" -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^\d' } |
+            Sort-Object Name -Descending |
+            Select-Object -First 1 |
+            ForEach-Object { Join-Path $_.FullName "x64\Microsoft.VC143.CRT" }
+          if (-not $crtDir -or -not (Test-Path $crtDir)) {
+            $crtDir = Get-ChildItem -Path "$vsPath\VC\Redist\MSVC" -Recurse -Directory -Filter "Microsoft.VC*.CRT" -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\' } |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $crtDir -or -not (Test-Path $crtDir)) {
+            throw "Could not find MSVC x64 CRT directory under $vsPath"
+          }
+          Copy-Item "$crtDir\*.dll" -Destination "dist\" -Force
+          if (-not (Test-Path "dist\vcruntime140_1.dll") -or -not (Test-Path "dist\msvcp140.dll")) {
+            throw "Missing required MSVC CRT DLLs in dist/"
+          }
+
+      - name: Build Windows installer (custom Rust setup)
+        shell: pwsh
+        run: |
+          $root = (Get-Location).Path
+          cargo test --locked --manifest-path packaging/windows/setup/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --release --locked --manifest-path packaging/windows/setup/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $stubExe = "$root\packaging\windows\setup\target\release\ymusic-setup.exe"
+          $packerExe = "$root\packaging\windows\setup\target\release\ymusic-packer.exe"
+          & $packerExe `
+            --input "$root\dist" `
+            --stub $stubExe `
+            --output "$root\ymusic-setup-windows-x86_64.exe" `
+            --version "0.3.0"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build single-file portable EXE (NSIS)
         shell: pwsh
         run: |
           @'
+          Icon "icons\ymusic.ico"
           OutFile "ymusic-portable-windows-x86_64.exe"
           SilentInstall silent
           RequestExecutionLevel user

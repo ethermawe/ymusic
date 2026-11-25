@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v0.2.3)'
+        description: 'Release tag (e.g. v0.3.0)'
         required: true
-        default: 'v0.2.3'
+        default: 'v0.3.0'
 
 permissions:
   contents: write
@@ -56,6 +56,8 @@ jobs:
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
 
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
@@ -67,14 +69,19 @@ jobs:
           modules: 'qtshadertools'
 
       - name: Build Rust core (release)
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_API_SECRET: ${{ secrets.LASTFM_API_SECRET }}
         run: cargo build --release --locked --lib
 
       - name: Configure and build Qt frontend
         run: |
+          TAG="${{ needs.meta.outputs.tag }}"
           cmake -S src-qt -B build-qt -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
-            -DCMAKE_INSTALL_LIBDIR=lib
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DYMUSIC_VERSION="${TAG#v}"
           cmake --build build-qt
 
       - name: Stage and archive release bundles
@@ -103,16 +110,19 @@ jobs:
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
       - name: Build Arch Linux .pkg.tar.zst
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_API_SECRET: ${{ secrets.LASTFM_API_SECRET }}
         run: |
           TAG="${{ needs.meta.outputs.tag }}"
           PKGVER="${TAG#v}"
           PKGVER="${PKGVER//-/_}"
-          docker run --rm -e PKGVER="$PKGVER" -v "$PWD:/work" -w /work archlinux:latest bash -euo pipefail -c '
+          docker run --rm -e PKGVER="$PKGVER" -e LASTFM_API_KEY -e LASTFM_API_SECRET -v "$PWD:/work" -w /work archlinux:latest bash -euo pipefail -c '
             pacman -Syu --noconfirm --needed base-devel git rust cmake ninja pkgconf alsa-lib qt6-base qt6-declarative qt6-svg qt6-shadertools hicolor-icon-theme
             useradd -m builder
             sed -i "s/^pkgver=.*/pkgver=$PKGVER/" PKGBUILD
             chown -R builder:builder /work
-            su - builder -c "cd /work && makepkg -sf --noconfirm"
+            su -w LASTFM_API_KEY,LASTFM_API_SECRET - builder -c "cd /work && makepkg -sf --noconfirm"
             mkdir -p /work/out-arch
             cp /work/*.pkg.tar.zst /work/out-arch/
           '
@@ -136,6 +146,10 @@ jobs:
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            packaging/windows/setup
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
@@ -147,19 +161,77 @@ jobs:
           modules: 'qtshadertools'
 
       - name: Build Rust core (release)
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_API_SECRET: ${{ secrets.LASTFM_API_SECRET }}
         run: cargo build --release --locked --lib
 
       - name: Configure and build Qt frontend
+        shell: pwsh
         run: |
-          cmake -S src-qt -B build-qt -A x64
+          $tag = "${{ needs.meta.outputs.tag }}"
+          $ver = $tag.TrimStart('v')
+          cmake -S src-qt -B build-qt -A x64 "-DYMUSIC_VERSION=$ver"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build build-qt --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --install build-qt --config Release --prefix dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Deploy Qt runtime (windeployqt)
         shell: pwsh
         run: |
-          windeployqt --qmldir src-qt/qml --release --no-translations --no-opengl-sw dist/ymusic-qml.exe
+          windeployqt --qmldir src-qt/qml --release --no-translations --no-opengl-sw --no-compiler-runtime dist/ymusic-qml.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Remove-Item -Recurse -Force dist/qmltooling -ErrorAction SilentlyContinue
+
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          if (-not $vsPath) { throw "Could not locate Visual Studio installation via vswhere.exe" }
+          $crtDir = Get-ChildItem -Path "$vsPath\VC\Redist\MSVC" -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^\d' } |
+            Sort-Object Name -Descending |
+            Select-Object -First 1 |
+            ForEach-Object { Join-Path $_.FullName "x64\Microsoft.VC143.CRT" }
+          if (-not $crtDir -or -not (Test-Path $crtDir)) {
+            $crtDir = Get-ChildItem -Path "$vsPath\VC\Redist\MSVC" -Recurse -Directory -Filter "Microsoft.VC*.CRT" -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\' } |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $crtDir -or -not (Test-Path $crtDir)) {
+            throw "Could not find MSVC x64 CRT directory under $vsPath"
+          }
+          Copy-Item "$crtDir\*.dll" -Destination "dist\" -Force
+          if (-not (Test-Path "dist\vcruntime140_1.dll") -or -not (Test-Path "dist\msvcp140.dll")) {
+            throw "Missing required MSVC CRT DLLs in dist/"
+          }
+
+      - name: Build Windows installer (custom Rust setup) and update manifest
+        shell: pwsh
+        run: |
+          $tag = "${{ needs.meta.outputs.tag }}"
+          $ver = $tag.TrimStart('v')
+          $root = (Get-Location).Path
+          cargo build --release --locked --manifest-path packaging/windows/setup/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $stubExe = "$root\packaging\windows\setup\target\release\ymusic-setup.exe"
+          $packerExe = "$root\packaging\windows\setup\target\release\ymusic-packer.exe"
+          New-Item -ItemType Directory -Force -Path "$root\out" | Out-Null
+          $setupName = "ymusic-$tag-windows-x86_64-setup.exe"
+          $setupPath = "$root\out\$setupName"
+
+          & $packerExe --input "$root\dist" --stub $stubExe --output $setupPath --version $ver
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $hash = (Get-FileHash -Path $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $manifest = [ordered]@{
+            version   = $ver
+            tag       = $tag
+            url       = "https://github.com/${{ github.repository }}/releases/download/$tag/$setupName"
+            sha256    = $hash
+            notes_url = "https://github.com/${{ github.repository }}/releases/tag/$tag"
+          }
+          $manifest | ConvertTo-Json | Set-Content -Encoding utf8NoBOM "$root\out\latest-windows.json"
 
       - name: Build single-file portable EXE (NSIS)
         shell: pwsh
@@ -168,6 +240,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path out | Out-Null
           $exeName = "out/ymusic-$tag-windows-x86_64.exe"
           @"
+          Icon "icons\ymusic.ico"
           OutFile "$exeName"
           SilentInstall silent
           RequestExecutionLevel user
@@ -180,6 +253,7 @@ jobs:
           SectionEnd
           "@ | Set-Content -Encoding ASCII portable.nsi
           & "C:\Program Files (x86)\NSIS\makensis.exe" portable.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Archive Windows bundle
         shell: pwsh

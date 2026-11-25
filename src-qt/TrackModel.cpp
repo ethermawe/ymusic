@@ -17,6 +17,7 @@ QVariant TrackModel::data(const QModelIndex &index, int role) const {
     case IdRole: return t.id;
     case TitleRole: return t.title;
     case ArtistsRole: return t.artists;
+    case ArtistLinksRole: return t.artistLinks;
     case AlbumRole: return t.album;
     case DurationRole: return t.duration;
     case DurationMsRole: return t.durationMs;
@@ -27,6 +28,7 @@ QVariant TrackModel::data(const QModelIndex &index, int role) const {
     case HasCoverRole: return t.hasCover;
     case HasArtistRole: return t.hasArtist;
     case HasAlbumRole: return t.hasAlbum;
+    case IsAiRole: return t.isAi;
     case IsCurrentRole: return index.row() == m_currentIndex;
     case IsPlayingRole: return (index.row() == m_currentIndex) && m_playing;
     default: return QVariant();
@@ -38,6 +40,7 @@ QHash<int, QByteArray> TrackModel::roleNames() const {
     roles[IdRole] = "id";
     roles[TitleRole] = "title";
     roles[ArtistsRole] = "artists";
+    roles[ArtistLinksRole] = "artistLinks";
     roles[AlbumRole] = "album";
     roles[DurationRole] = "duration";
     roles[DurationMsRole] = "durationMs";
@@ -48,6 +51,7 @@ QHash<int, QByteArray> TrackModel::roleNames() const {
     roles[HasCoverRole] = "hasCover";
     roles[HasArtistRole] = "hasArtist";
     roles[HasAlbumRole] = "hasAlbum";
+    roles[IsAiRole] = "isAi";
     roles[IsCurrentRole] = "isCurrent";
     roles[IsPlayingRole] = "isPlaying";
     return roles;
@@ -77,45 +81,73 @@ void TrackModel::setPlaying(bool playing) {
     }
 }
 
+namespace {
+TrackData parseTrack(const QJsonObject &obj) {
+    TrackData t;
+    t.id = obj["id"].toString();
+    t.title = obj["title"].toString();
+    t.artists = obj["artists"].toString();
+    t.artistLinks = obj["artist_links"].toArray().toVariantList();
+    t.album = obj["album"].toString();
+    t.duration = obj["duration"].toString();
+    t.durationMs = obj["duration_ms"].toInteger();
+    t.available = obj["available"].toBool();
+    t.liked = obj["liked"].toBool();
+    t.downloaded = obj["downloaded"].toBool();
+    t.coverUrl = obj["cover_url"].toString();
+    t.hasCover = obj["has_cover"].toBool();
+    t.hasArtist = obj["has_artist"].toBool();
+    t.hasAlbum = obj["has_album"].toBool();
+    t.isAi = obj["is_ai"].toBool();
+    return t;
+}
+} // namespace
+
 void TrackModel::setTracks(const QJsonArray &tracksArray, int currentIndex) {
     const int oldCount = m_tracks.size();
-    bool sameOrder = oldCount == tracksArray.size();
-    for (int i = 0; sameOrder && i < oldCount; ++i)
-        sameOrder = m_tracks[i].id == tracksArray[i].toObject()["id"].toString();
-
-    // Progress/like/queue refreshes must not destroy and rebuild every delegate
-    // (including its image textures and multisampled icon surfaces).
-    if (!sameOrder) {
-        beginResetModel();
-        m_tracks.clear();
-        m_tracks.reserve(tracksArray.size());
-    }
-
-    int row = 0;
-    for (const QJsonValue &val : tracksArray) {
-        QJsonObject obj = val.toObject();
-        TrackData t;
-        t.id = obj["id"].toString();
-        t.title = obj["title"].toString();
-        t.artists = obj["artists"].toString();
-        t.album = obj["album"].toString();
-        t.duration = obj["duration"].toString();
-        t.durationMs = obj["duration_ms"].toInteger();
-        t.available = obj["available"].toBool();
-        t.liked = obj["liked"].toBool();
-        t.downloaded = obj["downloaded"].toBool();
-        t.coverUrl = obj["cover_url"].toString();
-        t.hasCover = obj["has_cover"].toBool();
-        t.hasArtist = obj["has_artist"].toBool();
-        t.hasAlbum = obj["has_album"].toBool();
-        if (sameOrder) m_tracks[row] = t;
-        else m_tracks.append(t);
-        ++row;
-    }
     const int oldCurrent = m_currentIndex;
-    m_currentIndex = currentIndex;
-    if (!sameOrder) endResetModel();
-    else if (!m_tracks.isEmpty()) emit dataChanged(index(0), index(m_tracks.size() - 1));
+
+    QList<TrackData> next;
+    next.reserve(tracksArray.size());
+    for (const QJsonValue &val : tracksArray) {
+        next.append(parseTrack(val.toObject()));
+    }
+    const int newCount = next.size();
+
+    // Keep unchanged prefix rows intact (e.g. Wave appends) so ListView
+    // preserves scroll position and avoids rebuilding existing delegates.
+    int commonPrefix = 0;
+    const int minCount = qMin(oldCount, newCount);
+    while (commonPrefix < minCount && m_tracks[commonPrefix].id == next[commonPrefix].id) {
+        ++commonPrefix;
+    }
+
+    if (commonPrefix == 0) {
+        beginResetModel();
+        m_tracks = std::move(next);
+        m_currentIndex = currentIndex;
+        endResetModel();
+    } else {
+        for (int i = 0; i < commonPrefix; ++i) {
+            m_tracks[i] = next[i];
+        }
+        m_currentIndex = currentIndex;
+        emit dataChanged(index(0), index(commonPrefix - 1));
+
+        if (oldCount > commonPrefix) {
+            beginRemoveRows(QModelIndex(), commonPrefix, oldCount - 1);
+            m_tracks.erase(m_tracks.begin() + commonPrefix, m_tracks.end());
+            endRemoveRows();
+        }
+        if (newCount > commonPrefix) {
+            beginInsertRows(QModelIndex(), commonPrefix, newCount - 1);
+            for (int i = commonPrefix; i < newCount; ++i) {
+                m_tracks.append(next[i]);
+            }
+            endInsertRows();
+        }
+    }
+
     if (oldCurrent != m_currentIndex) emit currentIndexChanged();
     if (oldCount != m_tracks.size()) emit countChanged();
 }

@@ -1,3 +1,23 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Templates as T
 import ymusic.ui
@@ -6,133 +26,151 @@ T.AbstractButton {
     id: root
 
     property string symbol
+    property url artworkUrl
+    property string fallbackKey: text
     property bool selected: false
-    property color badgeColor: Appearance.colors.primaryContainer
-    property color badgeIconColor: Appearance.colors.onPrimaryContainer
-    property alias trailing: trailingSlot.data
+    property bool showArtwork: false
+    property bool compact: false
     property string iconShape: "cookie9"
+    property bool keepsShape: false
+    property alias trailing: trailingSlot.data
+    property int indent: 0
 
-    implicitHeight: 42
+    implicitHeight: 40
     hoverEnabled: true
     focusPolicy: Qt.TabFocus
 
     background: Item {
-        // State layer on hover
         Rectangle {
             anchors.fill: parent
             radius: Appearance.rounding.full
-            color: !root.selected && root.down ? Qt.rgba(1, 1, 1, 0.08)
-                 : (!root.selected && root.hovered ? Qt.rgba(1, 1, 1, 0.04) : "transparent")
+            color: !root.selected && root.down ? Appearance.colors.layer1Active
+                 : Qt.alpha(Appearance.colors.layer1Hover, !root.selected && root.hovered ? 1 : 0)
 
             Behavior on color {
                 ElementMoveFastColor {}
             }
         }
 
-        // Selected pill indicator
-        Rectangle {
+        WavyClip {
             id: pill
+
             property real openness: root.selected ? 1 : 0
 
             anchors.centerIn: parent
-            width: parent.width * (0.35 + 0.65 * openness)
+            width: parent.width * (0.35 + 0.65 * Math.min(openness, 1))
             height: parent.height
             opacity: root.selected ? 1 : 0
             visible: opacity > 0
             radius: height / 2
-            color: root.down ? Appearance.colors.secondaryContainer
-                 : (root.hovered ? Appearance.colors.secondaryContainer : Qt.rgba(Appearance.colors.primary.r, Appearance.colors.primary.g, Appearance.colors.primary.b, 0.16))
-            border.width: root.selected ? 1 : 0
-            border.color: Qt.rgba(Appearance.colors.primary.r, Appearance.colors.primary.g, Appearance.colors.primary.b, 0.3)
+            wavy: root.selected && root.hovered
+            depth: 2
+            wavelength: 14
 
             Behavior on openness {
-                ElementMoveSmall {}
+                enabled: !Appearance.performanceMode
+                ElementMove {}
             }
             Behavior on opacity {
-                NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                NumberAnimation { duration: Appearance.duration(160); easing.type: Easing.OutCubic }
             }
-            Behavior on color {
-                ElementMoveFastColor {}
+
+            Rectangle {
+                anchors.fill: parent
+                radius: height / 2
+                color: root.down ? Appearance.colors.secondaryContainerActive
+                     : root.hovered ? Appearance.colors.secondaryContainerHover : Appearance.colors.secondaryContainer
+
+                Behavior on color {
+                    ElementMoveFastColor {}
+                }
             }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            visible: root.visualFocus
+            radius: Appearance.rounding.full
+            color: "transparent"
+            border.width: 2
+            border.color: Appearance.colors.secondary
         }
     }
 
     contentItem: Item {
-        Row {
-            anchors.fill: parent
-            anchors.leftMargin: 14
-            anchors.rightMargin: 12
-            spacing: 12
+        Item {
+            id: iconSlot
+            x: root.compact ? Math.round((parent.width - width) / 2) : 14 + root.indent
+            anchors.verticalCenter: parent.verticalCenter
+            width: 24
+            height: 24
 
-            Item {
-                anchors.verticalCenter: parent.verticalCenter
+            MaterialSymbol {
+                anchors.centerIn: parent
+                Reveal.shown: !root.selected && !root.showArtwork
+                text: root.symbol
+                iconSize: 22
+                weight: root.hovered ? 600 : 400
+                color: Appearance.colors.onSurfaceVariant
+            }
+            ShapeIcon {
+                anchors.centerIn: parent
+                Reveal.shown: root.selected && !root.showArtwork
+                Reveal.overshoot: 2.4
+                size: 30
+                iconSize: 16
+                shape: root.iconShape
+                keepsShape: root.keepsShape
+                symbol: root.symbol
+                color: Appearance.colors.primary
+                iconColor: Appearance.colors.onPrimary
+                hovered: root.hovered
+            }
+            ArtworkImage {
+                anchors.centerIn: parent
+                visible: root.showArtwork
                 width: 24
                 height: 24
-
-                MaterialShape {
-                    anchors.centerIn: parent
-                    width: 32
-                    height: 32
-                    shape: root.iconShape
-                    color: Appearance.colors.primary
-                    opacity: root.selected || root.hovered ? 1 : 0
-                    scale: root.selected || root.hovered ? 1 : 0.55
-                    spinAngle: root.hovered ? 24 : 0
-
-                    Behavior on opacity {
-                        NumberAnimation { duration: Appearance.reduceMotion ? 0 : 160 }
-                    }
-                    Behavior on scale {
-                        NumberAnimation {
-                            duration: Appearance.reduceMotion ? 0 : 360
-                            easing.type: Easing.OutBack
-                            easing.overshoot: 1.6
-                        }
-                    }
-                    Behavior on spinAngle {
-                        NumberAnimation {
-                            duration: Appearance.reduceMotion ? 0 : 380
-                            easing.type: Easing.OutBack
-                        }
-                    }
-                }
-
-                MaterialSymbol {
-                    anchors.centerIn: parent
-                    text: root.symbol
-                    iconSize: root.selected || root.hovered ? 18 : 20
-                    color: root.selected || root.hovered ? Appearance.colors.onPrimary : Appearance.colors.onSurfaceVariant
-                    rotation: root.hovered ? -10 : 0
-                    Behavior on rotation {
-                        NumberAnimation {
-                            duration: Appearance.reduceMotion ? 0 : 380
-                            easing.type: Easing.OutBack
-                        }
-                    }
-                    Behavior on iconSize {
-                        NumberAnimation { duration: Appearance.reduceMotion ? 0 : 180 }
-                    }
-                    Behavior on color {
-                        ColorAnimation { duration: Appearance.reduceMotion ? 0 : 160 }
-                    }
-                }
-            }
-
-            StyledText {
-                anchors.verticalCenter: parent.verticalCenter
-                width: Math.max(0, parent.width - 36 - trailingSlot.width)
-                text: root.text
-                elide: Text.ElideRight
-                font.pixelSize: Appearance.fontSize.small
-                font.weight: root.selected ? Font.DemiBold : Font.Normal
-                color: root.selected ? Appearance.colors.primary
-                     : (root.hovered ? Appearance.colors.onSurface : Appearance.colors.onSurfaceVariant)
-            }
-
-            Row {
-                id: trailingSlot
-                anchors.verticalCenter: parent.verticalCenter
+                radius: 5
+                source: root.artworkUrl
+                fallbackKey: root.fallbackKey
             }
         }
+
+        StyledText {
+            visible: !root.compact
+            anchors.left: iconSlot.right
+            anchors.leftMargin: 12
+            anchors.right: trailingSlot.visible ? trailingSlot.left : parent.right
+            anchors.rightMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.text
+            elide: Text.ElideRight
+            font.pixelSize: Appearance.fontSize.small
+            font.weight: root.selected ? Font.DemiBold : Font.Medium
+            color: root.selected ? Appearance.colors.onSecondaryContainer : Appearance.colors.onSurface
+        }
+
+        Row {
+            id: trailingSlot
+            visible: !root.compact && children.length > 0
+            anchors.right: parent.right
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 2
+        }
+    }
+
+    Loader {
+        anchors.fill: parent
+        active: root.compact && root.hovered && root.text.length > 0
+        sourceComponent: StyledToolTip {
+            visible: true
+            text: root.text
+        }
+    }
+
+    HoverHandler {
+        cursorShape: Qt.PointingHandCursor
     }
 }

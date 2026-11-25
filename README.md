@@ -1,118 +1,169 @@
+<div align="center">
+
+<img src="icon.png" width="96" alt="ymusic">
+
 # ymusic
 
-Нативный клиент Яндекс Музыки на **Rust + Qt Quick/QML**. Работает через неофициальный API
-(эндпоинты сверены с [MarshalX/yandex-music-api](https://github.com/MarshalX/yandex-music-api)).
+Нативный десктопный клиент Яндекс Музыки на **Rust** и **Qt Quick / QML**
+
+[![Release](https://img.shields.io/github/v/release/ethermawe/ymusic?style=flat-square&color=d97706&label=release)](https://github.com/ethermawe/ymusic/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/ethermawe/ymusic/ci.yml?branch=develop&style=flat-square&label=build)](https://github.com/ethermawe/ymusic/actions/workflows/ci.yml)
+[![Rust](https://img.shields.io/badge/Rust-core-orange?style=flat-square&logo=rust&logoColor=white)](src/)
+[![Qt 6](https://img.shields.io/badge/Qt_6-QML-41cd52?style=flat-square&logo=qt&logoColor=white)](src-qt/)
+[![Platforms](https://img.shields.io/badge/Linux_%7C_Windows-x86__64-3584e4?style=flat-square)](https://github.com/ethermawe/ymusic/releases)
+[![License](https://img.shields.io/github/license/ethermawe/ymusic?style=flat-square)](LICENSE)
+
+[Установка](#установка) · [Скриншоты](#скриншоты) · [Возможности](#возможности) · [Моддинг](docs/MODDING.md) · [Сборка](#сборка-из-исходников) · [Клавиши](#горячие-клавиши)
+
+<br>
+
+<img src="docs/screenshots/imersive-player.png" width="100%" alt="Имерсивный плеер ymusic">
+
+</div>
+
+---
+
+**ymusic** — быстрый нативный клиент вместо Electron-обёртки: асинхронное ядро на Rust (`tokio`, `reqwest`, `rodio`) и GPU-интерфейс на Qt Quick в стиле Material 3 Expressive с GLSL-шейдерами.
+
+> Работает через неофициальное API Яндекс Музыки (эндпоинты сверены с [MarshalX/yandex-music-api](https://github.com/MarshalX/yandex-music-api)).
+
+## Скриншоты
+
+| «Моя волна» | «Моя волна» и синхронный текст |
+|---|---|
+| ![Моя волна](docs/screenshots/wave-dark.png) | ![Моя волна с текстом](docs/screenshots/wave-dark-subs.png) |
+
+| Плейлист, AI-метки и «Моя волна» по коллекции | Имерсивный плеер |
+|---|---|
+| ![Плейлист](docs/screenshots/playlist.png) | ![Имерсивный плеер](docs/screenshots/imersive-player.png) |
 
 ## Возможности
 
-1. **Авторизация**: вход по коду устройства (`ya.ru/device`, OAuth Device Flow) или по OAuth-токену (`~/.config/ymusic/token` либо переменная `YM_TOKEN`).
-2. **MPRIS (`org.mpris.MediaPlayer2.ymusic`) и Discord Rich Presence**:
-   - интеграция с D-Bus для работы мультимедийных клавиш, `playerctl` и системных виджетов плеера (GNOME, KDE, Waybar, Quickshell, Hyprland и др.);
-   - нативный Discord RPC через локальный IPC-сокет («Слушает Яндекс Музыку», обложка, альбом, таймер прогресса и кнопка со ссылкой на трек).
-3. **Потоковое воспроизведение и дисковый кэш**:
-   - воспроизведение начинается после предбуферизации первых ~96 КБ, не дожидаясь загрузки всего файла;
-   - прослушанные треки и обложки кэшируются в `~/.cache/ymusic/` (с автоматической очисткой сверх лимита 1 ГБ);
-   - следующий трек в очереди предзагружается в кэш в фоновом режиме.
-4. **«Моя волна» (Rotor API)**:
-   - запуск персонального потока рекомендаций (`user:onyourwave`) и волны по конкретному исполнителю (`artist:<id>`);
-   - отправка обратной связи (`radioStarted`, `trackStarted`, `trackFinished`, `skip`, `like`, `dislike`);
-   - бесконечная очередь с автоматической подгрузкой следующих партий треков.
-5. **Коллекция и навигация**:
-   - разделы **«Мне нравится»**, **«Плейлисты»** (собственные и лайкнутые), **«Альбомы»**, **«Артисты»**;
-   - переход на страницу альбома или страницу артиста (популярные треки, дискография, запуск волны по артисту) прямо из списка треков, поиска или нижней панели плеера;
-   - поиск одновременно по трекам, исполнителям, альбомам и плейлистам.
-6. **Лайк и дизлайк из плеера и списков**:
-   - мгновенное добавление/удаление из «Мне нравится» и кнопка дизлайка с пропуском трека.
+**Воспроизведение и звук**
+- Качество **Обычное / HQ / Lossless FLAC** с переключением на лету без потери позиции
+- Быстрый старт после предбуферизации ~96 КБ, предзагрузка следующего трека, нормализация R128, скорость и таймер сна
+- Офлайн-раздел «Загружено», автокэш до 1 ГБ, скачивание альбомов/плейлистов и экспорт треков на ПК в **MP3** или **FLAC**
 
-## Запуск
+**Моя волна и медиатека**
+- Персональная «Моя волна», волны по треку, артисту, альбому и плейлисту, фильтры волны и обратная связь в Rotor API
+- «Мне нравится», плейлисты с закреплением, альбомы, артисты, скрытые треки (дизлайки), поиск и история прослушивания
+- Вход по **QR-коду** (`ya.ru/device`, OAuth Device Flow) или токену (`~/.config/ymusic/token` / `YM_TOKEN`)
 
-### Qt / QML
+**Интерфейс и кастомизация**
+- Полноэкранный имерсивный плеер с шейдерным фоном, визуализаторами спектра и синхронными текстами (LRC / караоке / LRCLIB)
+- Динамические светлые и тёмные палитры из обложки, **Theme Studio** (создание, импорт и экспорт тем), интеграция с Quickshell / Noctalia / `wal`
+- Система модов на **QML + JS** без пересборки (28 UI-слотов, `overrides`, установка `.ymmod`, Hot Reload) — [docs/MODDING.md](docs/MODDING.md)
 
-Для сборки нужны Qt 6 (включая ShaderTools), CMake и Rust:
+**Интеграции и фильтры**
+- **MPRIS2** (`playerctl`, Waybar, KDE/GNOME), нативный **Discord Rich Presence**, скробблинг в **Last.fm**
+- **SlopLess** — пометка и опциональное скрытие AI-треков по встроенной базе и `slopless.art`
+
+## Установка
+
+Готовые сборки лежат в [GitHub Releases](https://github.com/ethermawe/ymusic/releases/latest):
+
+| Платформа | Формат |
+|---|---|
+| **Arch Linux** | `ymusic-*.pkg.tar.zst` (`sudo pacman -U ...`) или локальный `makepkg -si` |
+| **Linux (x86_64)** | `ymusic-*-linux-x86_64.tar.zst` / `.tar.gz` |
+| **Windows (x86_64)** | Установщик `ymusic-*-windows-x86_64-setup.exe`, портативный `.exe` или `.zip` |
+
+## Сборка из исходников
+
+Нужны **Rust** (stable), **CMake ≥ 3.20**, **Ninja** и **Qt 6** (`Core`, `Gui`, `Widgets`, `Quick`, `Qml`, `QuickControls2`, `Network`, `ShaderTools`, `Svg`, `Concurrent`). Шрифты `Google Sans Flex` и `Material Symbols Rounded` скачиваются при первой конфигурации CMake.
+
+<details>
+<summary><b>Linux</b></summary>
 
 ```sh
 cargo build --release --lib
-cmake -S src-qt -B build-qt
+cmake -S src-qt -B build-qt -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-qt
 ./build-qt/ymusic-qml
 ```
 
-Если графический драйвер занимает много памяти, можно сравнить аппаратные
-бэкенды, не отключая шейдеры и сглаживание:
+Установка в систему: `sudo cmake --install build-qt --prefix /usr/local`
 
-```sh
-./build-qt/ymusic-qml --graphics=vulkan
-./build-qt/ymusic-qml --graphics=opengl
+Для локальной сборки пакета Arch из корня репозитория: `makepkg -si`
+
+</details>
+
+<details>
+<summary><b>Windows (MSVC + Qt 6)</b></summary>
+
+```powershell
+cargo build --release --lib
+cmake -S src-qt -B build-qt -A x64
+cmake --build build-qt --config Release
+cmake --install build-qt --config Release --prefix dist
+windeployqt --qmldir src-qt/qml --release --no-translations --no-opengl-sw dist/ymusic-qml.exe
 ```
 
-По умолчанию используется выбор Qt. Vulkan требует поддержки со стороны
-драйвера; при проблемах запустите без параметра или с `--graphics=opengl`.
-RSS включает разделяемые библиотеки драйвера, поэтому для оценки памяти
-полезно дополнительно сравнивать PSS в `/proc/<PID>/smaps_rollup`.
+</details>
 
-Для установки после сборки: `cmake --install build-qt --prefix /usr/local` (могут потребоваться права администратора).
+<details>
+<summary><b>Параметры сборки и запуска (Last.fm, графика, Discord)</b></summary>
 
-### Пакет для Arch Linux
+- **Встроенные ключи Last.fm:** задайте `LASTFM_API_KEY` и `LASTFM_API_SECRET` перед `cargo build --release --lib` (либо укажите свои ключи в Настройки → Интеграции).
+- **Графический бэкенд:** `./build-qt/ymusic-qml --graphics=vulkan` или `--graphics=opengl`.
+- **Безопасный режим (без модов):** `./build-qt/ymusic-qml --safe-mode` (или удерживайте `Shift` при запуске).
+- **Discord RPC:** при необходимости ID приложения переопределяется через `YM_DISCORD_CLIENT_ID`. В Vesktop / Vencord локальный предпросмотр статуса не гарантирует видимость для других пользователей.
 
-Из корня локального checkout:
+</details>
 
-```sh
-makepkg -si
+## Горячие клавиши
+
+| Клавиши | Действие |
+|---|---|
+| `Space` | Пауза / воспроизведение *(вне имерсивного режима)* |
+| `Ctrl` + `←` / `→` | Предыдущий / следующий трек |
+| `Ctrl` + `Alt` + `←` / `→` | Перемотка −10 / +10 с |
+| `Ctrl` + `↑` / `↓` | Громкость ±5% |
+| `Ctrl` + `Alt` + `M` / `S` / `R` | Mute / Shuffle / Repeat |
+| `Ctrl` + `K` или `Ctrl` + `F` | Поиск |
+| `Ctrl` + `,` | Настройки |
+| `Ctrl` + `Shift` + `R` | Перезагрузка модов *(в режиме разработчика)* |
+| `Ctrl` + `+` / `-` / `0` | Масштаб интерфейса |
+| `Esc` / `Back` | Назад |
+
+<details>
+<summary><b>Структура проекта</b></summary>
+
+```text
+ymusic/
+├── src/                      # Rust-ядро (ymusic_core)
+│   ├── api.rs                # API Яндекс Музыки, Rotor API, OAuth, тексты (LRC/LRCLIB)
+│   ├── audio.rs              # Плеер на rodio + FFT-спектр
+│   ├── cache.rs              # Потоковый ридер, дисковый кэш, офлайн-загрузки
+│   ├── core.rs               # Состояние плеера, очередь, лента, волна
+│   ├── wave.rs               # Фильтры «Моей волны»
+│   ├── history.rs            # История прослушивания
+│   ├── slopless.rs           # Проверка AI-треков (база + slopless.art)
+│   ├── lastfm.rs             # Скробблинг Last.fm
+│   ├── mpris.rs              # D-Bus MPRIS2
+│   ├── discord.rs            # Discord Rich Presence (IPC)
+│   ├── config.rs             # Настройки, сессия, keyring
+│   ├── dns.rs                # Резолвер с учётом IPv6
+│   └── ffi.rs                # C ABI мост
+├── src-qt/                   # Qt Quick / C++ фронтенд
+│   ├── main.cpp              # Точка входа, трей, single-instance, --safe-mode
+│   ├── YMusicBackend.*       # Мост с Rust, модели, ThemeManager
+│   ├── mods/                 # ModManager, ModApi, ModUrlInterceptor
+│   ├── app/                  # Paths, QrImageProvider, UpdateChecker
+│   ├── qml/                  # UI M3 Expressive, Theme Studio, имерсивный плеер
+│   └── shaders/              # GLSL-шейдеры (Qt ShaderTools)
+├── docs/MODDING.md           # Документация по модам
+├── examples/mods/            # Примеры модов
+├── packaging/windows/setup/  # Установщик Windows на Rust
+└── data/                     # Встроенная база SlopLess
 ```
 
-PKGBUILD собирает текущие исходники, не скачивая GitHub-релиз. При стандартных
-настройках makepkg рабочие файлы помещаются в `build-makepkg/`, чтобы не затронуть
-каталог Rust `src/`. Для нестандартного BUILDDIR используется указанный каталог.
-Тесты запускаются с отдельными каталогами настроек и загрузок. Это локальный
-рецепт, не готовый source-пакет для AUR. Лицензия проекта пока не уточнена
-(`custom` в PKGBUILD).
+</details>
 
-## Дополнительные возможности
+## Лицензия и благодарности
 
-- Создание приватных или публичных плейлистов (в разделе «Плейлисты», окне выбора плейлиста или по `Ctrl+N`).
-- «Скачать всё» на странице альбома/плейлиста: последовательная загрузка, пропуск уже сохранённых файлов, счётчик ошибок и отмена.
-- Фильтры поиска: всё, треки, альбомы, артисты, плейлисты.
-- Локальная история: 100 последних уникальных треков после 5 секунд воспроизведения, на главной перед подборками; историю можно очистить.
-- Редактирование очереди в immersive-плеере: вверх/вниз, удаление, очистка с сохранением текущего трека.
-- Процент громкости над регулятором при наведении и изменении громкости.
-- Один экземпляр приложения: второй запуск запрашивает активацию существующего окна (на Wayland активация зависит от композитора).
-- Горячие клавиши: `Ctrl+Space` — пауза, `Ctrl+←/→` — предыдущий/следующий, `Ctrl+,` — настройки.
+Распространяется под **GNU GPL v3.0 or later** ([LICENSE](LICENSE)).
 
-- Меню трека: следующий трек, очередь, повтор одного трека, добавление в собственный плейлист.
-- «Загружено»: сохранение аудио на устройстве, размер загрузок, удаление и воспроизведение локальных файлов без запроса ссылки к API.
-- Экспорт аудио в MP3 через диалог сохранения.
-- Переход на артиста по имени и на альбом по названию трека.
-- Настройки интерфейса, движения, обложек, сглаживания SVG и графического API.
-- Динамическая тема из Quickshell, Noctalia, presets или wal.
-
-Проверка аккаунта при запуске требует сети; при наличии сохранённых треков раздел
-«Загружено» открывается сразу, не дожидаясь сетевой проверки. История хранится
-локально для текущего профиля ОС, не синхронизируется с историей Яндекса.
-
-## Структура
-
-### Видимость Discord Rich Presence
-
-Discord должен быть запущен на компьютере и подключён к сети. В его настройках
-конфиденциальности активности включите публикацию текущей активности; проверьте
-также ограничения активности для конкретного сервера и статус «Невидимый».
-Для Vesktop/Vencord проверьте настройки передачи активности: локальный предпросмотр
-не доказывает, что статус опубликован для других пользователей. Проверяйте профиль
-с другого аккаунта; собственный профиль на телефоне может отображаться иначе.
-
-Клиент отправляет тип «Слушает», название трека, исполнителя и обложку. Поле
-`status_display_type` выбирает название трека вместо названия приложения в кратком
-статусе; окончательное отображение зависит от версии Discord. Ошибки RPC выводятся
-в stderr. Для другого зарегистрированного приложения можно задать
-`YM_DISCORD_CLIENT_ID`; Discord-токен пользователя не требуется.
-
-- `src/api.rs` — HTTP-клиент API (аккаунт, лайки/дизлайки, поиск, плейлисты, альбомы, артисты, «Моя волна» Rotor API, ссылки на MP3, OAuth)
-- `src/audio.rs` — аудиоплеер на `rodio` в отдельном потоке (чтение из кэша и потокового буфера)
-- `src/cache.rs` — потоковый буфер `StreamReader` (`Read + Seek`) и дисковый кэш треков/обложек
-- `src/mpris.rs` — D-Bus сервер MPRIS2 на `zbus`
-- `src/discord.rs` — клиент Discord Rich Presence через локальный Unix IPC-сокет
-- `src/config.rs` — токен, настройки воспроизведения и сохранённая сессия
-- `src/core.rs` и `src/ffi.rs` — состояние приложения и C ABI для Qt
-- `src-qt/` — C++-мост, модели, тема и настройки интерфейса
-- `src-qt/qml/` — интерфейс Qt Quick
-- `src-qt/shaders/` — GPU-эффекты, собираемые Qt ShaderTools
+- Часть QML-компонентов, дизайн-токенов M3 Expressive, подсистемы тем, SceneGraph-рендереров и шейдеров в `src-qt/` адаптирована из [Swiftify](https://github.com/swiftify-org/swiftify) (`Copyright (C) 2026 shred0s`, GPL-3.0-or-later).
+- Определение AI-треков использует базу и API [SlopLess](https://slopless.art).
+- В `src-qt/third_party/` используются `material-color-utilities` и `rounded-polygon-qmljs` (Apache-2.0).

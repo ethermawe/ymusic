@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
@@ -8,43 +9,68 @@ ScrollView {
     property bool tokenMode: false
     property bool showToken: false
     property bool codeCopied: false
+    readonly property string tokenAuthUrl: "https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d"
     clip: true
     contentWidth: availableWidth
 
-    component ActionButton: Button {
-        id: control
-        property bool primary: false
-        implicitHeight: 44
-        padding: 12
-        hoverEnabled: true
-        opacity: enabled ? 1 : 0.5
-        contentItem: Text {
-            text: control.text
-            font.family: Appearance.fontFamily
-            font.pixelSize: Appearance.fontSize.small
-            font.weight: Font.Medium
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            color: control.primary ? Appearance.colors.onPrimary : Appearance.colors.onSurface
-            elide: Text.ElideRight
-        }
-        background: Rectangle {
-            radius: Appearance.rounding.full
-            color: control.primary
-                   ? (control.hovered ? Appearance.colors.primaryHover : Appearance.colors.primary)
-                   : (control.hovered ? Appearance.colors.surfaceContainerHighest : Appearance.colors.surfaceContainerHigh)
-            Behavior on color { ColorAnimation { duration: 140 } }
+    function ensureDeviceCode() {
+        if (root.tokenMode || backend.loggedIn || backend.loginBusy) return;
+        root.codeCopied = false;
+        backend.loginDevice();
+    }
+
+    function refreshDeviceCode() {
+        root.codeCopied = false;
+        if (backend.loginBusy) backend.cancelLogin();
+        Qt.callLater(() => {
+            if (!root.tokenMode && !backend.loggedIn) {
+                backend.loginDevice();
+            }
+        });
+    }
+
+    function switchMode(useToken: bool) {
+        if (root.tokenMode === useToken) return;
+        root.tokenMode = useToken;
+        root.codeCopied = false;
+        if (useToken) {
+            if (backend.loginBusy) backend.cancelLogin();
+            else backend.clearStatus();
+        } else {
+            backend.clearStatus();
+            Qt.callLater(root.ensureDeviceCode);
         }
     }
+
+    function submitClipboardToken() {
+        const clip = backend.clipboardText().trim();
+        if (clip.length === 0) {
+            UiState.showToast("Буфер обмена пуст — сначала скопируйте ссылку или токен.");
+            return;
+        }
+        tokenInput.text = clip;
+        backend.loginToken(clip);
+    }
+
+    Component.onCompleted: Qt.callLater(root.ensureDeviceCode)
+    onVisibleChanged: if (visible) Qt.callLater(root.ensureDeviceCode)
 
     Item {
         width: root.availableWidth
         height: Math.max(root.availableHeight, card.implicitHeight + 48)
 
+        SoftShadow {
+            anchors.fill: card
+            radius: card.radius
+            blur: 28
+            offset: Qt.vector2d(0, 10)
+            color: Qt.rgba(0, 0, 0, Appearance.colors.dark ? 0.36 : 0.10)
+        }
+
         Rectangle {
             id: card
             anchors.centerIn: parent
-            width: Math.min(460, parent.width - 32)
+            width: Math.min(480, parent.width - 32)
             implicitHeight: form.implicitHeight + 48
             height: implicitHeight
             radius: Appearance.rounding.veryLarge
@@ -60,131 +86,207 @@ ScrollView {
                 anchors.margins: 24
                 spacing: 16
 
-                MaterialSymbol {
+                ShapeIcon {
                     Layout.alignment: Qt.AlignHCenter
-                    text: "music_note"
-                    iconSize: 44
-                    color: Appearance.colors.primary
-                }
-                TitleText {
-                    Layout.fillWidth: true
-                    text: "Ваша музыка — здесь"
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                }
-                StyledText {
-                    Layout.fillWidth: true
-                    text: "Войдите в Яндекс, чтобы слушать свою коллекцию и Мою волну."
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                    color: Appearance.colors.onSurfaceVariant
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    ActionButton {
-                        Layout.fillWidth: true
-                        text: "По коду"
-                        primary: !root.tokenMode
-                        enabled: !backend.loginBusy
-                        onClicked: { root.tokenMode = false; backend.clearStatus(); }
-                    }
-                    ActionButton {
-                        Layout.fillWidth: true
-                        text: "По токену"
-                        primary: root.tokenMode
-                        enabled: !backend.loginBusy
-                        onClicked: { root.tokenMode = true; backend.clearStatus(); }
-                    }
+                    size: 56
+                    iconSize: 28
+                    shape: "cookie9"
+                    symbol: "music_note"
+                    color: Appearance.colors.primaryContainer
+                    iconColor: Appearance.colors.onPrimaryContainer
                 }
 
                 ColumnLayout {
                     Layout.fillWidth: true
-                    visible: !root.tokenMode
-                    spacing: 12
+                    spacing: 4
+
+                    TitleText {
+                        Layout.fillWidth: true
+                        text: "Вход в Яндекс Музыку"
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                    }
 
                     StyledText {
                         Layout.fillWidth: true
-                        text: "1. Получите код\n2. Откройте страницу Яндекса и введите его\n3. Подтвердите доступ — вход завершится автоматически"
+                        text: "Поддерживается Яндекс Ключ, SMS и любая 2FA."
+                        horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
+                        font.pixelSize: Appearance.fontSize.smaller
+                        color: Appearance.colors.onSurfaceVariant
+                    }
+                }
+
+                SegmentedControl {
+                    Layout.alignment: Qt.AlignHCenter
+                    currentIndex: root.tokenMode ? 1 : 0
+                    segments: [
+                        Segment { symbol: "qr_code_2"; text: "QR и браузер" },
+                        Segment { symbol: "key"; text: "Токен" }
+                    ]
+                    onActivated: (index) => root.switchMode(index === 1)
+                }
+
+                // QR + Device Code login
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    visible: !root.tokenMode
+                    spacing: 14
+
+                    Rectangle {
+                        Layout.alignment: Qt.AlignHCenter
+                        width: 196
+                        height: 196
+                        radius: Appearance.rounding.large
+                        color: "#ffffff"
+                        border.width: 1
+                        border.color: Appearance.colors.outlineVariant
+
+                        Image {
+                            id: qrImage
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            visible: backend.loginUrl.length > 0 && backend.loginCode.length > 0
+                            source: visible ? ("image://qr/" + encodeURIComponent(backend.loginUrl)) : ""
+                            sourceSize: Qt.size(256, 256)
+                            fillMode: Image.PreserveAspectFit
+                            smooth: false
+                            mipmap: false
+                            cache: false
+                        }
+
+                        LoadingSpinner {
+                            anchors.centerIn: parent
+                            running: !qrImage.visible && backend.loginBusy
+                            visible: running
+                        }
+
+                        MaterialSymbol {
+                            anchors.centerIn: parent
+                            visible: !qrImage.visible && !backend.loginBusy
+                            text: "qr_code_2"
+                            iconSize: 48
+                            color: "#888888"
+                        }
+                    }
+
+                    Rectangle {
+                        id: codeBox
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 62
+                        visible: backend.loginCode.length > 0
+                        radius: Appearance.rounding.normal
+                        color: codeHover.hovered
+                            ? Appearance.colors.surfaceContainerHighest
+                            : Appearance.colors.surfaceContainerHigh
+                        border.color: Appearance.colors.primary
+                        border.width: 1
+
+                        Behavior on color { ElementMoveFastColor {} }
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 10
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: backend.loginCode
+                                color: Appearance.colors.primary
+                                font.family: Appearance.monoFontFamily
+                                font.pixelSize: 26
+                                font.weight: Font.Bold
+                                font.letterSpacing: 4
+                            }
+
+                            MaterialSymbol {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.codeCopied ? "check" : "content_copy"
+                                iconSize: 18
+                                color: Appearance.colors.onSurfaceVariant
+                            }
+                        }
+
+                        HoverHandler {
+                            id: codeHover
+                            cursorShape: Qt.PointingHandCursor
+                        }
+
+                        TapHandler {
+                            onTapped: {
+                                backend.copyText(backend.loginCode);
+                                root.codeCopied = true;
+                                UiState.showToast("Код скопирован в буфер обмена");
+                            }
+                        }
+                    }
+
+                    StyledText {
+                        Layout.fillWidth: true
+                        text: backend.loginCode.length > 0
+                            ? "Отсканируйте QR телефоном или откройте Яндекс в браузере и введите код выше — вход завершится автоматически."
+                            : "Запрашиваем одноразовый код входа у Яндекса…"
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: Appearance.fontSize.smaller
                         color: Appearance.colors.onSurfaceVariant
                         lineHeight: 1.3
                     }
 
-                    ActionButton {
-                        Layout.fillWidth: true
-                        visible: backend.loginCode.length === 0 || !backend.loginBusy
-                        text: backend.loginBusy ? "Получаем код…" : "Получить код входа"
-                        primary: true
-                        enabled: !backend.loginBusy
-                        onClicked: { root.codeCopied = false; backend.loginDevice(); }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 72
-                        visible: backend.loginBusy && backend.loginCode.length > 0
-                        radius: Appearance.rounding.normal
-                        color: Appearance.colors.surfaceContainerHighest
-                        border.color: Appearance.colors.primary
-                        border.width: 1
-                        Text {
-                            anchors.centerIn: parent
-                            text: backend.loginCode
-                            color: Appearance.colors.primary
-                            font.family: Appearance.monoFontFamily
-                            font.pixelSize: 28
-                            font.weight: Font.Bold
-                            font.letterSpacing: 4
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: { backend.copyText(backend.loginCode); root.codeCopied = true; }
-                        }
-                    }
-
                     RowLayout {
                         Layout.fillWidth: true
-                        visible: backend.loginBusy && backend.loginCode.length > 0
-                        ActionButton {
+                        spacing: 8
+
+                        TextButton {
                             Layout.fillWidth: true
-                            text: root.codeCopied ? "Код скопирован" : "Копировать код"
-                            onClicked: { backend.copyText(backend.loginCode); root.codeCopied = true; }
+                            variant: TextButton.Filled
+                            symbol: "open_in_new"
+                            text: "Открыть в браузере"
+                            enabled: backend.loginUrl.length > 0 && backend.loginCode.length > 0
+                            onClicked: {
+                                backend.copyText(backend.loginCode);
+                                root.codeCopied = true;
+                                Qt.openUrlExternally(backend.loginUrl);
+                                UiState.showToast("Код скопирован — вставьте его (Ctrl+V) в браузере");
+                            }
                         }
-                        ActionButton {
-                            Layout.fillWidth: true
-                            text: "Открыть Яндекс"
-                            primary: true
-                            enabled: backend.loginUrl.length > 0
-                            onClicked: Qt.openUrlExternally(backend.loginUrl)
+
+                        TextButton {
+                            variant: TextButton.Outlined
+                            symbol: "refresh"
+                            text: "Новый код"
+                            onClicked: root.refreshDeviceCode()
                         }
-                    }
-                    StyledText {
-                        Layout.fillWidth: true
-                        visible: backend.loginBusy && backend.loginCode.length > 0
-                        text: "Ждём подтверждения в браузере…"
-                        horizontalAlignment: Text.AlignHCenter
-                        color: Appearance.colors.onSurfaceVariant
                     }
                 }
 
+                // Token login
                 ColumnLayout {
                     Layout.fillWidth: true
                     visible: root.tokenMode
                     spacing: 12
+
                     StyledText {
                         Layout.fillWidth: true
-                        text: "Вставьте OAuth-токен Яндекс Музыки. Пароль от аккаунта здесь не нужен."
+                        text: "Откройте страницу Яндекса, подтвердите доступ и скопируйте ссылку из адресной строки (или сам OAuth-токен)."
                         wrapMode: Text.WordWrap
+                        font.pixelSize: Appearance.fontSize.smaller
                         color: Appearance.colors.onSurfaceVariant
+                        lineHeight: 1.3
                     }
+
+                    TextButton {
+                        Layout.fillWidth: true
+                        variant: TextButton.Tonal
+                        symbol: "open_in_new"
+                        text: "Открыть страницу токена"
+                        onClicked: Qt.openUrlExternally(root.tokenAuthUrl)
+                    }
+
                     TextField {
                         id: tokenInput
                         Layout.fillWidth: true
-                        implicitHeight: 48
-                        placeholderText: "OAuth-токен"
+                        implicitHeight: 46
+                        placeholderText: "Токен или ссылка (#access_token=...)"
                         echoMode: root.showToken ? TextInput.Normal : TextInput.Password
                         enabled: !backend.loginBusy
                         selectByMouse: true
@@ -200,16 +302,30 @@ ScrollView {
                         }
                         onAccepted: if (text.trim().length > 0 && !backend.loginBusy) backend.loginToken(text.trim())
                     }
+
                     RowLayout {
                         Layout.fillWidth: true
-                        ActionButton {
-                            text: root.showToken ? "Скрыть токен" : "Показать токен"
+                        spacing: 8
+
+                        IconButton {
+                            symbol: root.showToken ? "visibility_off" : "visibility"
+                            tooltip: root.showToken ? "Скрыть" : "Показать"
                             onClicked: root.showToken = !root.showToken
                         }
-                        ActionButton {
+
+                        TextButton {
                             Layout.fillWidth: true
+                            variant: TextButton.Tonal
+                            symbol: "content_paste"
+                            text: "Вставить и войти"
+                            enabled: !backend.loginBusy
+                            onClicked: root.submitClipboardToken()
+                        }
+
+                        TextButton {
+                            Layout.fillWidth: true
+                            variant: TextButton.Filled
                             text: backend.loginBusy ? "Проверяем…" : "Войти"
-                            primary: true
                             enabled: !backend.loginBusy && tokenInput.text.trim().length > 0
                             onClicked: backend.loginToken(tokenInput.text.trim())
                         }
@@ -221,7 +337,20 @@ ScrollView {
                     visible: backend.statusMessage.length > 0
                     text: backend.statusMessage
                     color: Appearance.colors.error
+                    horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
+                    font.pixelSize: Appearance.fontSize.smaller
+                }
+
+                TextButton {
+                    Layout.fillWidth: true
+                    variant: TextButton.Text
+                    symbol: "download_done"
+                    text: "Открыть загрузки (офлайн)"
+                    onClicked: {
+                        if (backend.loginBusy) backend.cancelLogin();
+                        backend.loadDownloads();
+                    }
                 }
             }
         }

@@ -1,12 +1,15 @@
 #pragma once
 
+#include <QDateTime>
 #include <QObject>
 #include <QString>
 #include <QPointer>
+#include <QTimer>
 #include <QUrl>
 #include <QVariantList>
 #include "TrackModel.h"
 #include "CardModel.h"
+#include "playback/InteractionState.h"
 #include "ymusic_core.h"
 
 class YMusicBackend : public QObject {
@@ -43,6 +46,7 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(QString nowId READ nowId NOTIFY nowPlayingChanged)
     Q_PROPERTY(QString nowTitle READ nowTitle NOTIFY nowPlayingChanged)
     Q_PROPERTY(QString nowArtists READ nowArtists NOTIFY nowPlayingChanged)
+    Q_PROPERTY(QVariantList nowArtistLinks READ nowArtistLinks NOTIFY nowPlayingChanged)
     Q_PROPERTY(QString nowAlbum READ nowAlbum NOTIFY nowPlayingChanged)
     Q_PROPERTY(QString nowCover READ nowCover NOTIFY nowPlayingChanged)
     Q_PROPERTY(bool hasCover READ hasCover NOTIFY nowPlayingChanged)
@@ -50,6 +54,7 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(bool nowLiked READ nowLiked NOTIFY nowPlayingChanged)
     Q_PROPERTY(bool nowHasArtist READ nowHasArtist NOTIFY nowPlayingChanged)
     Q_PROPERTY(bool nowHasAlbum READ nowHasAlbum NOTIFY nowPlayingChanged)
+    Q_PROPERTY(bool nowIsAi READ nowIsAi NOTIFY nowPlayingChanged)
 
     // Progress
     Q_PROPERTY(qreal progress READ progress NOTIFY progressChanged)
@@ -63,6 +68,12 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(qreal volume READ volume WRITE setVolume NOTIFY volumeChanged)
     Q_PROPERTY(bool shuffle READ shuffle NOTIFY playbackStateChanged)
     Q_PROPERTY(int repeatMode READ repeatMode NOTIFY playbackStateChanged)
+    Q_PROPERTY(qreal tempo READ tempo WRITE setTempo NOTIFY tempoChanged)
+    Q_PROPERTY(bool sleepTimerRunning READ sleepTimerRunning NOTIFY sleepTimerChanged)
+    Q_PROPERTY(QDateTime sleepTimerDeadline READ sleepTimerDeadline NOTIFY sleepTimerChanged)
+    Q_PROPERTY(int sleepTimerTotalSecs READ sleepTimerTotalSecs NOTIFY sleepTimerChanged)
+    Q_PROPERTY(QString sleepTimerFade READ sleepTimerFade NOTIFY sleepTimerChanged)
+    Q_PROPERTY(quint64 trackInstanceId READ trackInstanceId NOTIFY nowPlayingChanged)
 
     // Models
     Q_PROPERTY(TrackModel* tracks READ tracks CONSTANT)
@@ -74,10 +85,47 @@ class YMusicBackend : public QObject {
     Q_PROPERTY(bool collectionDownloadable READ collectionDownloadable NOTIFY featuresChanged)
     Q_PROPERTY(QVariantMap batch READ batch NOTIFY featuresChanged)
     Q_PROPERTY(QVariantMap waveSettings READ waveSettings NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantList pinnedPlaylists READ pinnedPlaylists NOTIFY featuresChanged)
+    Q_PROPERTY(QString activePlaylistKey READ activePlaylistKey NOTIFY featuresChanged)
+    Q_PROPERTY(bool activePlaylistPinned READ activePlaylistPinned NOTIFY featuresChanged)
+    Q_PROPERTY(bool isOwnPlaylist READ isOwnPlaylist NOTIFY featuresChanged)
+    Q_PROPERTY(QString collectionKind READ collectionKind NOTIFY featuresChanged)
+    Q_PROPERTY(bool collectionLiked READ collectionLiked NOTIFY featuresChanged)
+    Q_PROPERTY(QString audioQuality READ audioQuality NOTIFY featuresChanged)
+    Q_PROPERTY(QString downloadQuality READ downloadQuality NOTIFY featuresChanged)
+    Q_PROPERTY(bool normalizeVolume READ normalizeVolume NOTIFY featuresChanged)
+    Q_PROPERTY(QString aiMusicBehavior READ aiMusicBehavior NOTIFY featuresChanged)
+    Q_PROPERTY(bool aiStrictTracks READ aiStrictTracks NOTIFY featuresChanged)
+    Q_PROPERTY(bool showAiLabels READ showAiLabels NOTIFY featuresChanged)
+    Q_PROPERTY(bool discordConnected READ discordConnected NOTIFY featuresChanged)
+    Q_PROPERTY(QString discordStatus READ discordStatus NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmHasBuiltinKeys READ lastfmHasBuiltinKeys NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmConfigured READ lastfmConfigured NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmConnected READ lastfmConnected NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmAuthorizing READ lastfmAuthorizing NOTIFY featuresChanged)
+    Q_PROPERTY(QString lastfmUsername READ lastfmUsername NOTIFY featuresChanged)
+    Q_PROPERTY(QString lastfmStatus READ lastfmStatus NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmIsError READ lastfmIsError NOTIFY featuresChanged)
+    Q_PROPERTY(int lastfmPendingCount READ lastfmPendingCount NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmEnabled READ lastfmEnabled NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmNowPlaying READ lastfmNowPlaying NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmLoveOnLike READ lastfmLoveOnLike NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmSkipAi READ lastfmSkipAi NOTIFY featuresChanged)
+    Q_PROPERTY(QString lastfmCustomApiKey READ lastfmCustomApiKey NOTIFY featuresChanged)
+    Q_PROPERTY(bool lastfmHasCustomSecret READ lastfmHasCustomSecret NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantList searchSuggestions READ searchSuggestions NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantList searchQuickTracks READ searchQuickTracks NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantMap searchSuggestBest READ searchSuggestBest NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantMap searchBest READ searchBest NOTIFY featuresChanged)
+    Q_PROPERTY(QVariantList searchHistory READ searchHistory NOTIFY featuresChanged)
+    Q_PROPERTY(bool searchHasMore READ searchHasMore NOTIFY featuresChanged)
+    Q_PROPERTY(bool searchLoadingMore READ searchLoadingMore NOTIFY featuresChanged)
 
 public:
     explicit YMusicBackend(QObject *parent = nullptr);
     ~YMusicBackend() override;
+    static YMusicBackend *instance() { return s_instance; }
+    int spectrumLevels(float *out, int count) const;
 
     bool loggedIn() const { return m_loggedIn; }
     bool authReady() const { return m_authReady; }
@@ -107,6 +155,7 @@ public:
     QString nowId() const { return m_nowId; }
     QString nowTitle() const { return m_nowTitle; }
     QString nowArtists() const { return m_nowArtists; }
+    QVariantList nowArtistLinks() const { return m_nowArtistLinks; }
     QString nowAlbum() const { return m_nowAlbum; }
     QString nowCover() const { return m_nowCover; }
     bool hasCover() const { return m_hasCover; }
@@ -114,6 +163,7 @@ public:
     bool nowLiked() const { return m_nowLiked; }
     bool nowHasArtist() const { return m_nowHasArtist; }
     bool nowHasAlbum() const { return m_nowHasAlbum; }
+    bool nowIsAi() const { return m_nowIsAi; }
 
     qreal progress() const { return m_progress; }
     QString positionText() const { return m_positionText; }
@@ -125,6 +175,12 @@ public:
     qreal volume() const { return m_volume; }
     bool shuffle() const { return m_shuffle; }
     int repeatMode() const { return m_repeatMode; }
+    qreal tempo() const { return m_tempo; }
+    bool sleepTimerRunning() const { return m_sleepTimerDeadline.isValid(); }
+    QDateTime sleepTimerDeadline() const { return m_sleepTimerDeadline; }
+    int sleepTimerTotalSecs() const { return m_sleepTimerTotalSecs; }
+    QString sleepTimerFade() const { return ymusic::sleepFadeName(m_sleepFade); }
+    quint64 trackInstanceId() const { return m_trackInstanceId; }
 
     TrackModel* tracks() { return &m_trackModel; }
     TrackModel* queue() { return &m_queueModel; }
@@ -135,11 +191,47 @@ public:
     bool collectionDownloadable() const { return m_collectionDownloadable; }
     QVariantMap batch() const { return m_batch; }
     QVariantMap waveSettings() const { return m_waveSettings; }
+    QVariantList pinnedPlaylists() const { return m_pinnedPlaylists; }
+    QString activePlaylistKey() const { return m_activePlaylistKey; }
+    bool activePlaylistPinned() const { return m_activePlaylistPinned; }
+    bool isOwnPlaylist() const { return m_isOwnPlaylist; }
+    QString collectionKind() const { return m_collectionKind; }
+    bool collectionLiked() const { return m_collectionLiked; }
+    QString audioQuality() const { return m_audioQuality; }
+    QString downloadQuality() const { return m_downloadQuality; }
+    bool normalizeVolume() const { return m_normalizeVolume; }
+    QString aiMusicBehavior() const { return m_aiMusicBehavior; }
+    bool aiStrictTracks() const { return m_aiStrictTracks; }
+    bool showAiLabels() const { return m_showAiLabels; }
+    bool discordConnected() const { return m_discordConnected; }
+    QString discordStatus() const { return m_discordStatus; }
+    bool lastfmHasBuiltinKeys() const { return m_lastfmHasBuiltinKeys; }
+    bool lastfmConfigured() const { return m_lastfmConfigured; }
+    bool lastfmConnected() const { return m_lastfmConnected; }
+    bool lastfmAuthorizing() const { return m_lastfmAuthorizing; }
+    QString lastfmUsername() const { return m_lastfmUsername; }
+    QString lastfmStatus() const { return m_lastfmStatus; }
+    bool lastfmIsError() const { return m_lastfmIsError; }
+    int lastfmPendingCount() const { return m_lastfmPendingCount; }
+    bool lastfmEnabled() const { return m_lastfmEnabled; }
+    bool lastfmNowPlaying() const { return m_lastfmNowPlaying; }
+    bool lastfmLoveOnLike() const { return m_lastfmLoveOnLike; }
+    bool lastfmSkipAi() const { return m_lastfmSkipAi; }
+    QString lastfmCustomApiKey() const { return m_lastfmCustomApiKey; }
+    bool lastfmHasCustomSecret() const { return m_lastfmHasCustomSecret; }
+    QVariantList searchSuggestions() const { return m_searchSuggestions; }
+    QVariantList searchQuickTracks() const { return m_searchQuickTracks; }
+    QVariantMap searchSuggestBest() const { return m_searchSuggestBest; }
+    QVariantMap searchBest() const { return m_searchBest; }
+    QVariantList searchHistory() const { return m_searchHistory; }
+    bool searchHasMore() const { return m_searchHasMore; }
+    bool searchLoadingMore() const { return m_searchLoadingMore; }
     Q_INVOKABLE void feature(const QVariantMap &command);
 
     // Q_INVOKABLE Actions
     Q_INVOKABLE void loginDevice();
     Q_INVOKABLE void loginToken(const QString &token);
+    Q_INVOKABLE void cancelLogin();
     Q_INVOKABLE void logout();
 
     Q_INVOKABLE void loadHome();
@@ -162,13 +254,19 @@ public:
     Q_INVOKABLE void openTrackArtist(int index);
     Q_INVOKABLE void openTrackAlbum(int index);
     Q_INVOKABLE void openNowArtist();
+    Q_INVOKABLE void openArtist(const QString &artistId);
     Q_INVOKABLE void openNowAlbum();
+    Q_INVOKABLE void setDiscordRpcEnabled(bool enabled);
+    Q_INVOKABLE void setDiscordRpcConfig(bool enabled, const QString &display, const QString &activityType,
+                                         bool showWhenPaused, bool showCover, bool showAlbum,
+                                         bool showTimestamps, bool showButton);
 
     Q_INVOKABLE void play(int index);
     Q_INVOKABLE void trackAction(const QString &id, int action);
     Q_INVOKABLE void saveOffline(const QString &id);
     Q_INVOKABLE void downloadTrack(const QString &id, const QUrl &destination);
     Q_INVOKABLE void copyText(const QString &text);
+    Q_INVOKABLE QString clipboardText() const;
     Q_INVOKABLE void requestTrackMenu(const QString &id, const QString &title, bool available, qreal x, qreal y) {
         emit trackMenuRequested(id, title, available, x, y);
     }
@@ -185,6 +283,10 @@ public:
     Q_INVOKABLE void toggleNowLike();
     Q_INVOKABLE void dislikeNow();
     Q_INVOKABLE void clearStatus();
+    Q_INVOKABLE void setTempo(qreal speed);
+    Q_INVOKABLE void startSleepTimer(int seconds, const QString &fadeMode = QStringLiteral("finalSeconds"));
+    Q_INVOKABLE void cancelSleepTimer();
+    Q_INVOKABLE void saveSession();
 
 signals:
     void featuresChanged();
@@ -198,11 +300,15 @@ signals:
     void progressChanged();
     void playbackStateChanged();
     void volumeChanged();
+    void tempoChanged();
+    void sleepTimerChanged();
 
 private:
+    void sleepTimerTick();
     void handleEvent(int eventType, const QString &jsonData);
     static void cCallback(int32_t eventType, const char *jsonData, void *userData);
 
+    inline static YMusicBackend *s_instance = nullptr;
     CoreHandle *m_core = nullptr;
     TrackModel m_trackModel;
     TrackModel m_queueModel;
@@ -213,6 +319,41 @@ private:
     bool m_collectionDownloadable = false;
     QVariantMap m_batch;
     QVariantMap m_waveSettings;
+    QVariantList m_pinnedPlaylists;
+    QString m_activePlaylistKey;
+    bool m_activePlaylistPinned = false;
+    bool m_isOwnPlaylist = false;
+    QString m_collectionKind;
+    bool m_collectionLiked = false;
+    QString m_audioQuality = "hq";
+    QString m_downloadQuality = "mp3";
+    bool m_normalizeVolume = true;
+    QString m_aiMusicBehavior = "skip_if_not_liked";
+    bool m_aiStrictTracks = false;
+    bool m_showAiLabels = true;
+    bool m_discordConnected = false;
+    QString m_discordStatus = QStringLiteral("Ожидание трека");
+    bool m_lastfmHasBuiltinKeys = false;
+    bool m_lastfmConfigured = false;
+    bool m_lastfmConnected = false;
+    bool m_lastfmAuthorizing = false;
+    QString m_lastfmUsername;
+    QString m_lastfmStatus = QStringLiteral("Не подключён");
+    bool m_lastfmIsError = false;
+    int m_lastfmPendingCount = 0;
+    bool m_lastfmEnabled = true;
+    bool m_lastfmNowPlaying = true;
+    bool m_lastfmLoveOnLike = false;
+    bool m_lastfmSkipAi = true;
+    QString m_lastfmCustomApiKey;
+    bool m_lastfmHasCustomSecret = false;
+    QVariantList m_searchSuggestions;
+    QVariantList m_searchQuickTracks;
+    QVariantMap m_searchSuggestBest;
+    QVariantMap m_searchBest;
+    QVariantList m_searchHistory;
+    bool m_searchHasMore = false;
+    bool m_searchLoadingMore = false;
 
     bool m_loggedIn = false;
     bool m_authReady = false;
@@ -242,6 +383,7 @@ private:
     QString m_nowId;
     QString m_nowTitle;
     QString m_nowArtists;
+    QVariantList m_nowArtistLinks;
     QString m_nowAlbum;
     QString m_nowCover;
     bool m_hasCover = false;
@@ -249,6 +391,7 @@ private:
     bool m_nowLiked = false;
     bool m_nowHasArtist = false;
     bool m_nowHasAlbum = false;
+    bool m_nowIsAi = false;
 
     qreal m_progress = 0.0;
     QString m_positionText = "0:00";
@@ -260,4 +403,12 @@ private:
     qreal m_volume = 0.7;
     bool m_shuffle = false;
     int m_repeatMode = 0;
+    qreal m_tempo = 1.0;
+    quint64 m_trackInstanceId = 0;
+
+    QTimer m_sleepTimer;
+    QDateTime m_sleepTimerDeadline;
+    int m_sleepTimerTotalSecs = 0;
+    ymusic::SleepFade m_sleepFade = ymusic::SleepFade::None;
+    double m_lastSleepFadeGain = 1.0;
 };

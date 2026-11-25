@@ -10,6 +10,12 @@ Button {
     rightPadding: 16
     hoverEnabled: true
     opacity: enabled ? 1 : 0.45
+    scale: down ? 0.96 : (hovered ? 1.015 : 1)
+
+    Behavior on scale {
+        enabled: !Appearance.performanceMode
+        Bounce {}
+    }
     contentItem: Text {
         text: root.text
         font.family: Appearance.fontFamily

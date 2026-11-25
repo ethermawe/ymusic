@@ -1,185 +1,162 @@
+/*
+ * Swiftify, a spotify player for desktop
+ * Copyright (C) 2026  shred0s
+ * Modified for ymusic (2026).
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
-import QtQuick.Layouts
+import QtQuick.Templates as T
 import ymusic.ui
 
-Popup {
+T.Popup {
     id: root
+
     property int page: 0
-    readonly property var titles: ["Интерфейс", "Графика", "Загрузки", "Аккаунт"]
-    readonly property var symbols: ["interface", "settings", "download_done", "person"]
-    readonly property var shapes: ["flower", "cookie9", "clover4", "softCookie"]
-    property string errorMessage: ""
+    property string activeModTabId: ""
+    readonly property var modTabs: ModManager.reloadRevision >= 0 ? ModManager.slotEntries("settings.tab") : []
+    readonly property list<string> titles: [
+        "Оформление", "Плеер и фон", "Звук",
+        "Анимации", "Интеграции", "Моды", "Система"
+    ]
+    readonly property list<string> symbols: [
+        "palette", "wallpaper", "play_circle",
+        "animation", "extension", "widgets", "tune"
+    ]
+    readonly property list<string> shapes: [
+        "clover4", "flower", "cookie9",
+        "gem", "sunny", "softBurst", "cookie12"
+    ]
+
+    parent: T.Overlay.overlay
+    anchors.centerIn: parent
+    width: Math.min(860, parent ? parent.width - 48 : 860)
+    height: Math.min(640, parent ? parent.height - 48 : 640)
     modal: true
     focus: true
-    width: Math.min(860, parent ? parent.width - 32 : 860)
-    height: Math.min(640, parent ? parent.height - 32 : 640)
-    anchors.centerIn: parent
+    closePolicy: T.Popup.CloseOnEscape | T.Popup.CloseOnPressOutside
     padding: 0
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    onPageChanged: { settingsFlickable.contentY = 0; errorMessage = ""; }
+    popupType: T.Popup.Item
 
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Appearance.reduceMotion ? 0 : 160 }
-        NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: Appearance.reduceMotion ? 0 : 260; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Appearance.duration(150) }
+        NumberAnimation { property: "scale"; from: 0.94; to: 1; duration: Appearance.motion(380); easing.type: Easing.BezierSpline; easing.bezierCurve: Appearance.curves.expressiveFastSpatial }
     }
     exit: Transition {
-        NumberAnimation { property: "opacity"; to: 0; duration: Appearance.reduceMotion ? 0 : 120 }
-    }
-    Overlay.modal: Rectangle { color: "#80000000" }
-    background: Rectangle {
-        radius: Appearance.rounding.veryLarge
-        color: Appearance.colors.surfaceContainerLowest
-        border.width: 1
-        border.color: Appearance.colors.outlineVariant
+        NumberAnimation { property: "opacity"; to: 0; duration: Appearance.duration(120) }
+        NumberAnimation { property: "scale"; to: 0.97; duration: Appearance.duration(120) }
     }
 
-    component Note: StyledText {
-        Layout.fillWidth: true
-        wrapMode: Text.WordWrap
-        color: Appearance.colors.onSurfaceVariant
-        font.pixelSize: Appearance.fontSize.smaller
+    T.Overlay.modal: Rectangle {
+        color: Appearance.colors.scrimOverlay
     }
-    component Card: Rectangle {
-        id: card
-        default property alias contents: body.data
-        Layout.fillWidth: true
-        implicitHeight: body.implicitHeight + 16
-        radius: Appearance.rounding.normal
-        color: Appearance.colors.surfaceContainerLow
-        ColumnLayout {
-            id: body
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: 8
-            spacing: 4
-        }
-    }
-    component ToggleRow: ItemDelegate {
-        id: control
-        property string description: ""
-        property bool value: false
-        signal changedTo(bool value)
-        Layout.fillWidth: true
-        implicitHeight: Math.max(72, labels.implicitHeight + 24)
-        padding: 12
-        Accessible.name: text
-        onClicked: changedTo(!value)
-        background: Rectangle {
-            radius: Appearance.rounding.small
-            color: control.hovered ? Appearance.colors.surfaceContainerHigh : "transparent"
-            Behavior on color { ColorAnimation { duration: Appearance.duration(140) } }
-        }
-        contentItem: RowLayout {
-            spacing: 16
-            ColumnLayout {
-                id: labels
-                Layout.fillWidth: true
-                spacing: 5
-                StyledText {
-                    Layout.fillWidth: true
-                    text: control.text
-                    font.weight: Font.Medium
-                    wrapMode: Text.WordWrap
-                }
-                Note { text: control.description }
-            }
-            Rectangle {
-                Layout.preferredWidth: 48
-                Layout.preferredHeight: 28
-                radius: 14
-                color: control.value ? Appearance.colors.primary : Appearance.colors.surfaceContainerHighest
-                border.width: control.value ? 0 : 1
-                border.color: Appearance.colors.outline
-                Rectangle {
-                    x: control.value ? 24 : 4
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 20; height: 20; radius: 10
-                    color: control.value ? Appearance.colors.onPrimary : Appearance.colors.onSurfaceVariant
-                    Behavior on x { NumberAnimation { duration: Appearance.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic } }
-                }
-            }
-        }
-    }
-    component ActionRow: ItemDelegate {
-        id: action
-        property string description: ""
-        Layout.fillWidth: true
-        implicitHeight: Math.max(64, actionLabels.implicitHeight + 24)
-        padding: 12
-        contentItem: RowLayout {
-            ColumnLayout {
-                id: actionLabels
-                Layout.fillWidth: true
-                StyledText { Layout.fillWidth: true; text: action.text; wrapMode: Text.WordWrap; font.weight: Font.Medium }
-                Note { text: action.description; visible: text.length > 0 }
-            }
-            MaterialSymbol { text: "chevron_right"; iconSize: 20; color: Appearance.colors.onSurfaceVariant }
-        }
-        background: Rectangle {
-            radius: Appearance.rounding.small
-            color: action.hovered ? Appearance.colors.surfaceContainerHigh : "transparent"
-        }
+
+    background: Rectangle {
+        radius: Appearance.rounding.large + 8
+        color: Appearance.colors.layer0
+        border.width: 1
+        border.color: Appearance.colors.layer0Border
     }
 
     contentItem: Item {
+        Shortcut {
+            sequences: [StandardKey.Close]
+            enabled: root.opened
+            onActivated: root.close()
+        }
+
         Flickable {
             id: railScroller
-            x: 8; y: 12
+            objectName: "settingsRail"
+            x: 12
             width: 108
-            height: parent.height - 24
-            contentHeight: rail.implicitHeight
-            clip: true
+            height: parent.height
+            contentHeight: rail.implicitHeight + 32
             boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+            clip: true
+
+            ScrollBar.vertical: StyledScrollBar {}
+
             Column {
                 id: rail
+                y: 16
                 width: railScroller.width
-                spacing: 8
+                spacing: 4
+
                 Repeater {
                     model: root.titles.length
-                    delegate: ItemDelegate {
+
+                    delegate: RippleButton {
                         id: destination
+
                         required property int index
-                        readonly property bool selected: root.page === index
+                        readonly property bool selected: root.activeModTabId.length === 0 && root.page === index
+
                         width: rail.width
-                        height: 82
-                        padding: 4
-                        onClicked: root.page = index
-                        background: Item {}
+                        implicitHeight: 68
+                        padding: 0
+                        colBackground: "transparent"
+                        colBackgroundHover: "transparent"
+                        rippleEnabled: false
+                        onClicked: {
+                            root.activeModTabId = "";
+                            root.page = index;
+                        }
+
                         contentItem: Column {
-                            spacing: 8
-                            Item {
-                                width: 56; height: 38
+                            spacing: 4
+
+                            Rectangle {
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: 19
-                                    color: destination.hovered && !destination.selected ? Appearance.colors.surfaceContainerHigh : "transparent"
+                                width: 56
+                                height: 32
+                                radius: height / 2
+                                color: Qt.alpha(Appearance.colors.layer1Hover, !destination.selected && destination.hovered ? 1 : 0)
+
+                                Behavior on color {
+                                    ElementMoveFastColor {}
                                 }
-                                MaterialShape {
-                                    anchors.centerIn: parent
-                                    width: 38; height: 38
-                                    shape: root.shapes[destination.index]
-                                    color: Appearance.colors.primaryContainer
-                                    opacity: destination.selected ? 1 : 0
-                                    scale: destination.selected ? 1 : 0.6
-                                    spinAngle: destination.hovered ? 20 : 0
-                                    Behavior on opacity { NumberAnimation { duration: Appearance.duration(160) } }
-                                    Behavior on scale { NumberAnimation { duration: Appearance.motion(280); easing.type: Easing.OutBack } }
-                                    Behavior on spinAngle { NumberAnimation { duration: Appearance.motion(280); easing.type: Easing.OutBack } }
-                                }
+
                                 MaterialSymbol {
                                     anchors.centerIn: parent
+                                    Reveal.shown: !destination.selected
                                     text: root.symbols[destination.index]
-                                    iconSize: 21
-                                    color: destination.selected ? Appearance.colors.onPrimaryContainer : Appearance.colors.onSurfaceVariant
+                                    iconSize: 22
+                                    color: Appearance.colors.onSurfaceVariant
+                                }
+                                ShapeIcon {
+                                    anchors.centerIn: parent
+                                    Reveal.shown: destination.selected
+                                    Reveal.overshoot: 2.4
+                                    size: 38
+                                    iconSize: 20
+                                    shape: root.shapes[destination.index]
+                                    symbol: root.symbols[destination.index]
+                                    hovered: destination.hovered
                                 }
                             }
+
                             StyledText {
-                                width: parent.width
-                                text: root.titles[destination.index]
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                width: rail.width
                                 horizontalAlignment: Text.AlignHCenter
+                                elide: Text.ElideRight
+                                text: root.titles[destination.index]
                                 font.pixelSize: Appearance.fontSize.smaller
                                 font.weight: destination.selected ? Font.DemiBold : Font.Normal
                                 color: destination.selected ? Appearance.colors.onSurface : Appearance.colors.onSurfaceVariant
@@ -187,169 +164,144 @@ Popup {
                         }
                     }
                 }
+
+                Repeater {
+                    model: root.modTabs
+
+                    delegate: RippleButton {
+                        id: modDest
+                        required property var modelData
+                        readonly property string tabKey: modelData.entryId || modelData.modId
+                        readonly property bool selected: root.activeModTabId === tabKey
+
+                        width: rail.width
+                        implicitHeight: 68
+                        padding: 0
+                        colBackground: "transparent"
+                        colBackgroundHover: "transparent"
+                        rippleEnabled: false
+                        onClicked: root.activeModTabId = tabKey
+
+                        contentItem: Column {
+                            spacing: 4
+
+                            Rectangle {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                width: 56
+                                height: 32
+                                radius: height / 2
+                                color: Qt.alpha(Appearance.colors.layer1Hover, !modDest.selected && modDest.hovered ? 1 : 0)
+
+                                Behavior on color {
+                                    ElementMoveFastColor {}
+                                }
+
+                                MaterialSymbol {
+                                    anchors.centerIn: parent
+                                    Reveal.shown: !modDest.selected
+                                    text: modDest.modelData.symbol || modDest.modelData.settingsTabSymbol || "widgets"
+                                    iconSize: 22
+                                    color: Appearance.colors.onSurfaceVariant
+                                }
+                                ShapeIcon {
+                                    anchors.centerIn: parent
+                                    Reveal.shown: modDest.selected
+                                    Reveal.overshoot: 2.4
+                                    size: 38
+                                    iconSize: 20
+                                    shape: modDest.modelData.shape || modDest.modelData.settingsTabShape || "flower"
+                                    symbol: modDest.modelData.symbol || modDest.modelData.settingsTabSymbol || "widgets"
+                                    hovered: modDest.hovered
+                                }
+                            }
+
+                            StyledText {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                width: rail.width
+                                horizontalAlignment: Text.AlignHCenter
+                                elide: Text.ElideRight
+                                text: modDest.modelData.title || modDest.modelData.settingsTabTitle || modDest.modelData.modName || ""
+                                font.pixelSize: Appearance.fontSize.smaller
+                                font.weight: modDest.selected ? Font.DemiBold : Font.Normal
+                                color: modDest.selected ? Appearance.colors.onSurface : Appearance.colors.onSurfaceVariant
+                            }
+                        }
+                    }
+                }
             }
-            ScrollBar.vertical: ScrollBar {}
         }
 
         Rectangle {
             anchors.left: railScroller.right
-            anchors.leftMargin: 8
+            anchors.leftMargin: 12
             anchors.right: parent.right
+            anchors.rightMargin: 8
             anchors.top: parent.top
+            anchors.topMargin: 8
             anchors.bottom: parent.bottom
-            anchors.margins: 8
+            anchors.bottomMargin: 8
             radius: Appearance.rounding.large
-            color: Appearance.colors.surfaceContainer
+            color: Appearance.colors.layer1
+
+            Stickers {
+                anchors.fill: parent
+                anchors.margins: 6
+                key: root.activeModTabId.length > 0 ? root.activeModTabId : root.titles[root.page]
+                count: 4
+                minimumSize: 90
+                maximumSize: 220
+                clipRadius: Appearance.rounding.large - 6
+            }
 
             Flickable {
+                id: scroller
                 anchors.fill: parent
-                anchors.margins: 24
-                anchors.topMargin: 64
-                clip: true
-                id: settingsFlickable
-                contentWidth: width
-                contentHeight: settingsContent.implicitHeight
+                anchors.margins: 20
+                contentHeight: pages.implicitHeight
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar {}
-                ColumnLayout {
-                    id: settingsContent
-                    width: settingsFlickable.width
-                    spacing: 16
-                    TitleText {
-                        Layout.fillWidth: true
-                        text: root.titles[root.page]
-                        font.pixelSize: Appearance.fontSize.headline
-                        wrapMode: Text.WordWrap
-                    }
-                    Note {
-                        text: ["Внешний вид и движение — под ваши предпочтения.",
-                               "Настройки отрисовки и расхода ресурсов.",
-                               "Музыка, сохранённая на этом устройстве.",
-                               "Ваш аккаунт Яндекс Музыки."][root.page]
-                    }
-                    Card {
-                        visible: root.page === 0
-                        ToggleRow {
-                            text: "Движение при воспроизведении"
-                            description: "Вращение Play, волны, индикаторы и перелистывание цифр."
-                            value: appSettings.motionEnabled
-                            onChangedTo: (value) => appSettings.motionEnabled = value
-                        }
-                        ToggleRow {
-                            text: "Обложки и аватары"
-                            description: "Отключите, чтобы уменьшить расход памяти и сетевые запросы."
-                            value: appSettings.coversEnabled
-                            onChangedTo: (value) => appSettings.coversEnabled = value
+                clip: true
+                FastWheel { target: scroller }
+
+                SettingsPages {
+                    id: pages
+                    width: scroller.width
+                    page: root.page
+                    activeModTabId: root.activeModTabId
+
+                    onPageChanged: {
+                        scroller.contentY = 0;
+                        if (!Appearance.performanceMode && !Appearance.reduceMotion) {
+                            arrive.restart();
                         }
                     }
-                    Card {
-                        visible: root.page === 1
-                        ToggleRow {
-                            text: "Сглаживание SVG"
-                            description: "MSAA ×4: более ровные края, дополнительные GPU-буферы."
-                            value: appSettings.iconAntialiasing
-                            onChangedTo: (value) => appSettings.iconAntialiasing = value
+                    onActiveModTabIdChanged: {
+                        scroller.contentY = 0;
+                        if (!Appearance.performanceMode && !Appearance.reduceMotion) {
+                            arrive.restart();
                         }
                     }
-                    Card {
-                        visible: root.page === 1
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.margins: 12
-                            spacing: 12
-                            StyledText { text: "Графический API"; font.weight: Font.Medium }
-                            StyledComboBox {
-                                Layout.fillWidth: true
-                                model: ["Автоматически (Qt)", "Vulkan", "OpenGL"]
-                                currentIndex: appSettings.graphicsBackend === "vulkan" ? 1 : (appSettings.graphicsBackend === "opengl" ? 2 : 0)
-                                onActivated: (index) => appSettings.graphicsBackend = ["auto", "vulkan", "opengl"][index]
-                                palette.button: Appearance.colors.surfaceContainerHighest
-                                palette.buttonText: Appearance.colors.onSurface
-                                palette.base: Appearance.colors.surfaceContainerHigh
-                                palette.text: Appearance.colors.onSurface
-                                palette.highlight: Appearance.colors.primaryContainer
-                                palette.highlightedText: Appearance.colors.onSurface
-                                Accessible.name: "Графический API"
-                            }
-                            Note { text: "Применится после перезапуска. Если Vulkan работает нестабильно, выберите OpenGL. Параметры --graphics и QSG_RHI_BACKEND имеют приоритет." }
-                        }
+
+                    ParallelAnimation {
+                        id: arrive
+                        NumberAnimation { target: pages; property: "opacity"; from: 0.4; to: 1; duration: Appearance.duration(180); easing.type: Easing.OutCubic }
+                        NumberAnimation { target: pages; property: "y"; from: 12; to: 0; duration: Appearance.motion(260); easing.type: Easing.BezierSpline; easing.bezierCurve: Appearance.curves.expressiveFastSpatial }
                     }
-                    Card {
-                        visible: root.page === 2
-                        ActionRow {
-                            text: "Открыть загруженные треки"
-                            description: "Список треков, размер загрузок и удаление файлов."
-                            onClicked: { backend.loadDownloads(); root.close(); }
-                        }
-                        ActionRow {
-                            text: "Папка загрузок"
-                            description: "Открыть сохранённое аудио в файловом менеджере."
-                            onClicked: if (!appSettings.openOfflineFolder()) root.errorMessage = "Не удалось открыть папку загрузок."
-                        }
-                    }
-                    Card {
-                        visible: root.page === 3
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Layout.margins: 12
-                            spacing: 14
-                            RoundedImage {
-                                Layout.preferredWidth: 48; Layout.preferredHeight: 48
-                                source: backend.userHasAvatar ? backend.userAvatar : ""
-                                radius: 24
-                                fallbackSymbol: "person"
-                            }
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                StyledText {
-                                    Layout.fillWidth: true
-                                    text: backend.loggedIn ? backend.userName : "Вы не вошли в аккаунт"
-                                    elide: Text.ElideRight
-                                    font.weight: Font.DemiBold
-                                }
-                                Note { text: backend.loggedIn ? "Яндекс Музыка" : "Загрузки доступны без входа." }
-                            }
-                        }
-                        ActionRow {
-                            text: backend.loggedIn ? "Выйти из аккаунта" : "Перейти ко входу"
-                            description: backend.loggedIn ? "Загруженные файлы останутся на устройстве." : "Вход по коду устройства или OAuth-токену."
-                            onClicked: {
-                                if (backend.loggedIn) logoutConfirmation.open();
-                                else { backend.loadHome(); root.close(); }
-                            }
-                        }
-                    }
-                    Note {
-                        visible: root.errorMessage.length > 0
-                        text: root.errorMessage
-                        color: Appearance.colors.error
-                    }
-                    Note { text: "Настройки сохраняются автоматически." }
                 }
-            }
-            IconButton {
-                anchors.top: parent.top
-                anchors.right: parent.right
-                anchors.margins: 12
-                symbol: "close"
-                tooltip: "Закрыть настройки"
-                onClicked: root.close()
+
+                ScrollBar.vertical: StyledScrollBar {}
             }
         }
-    }
 
-    Dialog {
-        id: logoutConfirmation
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        title: "Выйти из аккаунта?"
-        modal: true
-        standardButtons: Dialog.Yes | Dialog.Cancel
-        Label { text: "Загруженная музыка останется на устройстве." }
-        onAccepted: { backend.logout(); root.close(); }
-    }
-    Connections {
-        target: appSettings
-        function onSaveFailed() { root.errorMessage = "Не удалось сохранить настройки. Проверьте свободное место и права доступа." }
+        ToolbarButton {
+            anchors.top: parent.top
+            anchors.topMargin: 18
+            anchors.right: parent.right
+            anchors.rightMargin: 18
+            z: 2
+            shape: "cookie6"
+            symbol: "close"
+            onClicked: root.close()
+            tooltip: "Закрыть"
+        }
     }
 }

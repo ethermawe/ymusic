@@ -179,7 +179,10 @@ Dialog {
                 id: list
                 anchors.fill: parent
                 clip: true
+                maximumFlickVelocity: 5000
+                flickDeceleration: 2400
                 model: root.filtered
+                FastWheel { target: list }
                 spacing: 6
                 visible: !root.loading
                 delegate: ItemDelegate {

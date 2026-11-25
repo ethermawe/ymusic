@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
@@ -6,337 +7,587 @@ import ymusic.ui
 Flickable {
     id: root
 
-    contentHeight: homeColumn.y + homeColumn.implicitHeight + Appearance.sizes.playerBarClearance
-    clip: true
+    topMargin: width < 560 ? Appearance.sizes.topBarHeight : 0
+    contentWidth: width
+    contentHeight: column.y + column.implicitHeight + 28 + Appearance.sizes.playerBarClearance
     boundsBehavior: Flickable.StopAtBounds
+    clip: true
 
-    readonly property int currentHour: new Date().getHours()
-    readonly property string greetingText: currentHour < 5 ? "Доброй ночи"
-                                         : (currentHour < 12 ? "Доброе утро"
-                                         : (currentHour < 18 ? "Добрый день" : "Добрый вечер"))
+    ScrollBar.vertical: StyledScrollBar { topPadding: 3 + Appearance.sizes.topBarHeight }
+    FastWheel { target: root }
 
-    // Subtle organic stickers floating faintly in background (Swiftify style)
-    Stickers {
-        anchors.fill: parent
-        opacity: 0.75
-        z: 0
-    }
+    readonly property real margin: Appearance.sizes.pageMargin
+    readonly property real innerWidth: Math.max(0, width - 2 * margin)
+    readonly property bool narrow: innerWidth < 680
 
-    ColumnLayout {
-        id: homeColumn
-        y: Appearance.sizes.pageMargin
-        width: parent.width
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.margins: Appearance.sizes.pageMargin
-        spacing: Appearance.sizes.sectionGap
-        z: 1
+    readonly property var personalCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("personal") : []
+    readonly property var newReleaseCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("new_releases") : []
+    readonly property var newPlaylistCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("new_playlists") : []
+    readonly property var userPlaylistCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("user_playlists") : []
+    readonly property var userAlbumCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("user_albums") : []
+    readonly property var uncategorizedCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("") : []
 
-        // Header: Display Title (Swiftify style)
-        TitleText {
-            text: "Yandex Music"
-            level: "display"
-            color: Appearance.colors.onSurface
-            Layout.topMargin: 4
+    component HomeSectionBlock: Column {
+        id: secBlock
+        property string title: ""
+        property string symbol: "auto_awesome"
+        property string iconShape: "sunny"
+        property var items: []
+        property bool showsSeeAll: false
+        signal seeAllClicked()
+
+        width: parent ? parent.width : 0
+        spacing: 14
+        visible: items.length > 0
+
+        SectionHeader {
+            width: parent.width
+            title: secBlock.title
+            symbol: secBlock.symbol
+            iconShape: secBlock.iconShape
+            showsSeeAll: secBlock.showsSeeAll
+            onSeeAll: secBlock.seeAllClicked()
         }
 
-        // Spotlight Card: Now Playing Hero Card (Swiftify-inspired frosted card)
+        GridView {
+            id: secGrid
+            width: parent.width
+            property real maxCardHeight: 205
+            function updateMaxCardHeight() {
+                let m = 0;
+                const kids = contentItem ? contentItem.children : [];
+                for (let i = 0; i < kids.length; ++i) {
+                    const c = kids[i];
+                    if (c && c.visible && c.implicitHeight > 0) {
+                        m = Math.max(m, c.implicitHeight);
+                    }
+                }
+                if (m > 0 && Math.abs(m - maxCardHeight) > 0.5) {
+                    maxCardHeight = m;
+                }
+            }
+            height: count > 0
+                ? Math.max(0, Math.ceil(count / Math.max(1, Math.floor(width / cellWidth))) * cellHeight - 12)
+                : 0
+            clip: false
+            interactive: false
+            cellWidth: 194
+            cellHeight: Math.ceil(maxCardHeight) + 12
+            reuseItems: true
+            model: secBlock.items
+            onCountChanged: Qt.callLater(updateMaxCardHeight)
+            onModelChanged: Qt.callLater(updateMaxCardHeight)
+
+            displaced: Transition {
+                enabled: !Appearance.performanceMode
+                NumberAnimation {
+                    properties: "x,y"
+                    duration: Appearance.motion(320)
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: Appearance.curves.expressiveDefaultSpatial
+                }
+            }
+
+            delegate: CardItem {
+                required property var modelData
+                cardIndex: modelData.cardIndex
+                cardData: modelData
+                width: 178
+                onImplicitHeightChanged: Qt.callLater(secGrid.updateMaxCardHeight)
+                Component.onCompleted: Qt.callLater(secGrid.updateMaxCardHeight)
+            }
+        }
+    }
+
+    Stickers {
+        width: root.width
+        height: 240
+        key: "home-view"
+        count: 5
+        minimumSize: 80
+        maximumSize: 220
+    }
+
+    Column {
+        id: column
+        x: root.margin
+        y: 16
+        width: root.innerWidth
+        spacing: 26
+
+        TitleText {
+            width: parent.width
+            text: "Главная"
+            font.pixelSize: Appearance.fontSize.huge + 4
+            font.weight: Font.Bold
+        }
+
+        ModSlotHost {
+            layoutMode: "column"
+            width: parent.width
+            visible: implicitHeight > 0
+            slotName: "home.top"
+            slotContext: ({ narrow: root.narrow })
+        }
+
+        // Now Playing Spotlight Hero
         Rectangle {
             id: spotlightCard
-            Layout.fillWidth: true
-            Layout.preferredHeight: 186
-            radius: Appearance.rounding.large
+            width: parent.width
+            implicitHeight: spotlightInner.implicitHeight + (root.narrow ? 32 : 40)
+            radius: Appearance.rounding.veryLarge
             color: Appearance.colors.surfaceContainerLow
-            clip: true
             border.width: 1
-            border.color: Qt.rgba(1, 1, 1, 0.08)
+            border.color: Appearance.colors.outlineVariant
+            clip: true
 
-            // Blurred luminous backdrop from artwork
             Image {
-                id: backdropImage
-                anchors.fill: parent
+                id: spotlightSource
                 visible: false
                 source: appSettings.coversEnabled && backend.hasCover ? backend.nowCover : ""
-                asynchronous: true
                 sourceSize: Qt.size(64, 64)
                 smooth: true
-                mipmap: true
-            }
-
-            ShaderEffect {
-                id: horizontalBlur
-                width: 256
-                height: 64
-                property variant source: backdropImage
-                property vector2d texelStep: Qt.vector2d(1 / 256, 0)
-                fragmentShader: "qrc:/shaders/gaussian_blur.frag.qsb"
-            }
-
-            ShaderEffectSource {
-                id: blurredTexture
-                sourceItem: horizontalBlur
-                hideSource: true
-                visible: false
-                textureSize: Qt.size(256, 64)
-                smooth: true
-                live: backdropImage.status === Image.Ready
+                asynchronous: true
             }
 
             ShaderEffect {
                 anchors.fill: parent
-                property variant source: blurredTexture
+                property variant source: spotlightSource
                 property size itemSize: Qt.size(width, height)
                 property real radius: spotlightCard.radius
                 fragmentShader: "qrc:/shaders/artwork_backdrop.frag.qsb"
-                opacity: 0.38
-                visible: backdropImage.status === Image.Ready
+                visible: spotlightSource.status === Image.Ready
+                opacity: 0.16
             }
 
-            // Spotlight Content
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 20
-                spacing: 20
+            GridLayout {
+                id: spotlightInner
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: root.narrow ? 16 : 20
+                columns: root.narrow ? 1 : 2
+                columnSpacing: 22
+                rowSpacing: 16
 
-                // Cover Artwork with true rounded corners
-                RoundedImage {
-                    Layout.preferredWidth: 144
-                    Layout.preferredHeight: 144
-                    radius: Appearance.rounding.normal
-                    source: backend.hasCover ? backend.nowCover : ""
-                    fallbackSymbol: "music_note"
-                    fallbackIconSize: 48
-                    sourceSize.width: 288
-                    sourceSize.height: 288
-                    borderWidth: 1
-                    borderColor: Qt.rgba(1, 1, 1, 0.08)
+                Item {
+                    id: spotlightArtBox
+                    Layout.preferredWidth: root.narrow ? 124 : 152
+                    Layout.preferredHeight: Layout.preferredWidth
+                    Layout.alignment: root.narrow ? Qt.AlignLeft : Qt.AlignVCenter
+                    scale: spotlightArtHover.hovered && backend.hasTrack ? 1.04 : 1
+
+                    Behavior on scale {
+                        enabled: !Appearance.performanceMode
+                        Bounce {}
+                    }
+
+                    transform: Scale {
+                        id: spotlightPop
+                        origin.x: spotlightArtBox.width / 2
+                        origin.y: spotlightArtBox.height / 2
+                    }
+
+                    Connections {
+                        target: backend
+                        function onTrackInstanceIdChanged() {
+                            if (!Appearance.performanceMode && !Appearance.reduceMotion) {
+                                spotlightPopIn.restart()
+                            }
+                        }
+                    }
+
+                    NumberAnimation {
+                        id: spotlightPopIn
+                        target: spotlightPop
+                        properties: "xScale,yScale"
+                        from: 0.84
+                        to: 1
+                        duration: Appearance.motion(520)
+                        easing.type: Easing.OutBack
+                        easing.overshoot: 2.0
+                    }
+
+                    ArtworkGlow {
+                        anchors.fill: parent
+                        source: backend.hasCover ? backend.nowCover : ""
+                        intensity: 0.24
+                        glowRadius: 24
+                    }
+
+                    ArtworkImage {
+                        anchors.fill: parent
+                        radius: Appearance.rounding.large
+                        source: backend.hasCover ? backend.nowCover : ""
+                        crossfade: true
+                        placeholderSymbol: "music_note"
+                        fallbackKey: backend.nowTitle
+                    }
+
+                    HoverHandler {
+                        id: spotlightArtHover
+                        cursorShape: backend.hasTrack ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    }
+                    TapHandler {
+                        enabled: backend.hasTrack
+                        onTapped: UiState.openImmersive()
+                    }
                 }
 
-                // Info & Controls
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignVCenter
-                    spacing: 6
+                    spacing: 10
 
-                    // Tag
-                    StyledText {
-                        text: backend.hasTrack ? (backend.playing ? "СЕЙЧАС ИГРАЕТ" : "ПАУЗА") : "ПЕРСОНАЛЬНЫЙ ПОТОК"
-                        font.pixelSize: Appearance.fontSize.smallest
-                        font.weight: Font.Bold
-                        font.letterSpacing: 0.8
-                        color: Appearance.colors.primary
+                    Rectangle {
+                        Layout.preferredWidth: statusRow.implicitWidth + 18
+                        Layout.preferredHeight: 24
+                        radius: 12
+                        color: Appearance.colors.primaryContainer
+
+                        Behavior on Layout.preferredWidth {
+                            enabled: !Appearance.performanceMode
+                            ElementMoveSmall {}
+                        }
+
+                        Row {
+                            id: statusRow
+                            anchors.centerIn: parent
+                            spacing: 6
+                            MaterialSymbol {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: backend.playing ? "graphic_eq" : "music_note"
+                                iconSize: 14
+                                fill: 1
+                                color: Appearance.colors.onPrimaryContainer
+                                scale: backend.playing && !Appearance.reduceMotion && !Appearance.performanceMode
+                                    ? 1 + 0.1 * Math.sin(UiState.spin * 6) : 1
+                            }
+                            StyledText {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: backend.playing ? "СЕЙЧАС ИГРАЕТ" : (backend.hasTrack ? "НА ПАУЗЕ" : "ВАШ ВКУС")
+                                font.pixelSize: Appearance.fontSize.smallest
+                                font.weight: Font.Bold
+                                font.letterSpacing: 0.7
+                                color: Appearance.colors.onPrimaryContainer
+                            }
+                        }
                     }
 
-                    // Title
                     TitleText {
                         Layout.fillWidth: true
-                        text: backend.hasTrack ? backend.nowTitle : "Моя волна"
-                        level: "headline"
+                        text: backend.hasTrack ? backend.nowTitle : "Готовы слушать"
+                        animateChange: true
+                        changeDistanceY: 6
+                        font.pixelSize: root.narrow ? 20 : 25
+                        maximumLineCount: 2
+                        wrapMode: Text.WordWrap
                         elide: Text.ElideRight
-                        font.underline: homeTitleHover.hovered && backend.nowHasAlbum
+                        font.underline: titleHover.hovered && backend.hasTrack && backend.nowHasAlbum
                         HoverHandler {
-                            id: homeTitleHover
-                            cursorShape: backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            id: titleHover
+                            cursorShape: backend.hasTrack && backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
                         }
-                        TapHandler { enabled: backend.nowHasAlbum; onTapped: backend.openNowAlbum() }
+                        TapHandler {
+                            enabled: backend.hasTrack && backend.nowHasAlbum
+                            onTapped: backend.openNowAlbum()
+                        }
                     }
 
-                    // Artist & Album
-                    StyledText {
+                    ArtistLinks {
                         Layout.fillWidth: true
-                        text: backend.hasTrack
-                              ? (backend.nowArtists + (backend.nowAlbum.length > 0 ? " • " + backend.nowAlbum : ""))
-                              : "Бесконечный поток музыки под ваше настроение"
+                        links: backend.hasTrack ? backend.nowArtistLinks : []
+                        fallbackText: backend.hasTrack ? backend.nowArtists : "Включите Мою волну или любой плейлист"
+                        clickable: backend.hasTrack
+                        fallbackClickable: backend.nowHasArtist
                         font.pixelSize: Appearance.fontSize.normal
-                        font.weight: Font.Medium
                         color: Appearance.colors.onSurfaceVariant
-                        elide: Text.ElideRight
-                        font.underline: homeArtistHover.hovered && backend.nowHasArtist
-                        HoverHandler { id: homeArtistHover; cursorShape: backend.nowHasArtist ? Qt.PointingHandCursor : Qt.ArrowCursor }
-                        TapHandler { enabled: backend.nowHasArtist; onTapped: backend.openNowArtist() }
+                        wrapMode: Text.WordWrap
                     }
 
-                    // Action buttons
                     RowLayout {
-                        spacing: 12
-                        Layout.topMargin: 6
+                        Layout.fillWidth: true
+                        Layout.topMargin: 4
+                        spacing: 10
 
-                        // Play Button with Swiftify softCookie / cookie9 shape
-                        PlayHeroButton {
-                            size: 42
+                        PlayButton {
+                            size: 46
+                            iconSize: 24
                             playing: backend.playing
+                            tooltip: backend.hasTrack ? (backend.playing ? "Пауза" : "Играть") : "Запустить Мою волну"
                             onClicked: {
-                                if (backend.hasTrack) {
-                                    backend.toggle();
-                                } else {
-                                    backend.startWave();
-                                }
+                                if (backend.hasTrack) backend.toggle();
+                                else backend.startWave();
                             }
                         }
 
                         IconButton {
-                            symbol: backend.nowLiked ? "favorite" : "favorite_border"
-                            size: 38
-                            iconSize: 20
-                            iconColor: backend.nowLiked ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
-                            toggled: backend.nowLiked
-                            heartBurst: true
                             visible: backend.hasTrack
+                            symbol: backend.nowLiked ? "favorite" : "favorite_border"
+                            toggled: backend.nowLiked
+                            burst: "hearts"
+                            size: 40
+                            iconSize: 22
+                            tooltip: backend.nowLiked ? "Убрать из Мне нравится" : "Мне нравится"
                             onClicked: backend.toggleNowLike()
                         }
 
                         TransportButton {
-                            symbol: "skip_next"
-                            effect: TransportButton.NudgeRight
-                            size: 38
-                            iconSize: 22
-                            iconColor: Appearance.colors.onSurfaceVariant
                             visible: backend.hasTrack
+                            symbol: "skip_next"
+                            size: 40
+                            iconSize: 24
+                            effect: TransportButton.NudgeRight
+                            hoverShape: "pill"
+                            tooltip: "Следующий трек"
                             onClicked: backend.next()
                         }
 
-                        // Wavy Sound Wave running across the bottom of spotlight card
-                        WavyLine {
-                            Layout.fillWidth: true
-                            Layout.alignment: Qt.AlignVCenter
-                            Layout.preferredHeight: 10
-                            wavelength: 22
-                            amplitude: backend.playing && !Appearance.reduceMotion ? 2.8 : 0
-                            running: backend.playing
-                            opacity: backend.playing ? 1 : 0.45
-                            Behavior on amplitude {
-                                NumberAnimation { duration: Appearance.reduceMotion ? 0 : 420; easing.type: Easing.InOutCubic }
-                            }
-                            Behavior on opacity {
-                                NumberAnimation { duration: Appearance.reduceMotion ? 0 : 300; easing.type: Easing.InOutCubic }
-                            }
-                            color: Qt.rgba(Appearance.colors.primary.r,
-                                           Appearance.colors.primary.g,
-                                           Appearance.colors.primary.b, 0.35)
+                        Item { Layout.fillWidth: true }
+
+                        TextButton {
+                            visible: backend.hasTrack
+                            variant: TextButton.Tonal
+                            symbol: "open_in_full"
+                            text: "На весь экран"
+                            iconOnly: root.innerWidth < 460
+                            onClicked: UiState.openImmersive()
                         }
                     }
                 }
             }
         }
 
-        // Two Shortcuts Side by Side (Swiftify HomeShortcut)
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 14
+        // Quick Shortcuts
+        GridLayout {
+            width: parent.width
+            columns: root.narrow ? 1 : (root.innerWidth < 940 ? 2 : 3)
+            columnSpacing: 14
+            rowSpacing: 12
 
             HomeShortcut {
                 Layout.fillWidth: true
-                title: "Любимые треки"
-                subtitle: "Понравившаяся вам музыка"
+                title: "Моя волна"
+                subtitle: "Бесконечный поток по вашему вкусу"
+                symbol: "my_wave"
+                iconShape: "cookie9"
+                onClicked: backend.startWave()
+            }
+
+            HomeShortcut {
+                Layout.fillWidth: true
+                title: "Мне нравится"
+                subtitle: "Все любимые треки в одном месте"
                 symbol: "favorite"
-                badgeColor: Qt.rgba(Appearance.colors.primary.r, Appearance.colors.primary.g, Appearance.colors.primary.b, 0.16)
-                badgeIconColor: Appearance.colors.primary
+                iconShape: "heart"
+                keepsShape: true
                 onClicked: backend.loadLikes()
             }
 
             HomeShortcut {
                 Layout.fillWidth: true
-                title: "Моя волна"
-                subtitle: "Умные рекомендации потока"
-                symbol: "my_wave"
-                badgeColor: Qt.rgba(Appearance.colors.secondary.r, Appearance.colors.secondary.g, Appearance.colors.secondary.b, 0.16)
-                badgeIconColor: Appearance.colors.secondary
-                onClicked: backend.startWave()
+                title: "Чарт"
+                subtitle: "Самые популярные треки сейчас"
+                symbol: "trending_up"
+                iconShape: "sunny"
+                onClicked: backend.feature({action: "open_chart"})
             }
         }
 
-        ColumnLayout {
-            Layout.fillWidth: true
+        // Recently Played Shelf
+        Column {
+            width: parent.width
             visible: backend.history.count > 0
             spacing: 12
+
             SectionHeader {
-                Layout.fillWidth: true
-                title: "Недавно слушали"
-                symbol: "music_note"
-                showsAction: true
-                actionText: "Очистить"
-                onActionClicked: clearHistory.open()
+                width: parent.width
+                title: "Недавно прослушано"
+                symbol: "history"
+                iconShape: "clover4"
+                showsSeeAll: backend.history.count > 0
+                seeAllText: "Очистить"
+                seeAllSymbol: "delete_sweep"
+                onSeeAll: clearHistory.open()
             }
-            ListView {
-                id: recent
-                Layout.fillWidth: true
-                Layout.preferredHeight: 104
-                orientation: ListView.Horizontal
-                spacing: 12
-                clip: true
-                model: backend.history
-                delegate: Rectangle {
-                    id: historyTile
+
+            Item {
+                width: parent.width
+                height: 88
+
+                ListView {
+                    anchors.fill: parent
+                    anchors.margins: -8
+                    leftMargin: 8
+                    rightMargin: 8
+                    orientation: ListView.Horizontal
+                    spacing: 12
+                    clip: true
+                    model: backend.history
+
+                delegate: Item {
+                    id: historySlot
                     required property var model
-                    width: 240; height: 92
-                    radius: 16
-                    color: Appearance.colors.surfaceContainerLow
-                    RowLayout {
-                        anchors.fill: parent; anchors.margins: 12; spacing: 12
-                        RoundedImage { Layout.preferredWidth: 60; Layout.preferredHeight: 60; source: historyTile.model.coverUrl; radius: 12 }
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            StyledText { Layout.fillWidth: true; text: historyTile.model.title; elide: Text.ElideRight; font.weight: Font.Medium }
-                            StyledText { Layout.fillWidth: true; text: historyTile.model.artists; elide: Text.ElideRight; color: Appearance.colors.onSurfaceVariant }
+                    width: 246
+                    height: 104
+
+                    Rectangle {
+                        id: historyTile
+                        y: 8
+                        width: 246
+                        height: 88
+                        radius: Appearance.rounding.normal
+                        color: tileHover.hovered ? Appearance.colors.surfaceContainerHigh : Appearance.colors.surfaceContainerLow
+                        border.width: 1
+                        border.color: Appearance.colors.outlineVariant
+                        scale: tileTap.pressed ? 0.96 : (tileHover.hovered ? 1.02 : 1)
+
+                        Behavior on color { ElementMoveFastColor {} }
+                        Behavior on scale {
+                            enabled: !Appearance.performanceMode
+                            Bounce {}
+                        }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            spacing: 12
+
+                            ArtworkImage {
+                                Layout.preferredWidth: 64
+                                Layout.preferredHeight: 64
+                                radius: Appearance.rounding.small
+                                source: historySlot.model.coverUrl
+                                placeholderSymbol: "music_note"
+                                fallbackKey: historySlot.model.title
+                                scale: tileHover.hovered ? 1.06 : 1
+
+                                Behavior on scale {
+                                    enabled: !Appearance.performanceMode
+                                    Bounce {}
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                StyledText {
+                                    Layout.fillWidth: true
+                                    text: historySlot.model.title
+                                    elide: Text.ElideRight
+                                    font.weight: Font.DemiBold
+                                }
+                                StyledText {
+                                    Layout.fillWidth: true
+                                    text: historySlot.model.artists
+                                    elide: Text.ElideRight
+                                    font.pixelSize: Appearance.fontSize.smaller
+                                    color: Appearance.colors.onSurfaceVariant
+                                }
+                            }
+                        }
+
+                        HoverHandler {
+                            id: tileHover
+                            cursorShape: Qt.PointingHandCursor
+                        }
+                        TapHandler {
+                            id: tileTap
+                            onTapped: backend.feature({action: "play_history", id: historySlot.model.id})
                         }
                     }
-                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: backend.feature({action: "play_history", id: historyTile.model.id}) }
                 }
+            }
             }
         }
 
-        // Recommendations Section with Swiftify SectionHeader and WavyLine
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 14
+        // Categorized Sections on Home
+        HomeSectionBlock {
+            title: "Умные плейлисты для вас"
+            symbol: "auto_awesome"
+            iconShape: "sunny"
+            items: root.personalCards
+        }
 
-            SectionHeader {
-                Layout.fillWidth: true
-                title: "Ваши плейлисты и альбомы"
-                symbol: "auto_awesome"
-                showsAction: backend.cards.count > 0
-                actionText: "Смотреть все"
-                onActionClicked: backend.loadPlaylists()
-            }
+        HomeSectionBlock {
+            title: "Новые релизы"
+            symbol: "new_releases"
+            iconShape: "cookie9"
+            items: root.newReleaseCards
+        }
 
-            // Grid of recommendation cards
-            GridView {
-                id: homeCardsGrid
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.ceil(Math.max(1, count) / Math.max(1, Math.floor(width / cellWidth))) * cellHeight
-                clip: true
-                interactive: false
-                cellWidth: 194
-                cellHeight: 254
-                reuseItems: true
-                model: backend.cards
-                visible: count > 0
+        HomeSectionBlock {
+            title: "Новые плейлисты"
+            symbol: "library_music"
+            iconShape: "bun"
+            items: root.newPlaylistCards
+        }
 
-                delegate: CardItem {
-                    width: 178
-                    height: 238
-                }
-            }
+        HomeSectionBlock {
+            title: "Ваши плейлисты"
+            symbol: "queue_music"
+            iconShape: "clover4"
+            items: root.userPlaylistCards
+            showsSeeAll: true
+            onSeeAllClicked: backend.loadPlaylists()
+        }
 
-            EmptyState {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 180
-                visible: backend.cards.count === 0
-                symbol: "auto_awesome"
-                title: "Подборки появятся здесь"
-                description: "Музыка, плейлисты и альбомы из вашей библиотеки"
-            }
+        HomeSectionBlock {
+            title: "Понравившиеся альбомы"
+            symbol: "album"
+            iconShape: "sunny"
+            items: root.userAlbumCards
+            showsSeeAll: true
+            onSeeAllClicked: backend.loadAlbums()
+        }
+
+        HomeSectionBlock {
+            title: "Ваша коллекция"
+            symbol: "library_music"
+            iconShape: "sunny"
+            items: root.uncategorizedCards
+            showsSeeAll: true
+            onSeeAllClicked: backend.loadPlaylists()
+        }
+
+        ModSlotHost {
+            layoutMode: "column"
+            width: parent.width
+            visible: implicitHeight > 0
+            slotName: "home.sections"
+            slotContext: ({ narrow: root.narrow })
+        }
+
+        EmptyState {
+            width: parent.width
+            height: 180
+            visible: backend.cards.count === 0
+            symbol: "auto_awesome"
+            title: "Подборки появятся здесь"
+            description: "Музыка, плейлисты и альбомы из вашей библиотеки"
         }
     }
 
-    ScrollBar.vertical: ScrollBar { active: true }
-    Dialog {
+    StyledDialog {
         id: clearHistory
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        title: "Очистить историю прослушивания?"
-        modal: true
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        onAccepted: backend.feature({action: "clear_history"})
+        headline: "Очистить историю?"
+        symbol: "delete_sweep"
+        iconShape: "clover4"
+        body: "Список недавно прослушанных треков на главной странице будет очищен."
+        buttons: [
+            TextButton {
+                text: "Отмена"
+                variant: TextButton.Text
+                onClicked: clearHistory.close()
+            },
+            TextButton {
+                text: "Очистить"
+                variant: TextButton.Filled
+                onClicked: {
+                    backend.feature({action: "clear_history"});
+                    clearHistory.accept();
+                }
+            }
+        ]
     }
 }

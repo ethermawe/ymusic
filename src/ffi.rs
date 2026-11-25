@@ -68,6 +68,13 @@ pub unsafe extern "C" fn ymusic_core_login_token(handle: *mut CoreHandle, token:
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_core_cancel_login(handle: *mut CoreHandle) {
+    if let Some(h) = unsafe { handle.as_ref() } {
+        h.core.cancel_login();
+    }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_logout(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
         h.core.logout();
@@ -210,6 +217,16 @@ pub unsafe extern "C" fn ymusic_core_open_now_artist(handle: *mut CoreHandle) {
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_core_open_artist(handle: *mut CoreHandle, artist_id: *const c_char) {
+    if let Some(h) = unsafe { handle.as_ref() } && !artist_id.is_null()
+        && let Ok(id) = unsafe { CStr::from_ptr(artist_id) }.to_str()
+        && !id.is_empty()
+    {
+        h.core.clone().open_artist(id.to_string());
+    }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_open_now_album(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
         let id = {
@@ -342,6 +359,27 @@ pub unsafe extern "C" fn ymusic_core_set_volume(handle: *mut CoreHandle, volume:
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_core_set_discord_enabled(handle: *mut CoreHandle, enabled: bool) {
+    if let Some(h) = unsafe { handle.as_ref() } {
+        h.core.set_discord_enabled(enabled);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_core_set_discord_config(
+    handle: *mut CoreHandle,
+    config_json: *const c_char,
+) {
+    if let Some(h) = unsafe { handle.as_ref() }
+        && !config_json.is_null()
+        && let Ok(json) = unsafe { CStr::from_ptr(config_json) }.to_str()
+        && let Ok(config) = serde_json::from_str::<crate::discord::DiscordConfig>(json)
+    {
+        h.core.set_discord_config(config);
+    }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_toggle_mute(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
         let rt = h.core.rt_handle.clone();
@@ -404,5 +442,26 @@ pub unsafe extern "C" fn ymusic_core_dislike_now(handle: *mut CoreHandle) {
         rt.spawn(async move {
             core.dislike_now();
         });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_core_save_session(handle: *mut CoreHandle) {
+    if let Some(h) = unsafe { handle.as_ref() } {
+        h.core.persist_session_sync();
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_core_spectrum_levels(handle: *mut CoreHandle, out: *mut f32, capacity: u32) -> u32 {
+    if out.is_null() || capacity == 0 {
+        return 0;
+    }
+    let slice = unsafe { std::slice::from_raw_parts_mut(out, capacity as usize) };
+    if let Some(h) = unsafe { handle.as_ref() } {
+        h.core.spectrum_levels(slice) as u32
+    } else {
+        slice.fill(0.0);
+        0
     }
 }

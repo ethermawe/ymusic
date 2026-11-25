@@ -1,22 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="100%" height="100%">
-  <defs>
-    <!-- Контейнер MD3 Surface -->
-    <linearGradient id="md3-bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1D1B1C" />
-      <stop offset="100%" stop-color="#141314" />
-    </linearGradient>
+  <!-- Подложка Squircle (MD3 Surface / Outline Variant) -->
+  <rect x="16" y="16" width="224" height="224" rx="64" fill="#141218" stroke="#49454F" stroke-width="4" />
 
-    <!-- Основной акцент (MD3 Primary / Accent) -->
-    <linearGradient id="md3-primary" x1="20%" y1="0%" x2="80%" y2="100%">
-      <stop offset="0%" stop-color="#EBDCEB" />
-      <stop offset="100%" stop-color="#D1C2D2" />
-    </linearGradient>
-  </defs>
-
-  <!-- Подложка Squircle -->
-  <rect x="16" y="16" width="224" height="224" rx="64" fill="url(#md3-bg)" stroke="#494648" stroke-width="4" />
-
-  <!-- Задний тональный слой (мягкая пухлая форма MD3 Cookie сверху-справа) -->
+  <!-- Задний тональный слой (MD3 Primary Container) -->
   <path d="M 150 56
        C 168 56, 174 74, 190 70
        C 208 66, 218 84, 208 100
@@ -24,9 +10,9 @@
        C 212 164, 188 164, 180 182
        C 172 200, 146 196, 132 182
        C 112 162, 102 128, 114 96
-       C 124 72, 134 56, 150 56 Z" fill="#D1C2D2" opacity="0.22" />
+       C 124 72, 134 56, 150 56 Z" fill="#4F378B" />
 
-  <!-- Передний слой: плавная 8-лучевая искра MD3 -->
+  <!-- Передний слой: плавная 8-лучевая искра MD3 (MD3 Primary) -->
   <path d="M 140 50
        Q 152 44 156 58
        Q 162 84 184 68
@@ -46,12 +32,12 @@
        Q 86 102 68 68
        Q 60 52 78 60
        Q 118 82 140 50
-       Z" fill="url(#md3-primary)" />
+       Z" fill="#D0BCFF" />
 
-  <!-- Внутренний блик-капля (смещённый к центру тяжести справа-сверху) -->
+  <!-- Внутреннее ядро (MD3 On Primary Container) -->
   <path d="M 152 96
        Q 176 96 176 120
        Q 176 146 146 152
        Q 120 156 124 128
-       Q 128 96 152 96 Z" fill="#F7EFF6" opacity="0.6" />
+       Q 128 96 152 96 Z" fill="#EADDFF" />
 </svg>
