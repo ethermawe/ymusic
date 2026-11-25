@@ -66,6 +66,24 @@ Item {
         description: UiState.lyricsMessage.length > 0 ? UiState.lyricsMessage : "Для этого трека текст пока не найден"
     }
 
+    ModSlotHost {
+        layoutMode: "row"
+        spacing: 6
+        z: 3
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.leftMargin: 20
+        anchors.topMargin: 8
+        height: 30
+        visible: implicitWidth > 0 && !UiState.lyricsLoading && root.hasLyrics
+        slotName: "immersive.lyrics.header"
+        slotContext: ({
+            scheme: root.scheme,
+            trackId: UiState.lyricsTrackId,
+            synced: UiState.lyricsSynced
+        })
+    }
+
     Item {
         id: statusHeader
         z: 2

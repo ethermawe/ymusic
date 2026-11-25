@@ -29,6 +29,23 @@ Item {
     readonly property int stepMs: 30
     readonly property int depth: 12
 
+    ModSlotHost {
+        layoutMode: "row"
+        spacing: 6
+        z: 2
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.rightMargin: 12
+        anchors.topMargin: 6
+        height: 32
+        visible: implicitWidth > 0
+        slotName: "immersive.queue.header"
+        slotContext: ({
+            scheme: root.scheme,
+            count: backend.queue.count
+        })
+    }
+
     EmptyState {
         anchors.horizontalCenter: parent.horizontalCenter
         y: 80

@@ -13,7 +13,11 @@
 #include <QFileInfo>
 #include <QJSEngine>
 #include <QLoggingCategory>
+#include <QProcess>
 #include <QQmlEngine>
+#include <QTemporaryDir>
+
+#include <algorithm>
 
 namespace ymusic::mods {
 
@@ -167,6 +171,22 @@ void ModManager::scanAndSync(bool initialStartup)
         }
     }
 
+    // Apply persisted load order (earlier in list = higher priority for overrides and slots)
+    const QStringList order = m_settings ? m_settings->modOrder() : QStringList();
+    if (!order.isEmpty() && m_manifests.size() > 1) {
+        QHash<QString, int> rank;
+        rank.reserve(order.size());
+        for (int i = 0; i < order.size(); ++i) {
+            rank.insert(order.at(i), i);
+        }
+        std::stable_sort(m_manifests.begin(), m_manifests.end(), [&](const ModManifest &a, const ModManifest &b) {
+            const int ra = rank.value(a.id, std::numeric_limits<int>::max());
+            const int rb = rank.value(b.id, std::numeric_limits<int>::max());
+            if (ra != rb) return ra < rb;
+            return a.id < b.id;
+        });
+    }
+
     const QStringList enabledIds = m_settings ? m_settings->enabledModIds() : QStringList();
     QHash<QString, QUrl> activeOverrides;
     QHash<QString, QString> overrideOwners;
@@ -180,9 +200,10 @@ void ModManager::scanAndSync(bool initialStartup)
                 const QString &target = it.key();
                 const QString &localPath = it.value();
                 if (overrideOwners.contains(target)) {
-                    const QString prevOwner = overrideOwners.value(target);
-                    m_overrideConflicts[m.id].append(target + QStringLiteral(" (конфликт с ") + prevOwner + u')');
-                    m_overrideConflicts[prevOwner].append(target + QStringLiteral(" (перекрыт ") + m.id + u')');
+                    const QString winner = overrideOwners.value(target);
+                    m_overrideConflicts[m.id].append(target + QStringLiteral(" (перекрыт приоритетным ") + winner + u')');
+                    m_overrideConflicts[winner].append(target + QStringLiteral(" (приоритет над ") + m.id + u')');
+                    continue;
                 }
                 overrideOwners.insert(target, m.id);
                 activeOverrides.insert(target, QUrl::fromLocalFile(localPath));
@@ -274,6 +295,27 @@ void ModManager::setModEnabled(const QString &modId, bool enabled)
         m_pendingRestartPrompt = true;
     }
     m_settings->setEnabledModIds(ids);
+}
+
+void ModManager::moveMod(const QString &modId, int delta)
+{
+    if (!m_settings || modId.isEmpty() || delta == 0 || m_manifests.size() < 2) return;
+    QStringList order;
+    order.reserve(m_manifests.size());
+    for (const ModManifest &m : m_manifests) {
+        order.append(m.id);
+    }
+    const int idx = order.indexOf(modId);
+    const int nextIdx = idx + delta;
+    if (idx < 0 || nextIdx < 0 || nextIdx >= order.size()) return;
+
+    const bool affectsOverrides = !m_manifests.at(idx).overridesMap.isEmpty()
+        || !m_manifests.at(nextIdx).overridesMap.isEmpty();
+    order.swapItemsAt(idx, nextIdx);
+    if (affectsOverrides) {
+        m_pendingRestartPrompt = true;
+    }
+    m_settings->setModOrder(order);
 }
 
 void ModManager::dismissRestartPrompt()
@@ -675,6 +717,88 @@ QVariantMap ModManager::installModFromFolder(const QUrl &folderUrl)
     appendLog(parsed.id, QStringLiteral("info"), QStringLiteral("Установлен мод «%1» v%2").arg(parsed.name, parsed.version));
     scanAndSync(false);
     return {{QStringLiteral("ok"), true}, {QStringLiteral("id"), parsed.id}, {QStringLiteral("name"), parsed.name}};
+}
+
+QVariantMap ModManager::installModFromArchive(const QUrl &archiveUrl)
+{
+    const QString archivePath = archiveUrl.isLocalFile() ? archiveUrl.toLocalFile() : archiveUrl.toString();
+    const QFileInfo archiveInfo(archivePath);
+    if (!archiveInfo.isFile()) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Выбранный файл архива не найден")}};
+    }
+    const QString lower = archiveInfo.fileName().toLower();
+    if (!lower.endsWith(QLatin1StringView(".ymmod")) && !lower.endsWith(QLatin1StringView(".zip"))) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Поддерживаются только архивы .ymmod и .zip")}};
+    }
+
+    QTemporaryDir tempDir;
+    if (!tempDir.isValid()) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Не удалось создать временную папку для распаковки")}};
+    }
+
+    auto tryExtract = [&](const QString &program, const QStringList &args) -> int {
+        QProcess proc;
+        proc.start(program, args);
+        if (!proc.waitForStarted(3000)) return -2;
+        if (!proc.waitForFinished(20000)) {
+            proc.kill();
+            return -1;
+        }
+        return (proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) ? 0 : 1;
+    };
+
+    int res = -2;
+#ifdef Q_OS_WIN
+    res = tryExtract(QStringLiteral("tar"), {QStringLiteral("-xf"), archiveInfo.absoluteFilePath(), QStringLiteral("-C"), tempDir.path()});
+#else
+    res = tryExtract(QStringLiteral("unzip"), {QStringLiteral("-qq"), QStringLiteral("-o"), archiveInfo.absoluteFilePath(), QStringLiteral("-d"), tempDir.path()});
+    if (res == -2) {
+        res = tryExtract(QStringLiteral("bsdtar"), {QStringLiteral("-xf"), archiveInfo.absoluteFilePath(), QStringLiteral("-C"), tempDir.path()});
+    }
+    if (res == -2) {
+        res = tryExtract(QStringLiteral("python3"), {QStringLiteral("-m"), QStringLiteral("zipfile"), QStringLiteral("-e"), archiveInfo.absoluteFilePath(), tempDir.path()});
+    }
+#endif
+    if (res != 0) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Не удалось распаковать архив (проверьте формат ZIP/ymmod)")}};
+    }
+
+    // Verify no symlink / zip-slip escaped tempDir
+    const QString tempCanonical = QFileInfo(tempDir.path()).canonicalFilePath();
+    QDirIterator checkIt(tempDir.path(), QDir::AllEntries | QDir::NoDotAndDotDot | QDir::System, QDirIterator::Subdirectories);
+    while (checkIt.hasNext()) {
+        checkIt.next();
+        const QFileInfo fi = checkIt.fileInfo();
+        if (fi.isSymLink()) {
+            return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Архив содержит симлинки, установка отклонена")}};
+        }
+        const QString c = fi.canonicalFilePath();
+        if (c.isEmpty() || !c.startsWith(tempCanonical + u'/')) {
+            return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Небезопасный путь внутри архива")}};
+        }
+    }
+
+    // Locate manifest.json either at archive root or inside a single top-level directory
+    QString modRoot;
+    if (QFileInfo::exists(tempDir.path() + QStringLiteral("/manifest.json"))) {
+        modRoot = tempDir.path();
+    } else {
+        const QDir rootDir(tempDir.path());
+        const auto topDirs = rootDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QFileInfo &sub : topDirs) {
+            if (sub.fileName() == QLatin1StringView("__MACOSX")) continue;
+            if (QFileInfo::exists(sub.absoluteFilePath() + QStringLiteral("/manifest.json"))) {
+                modRoot = sub.absoluteFilePath();
+                break;
+            }
+        }
+    }
+
+    if (modRoot.isEmpty()) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("В архиве не найден manifest.json")}};
+    }
+
+    return installModFromFolder(QUrl::fromLocalFile(modRoot));
 }
 
 bool ModManager::uninstallMod(const QString &modId)

@@ -118,6 +118,16 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 4
 
+            ModSlotHost {
+                layoutMode: "row"
+                spacing: 4
+                height: root.buttonSize
+                anchors.verticalCenter: parent.verticalCenter
+                visible: implicitWidth > 0
+                slotName: "topbar.right"
+                slotContext: ({ buttonSize: root.buttonSize, compact: root.compact })
+            }
+
             ToolbarButton {
                 id: overflow
                 effect: ToolbarButton.Spin

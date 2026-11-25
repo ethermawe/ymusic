@@ -88,6 +88,7 @@ class AppSettings : public QObject {
     Q_PROPERTY(bool modsEnabled READ modsEnabled WRITE setModsEnabled NOTIFY modsSettingsChanged)
     Q_PROPERTY(bool modDevMode READ modDevMode WRITE setModDevMode NOTIFY modsSettingsChanged)
     Q_PROPERTY(QStringList enabledModIds READ enabledModIds WRITE setEnabledModIds NOTIFY modsSettingsChanged)
+    Q_PROPERTY(QStringList modOrder READ modOrder WRITE setModOrder NOTIFY modsSettingsChanged)
 
 public:
     explicit AppSettings(QObject *parent = nullptr) : QObject(parent), m_store("finrixx", "ymusic") {
@@ -194,6 +195,7 @@ public:
     bool modsEnabled() const { return m_store.value("mods/enabled", true).toBool(); }
     bool modDevMode() const { return m_store.value("mods/devMode", false).toBool(); }
     QStringList enabledModIds() const { return m_store.value("mods/enabledIds").toStringList(); }
+    QStringList modOrder() const { return m_store.value("mods/order").toStringList(); }
 
     void setMotionEnabled(bool value) {
         if (value != motionEnabled()) {
@@ -546,6 +548,14 @@ public:
         cleaned.removeDuplicates();
         if (cleaned != enabledModIds()) {
             save("mods/enabledIds", cleaned);
+            emit modsSettingsChanged();
+        }
+    }
+    void setModOrder(const QStringList &value) {
+        QStringList cleaned = value;
+        cleaned.removeDuplicates();
+        if (cleaned != modOrder()) {
+            save("mods/order", cleaned);
             emit modsSettingsChanged();
         }
     }

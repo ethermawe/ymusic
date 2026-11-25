@@ -1344,6 +1344,12 @@ Item {
                     }
                     TextButton {
                         variant: TextButton.Tonal
+                        symbol: "archive"
+                        text: "Установить .ymmod…"
+                        onClicked: installModArchiveDialog.open()
+                    }
+                    TextButton {
+                        variant: TextButton.Tonal
                         symbol: "add"
                         text: "Установить папку мода…"
                         onClicked: installModFolderDialog.open()
@@ -1384,6 +1390,7 @@ Item {
 
                     delegate: Rectangle {
                         id: modCard
+                        required property int index
                         required property var modelData
                         x: 8
                         width: parent ? parent.width - 16 : 0
@@ -1438,6 +1445,26 @@ Item {
                                         font.pixelSize: Appearance.fontSize.smaller
                                         color: Appearance.colors.onSurfaceVariant
                                     }
+                                }
+
+                                IconButton {
+                                    visible: ModManager.mods.length > 1
+                                    enabled: modCard.index > 0
+                                    symbol: "arrow_upward"
+                                    size: 30
+                                    iconSize: 17
+                                    tooltip: "Выше приоритет загрузки"
+                                    onClicked: ModManager.moveMod(modCard.modelData.id, -1)
+                                }
+
+                                IconButton {
+                                    visible: ModManager.mods.length > 1
+                                    enabled: modCard.index < ModManager.mods.length - 1
+                                    symbol: "arrow_downward"
+                                    size: 30
+                                    iconSize: 17
+                                    tooltip: "Ниже приоритет загрузки"
+                                    onClicked: ModManager.moveMod(modCard.modelData.id, 1)
                                 }
 
                                 IconButton {
@@ -1854,6 +1881,17 @@ Item {
         onAccepted: {
             const res = Theme.importThemeFile(selectedFile, true);
             UiState.showToast(res.ok ? ("Тема «" + res.name + "» применена") : (res.error || "Ошибка импорта"));
+        }
+    }
+
+    FileDialog {
+        id: installModArchiveDialog
+        title: "Выберите архив мода (.ymmod / .zip)"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Архивы модов (*.ymmod *.zip)"]
+        onAccepted: {
+            const res = ModManager.installModFromArchive(selectedFile);
+            UiState.showToast(res.ok ? ("Мод «" + res.name + "» установлен. Включите его в списке.") : (res.error || "Ошибка установки архива"));
         }
     }
 

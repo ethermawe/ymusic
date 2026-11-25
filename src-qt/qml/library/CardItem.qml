@@ -143,6 +143,27 @@ T.AbstractButton {
         }
     }
 
+    Loader {
+        active: ModManager.reloadRevision >= 0 && ModManager.hasSlot("card.overlay")
+        x: 0
+        y: 0
+        width: root.artworkSize
+        height: root.artworkSize
+        z: 2
+        sourceComponent: ModSlotHost {
+            slotName: "card.overlay"
+            slotContext: ({
+                card: root.cardData,
+                index: root.effectiveCardIndex,
+                title: root.title,
+                subtitle: root.subtitle,
+                isArtist: root.isArtist,
+                isPlaylist: root.isPlaylist,
+                hovered: root.hovered
+            })
+        }
+    }
+
     IconButton {
         visible: root.isPlaylist && (root.hovered || root.isPinned)
         anchors.top: parent.top

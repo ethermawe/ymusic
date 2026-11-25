@@ -11,6 +11,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QTemporaryDir>
 #include <QUrl>
 
@@ -215,6 +216,52 @@ int main(int argc, char *argv[]) {
     CHECK(manager.trackMenuActionsVariantList().isEmpty()); // Cleared automatically when ModApi recreated
     CHECK(manager.lyricSubtitleFor(QStringLiteral("track-42"), 0).isEmpty()); // Subtitles cleared automatically
     CHECK(manager.shortcutsVariantList().size() == 1); // Declarative shortcut restored after reload
+
+    // Load order & override conflict priority (higher in list wins)
+    const QString secondModDir = ymusic::paths::modsDirectory() + QStringLiteral("/zeta-mod");
+    CHECK(writeText(secondModDir + QStringLiteral("/overrides/BarZ.qml"), "import QtQuick\nItem {}\n"));
+    CHECK(writeText(secondModDir + QStringLiteral("/manifest.json"), R"({
+        "id": "zeta-mod",
+        "name": "Zeta Mod",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "permissions": ["ui:override"],
+        "overrides": { "qml/player/FloatingPlayerBar.qml": "overrides/BarZ.qml" }
+    })"));
+    manager.reloadMods();
+    manager.setModEnabled(QStringLiteral("zeta-mod"), true);
+    // demo-mod comes before zeta-mod alphabetically, so demo-mod wins initially
+    CHECK(manager.urlInterceptor()->intercept(
+        QUrl(QStringLiteral("qrc:/qt/qml/ymusic/ui/qml/player/FloatingPlayerBar.qml")),
+        QQmlAbstractUrlInterceptor::QmlFile).toLocalFile().endsWith(QStringLiteral("/overrides/Bar.qml")));
+    // Move zeta-mod UP -> zeta-mod now has higher priority and wins!
+    manager.moveMod(QStringLiteral("zeta-mod"), -1);
+    CHECK(manager.urlInterceptor()->intercept(
+        QUrl(QStringLiteral("qrc:/qt/qml/ymusic/ui/qml/player/FloatingPlayerBar.qml")),
+        QQmlAbstractUrlInterceptor::QmlFile).toLocalFile().endsWith(QStringLiteral("/overrides/BarZ.qml")));
+
+    // Install mod from .ymmod ZIP archive
+    const QString archiveSrcDir = tmpDir.path() + QStringLiteral("/pack-src/zip-mod");
+    CHECK(writeText(archiveSrcDir + QStringLiteral("/manifest.json"), R"({
+        "id": "zip-mod",
+        "name": "Zip Mod",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "permissions": ["ui:slots"]
+    })"));
+    const QString ymmodPath = tmpDir.path() + QStringLiteral("/zip-mod.ymmod");
+    QProcess zipProc;
+    zipProc.start(QStringLiteral("python3"), {
+        QStringLiteral("-c"),
+        QStringLiteral("import zipfile, sys; z=zipfile.ZipFile(sys.argv[1],'w'); z.write(sys.argv[2],'zip-mod/manifest.json'); z.close()"),
+        ymmodPath,
+        archiveSrcDir + QStringLiteral("/manifest.json")
+    });
+    if (zipProc.waitForFinished(5000) && zipProc.exitCode() == 0) {
+        const QVariantMap zipRes = manager.installModFromArchive(QUrl::fromLocalFile(ymmodPath));
+        CHECK(zipRes.value(QStringLiteral("ok")).toBool());
+        CHECK(zipRes.value(QStringLiteral("id")).toString() == QStringLiteral("zip-mod"));
+    }
 
     // Quarantine disables override mods
     manager.quarantineOverrideMods(QStringLiteral("simulated crash"));

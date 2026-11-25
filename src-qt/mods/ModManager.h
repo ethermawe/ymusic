@@ -101,6 +101,7 @@ public:
     Q_INVOKABLE bool hasSlot(const QString &slotName) const;
     Q_INVOKABLE ymusic::mods::ModApi *apiForMod(const QString &modId) const;
     Q_INVOKABLE void setModEnabled(const QString &modId, bool enabled);
+    Q_INVOKABLE void moveMod(const QString &modId, int delta);
     Q_INVOKABLE void reloadMods();
     Q_INVOKABLE void dismissRestartPrompt();
     Q_INVOKABLE void requestAppRestart();
@@ -115,6 +116,7 @@ public:
     Q_INVOKABLE void clearLogs();
     Q_INVOKABLE bool openModsFolder() const;
     Q_INVOKABLE QVariantMap installModFromFolder(const QUrl &folderUrl);
+    Q_INVOKABLE QVariantMap installModFromArchive(const QUrl &archiveUrl);
     Q_INVOKABLE bool uninstallMod(const QString &modId);
 
     /// Disables all mods with UI overrides and clears the URL interceptor (used for startup crash recovery).

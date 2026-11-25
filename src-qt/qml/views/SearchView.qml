@@ -58,6 +58,18 @@ Flickable {
             }
         }
 
+        ModSlotHost {
+            layoutMode: "column"
+            width: parent.width
+            visible: implicitHeight > 0
+            slotName: "search.top"
+            slotContext: ({
+                query: backend.searchQuery,
+                filter: backend.searchFilter,
+                loading: backend.listLoading
+            })
+        }
+
         // Недавние поисковые запросы, когда строка поиска пуста
         Column {
             width: parent.width

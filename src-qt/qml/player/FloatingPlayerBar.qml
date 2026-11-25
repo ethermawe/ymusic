@@ -96,6 +96,21 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: root.tiny ? 0 : 4
 
+            ModSlotHost {
+                layoutMode: "row"
+                spacing: root.tiny ? 2 : 4
+                height: root.buttonSize
+                anchors.verticalCenter: parent.verticalCenter
+                visible: implicitWidth > 0
+                slotName: "playerBar.left"
+                slotContext: ({
+                    scheme: root.scheme,
+                    buttonSize: root.buttonSize,
+                    compact: root.compact,
+                    tiny: root.tiny
+                })
+            }
+
             TransportButton {
                 visible: !root.twoRow
                 anchors.verticalCenter: parent.verticalCenter

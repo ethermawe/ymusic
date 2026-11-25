@@ -9,11 +9,13 @@
 ## 1. Быстрый старт (за 3 минуты)
 
 1. Откройте папку модов:
-   - Через UI: **Настройки → Моды → Папка модов**.
+   - Через UI: **Настройки → Моды → Папка модов** (или установите готовый `.ymmod` / `.zip` архив кнопкой **«Установить .ymmod…»**).
    - Напрямую:
      - **Linux:** `~/.local/share/ymusic/mods/`
      - **Windows:** `%LOCALAPPDATA%\ymusic\mods\`
 2. Создайте папку с валидным ID мода (например, `my-first-mod/`), положите туда `manifest.json` и `main.qml`.
+   - Для публикации мода достаточно упаковать папку мода (или её содержимое с `manifest.json` в корне) в обычный ZIP и переименовать в `my-mod.ymmod`.
+   - Если установлено несколько модов, их порядок загрузки и приоритет при конфликте `overrides` регулируются стрелками ↑/↓ в списке модов (выше в списке = выше приоритет).
 3. Включите **Настройки → Моды → Режим разработчика** — клиент начнёт следить за файлами включённых модов (`QFileSystemWatcher`) и автоматически перезагружать их при сохранении.
 4. Горячие клавиши и аварийный запуск:
    - **`Ctrl+Shift+R`** — мгновенный Hot Reload всех модов (`clearComponentCache()` + `collectGarbage()` + пересоздание `ModApi`).
@@ -142,11 +144,15 @@
 |---|---|---|---|---|
 | `window.backdrop` | `Main.qml` (`z: -1`) | `fill` | `{}` | Кастомные обои окна, градиенты, шейдерный фон |
 | `topbar.center` | `TopBar.qml` | `fill` | `{ topBarWidth, compact }` | Верхняя пилюля навигации, мини-статус |
+| `topbar.right` | `TopBar.qml` | `row` (`height: buttonSize`) | `{ buttonSize, compact }` | Кнопки справа в верхней панели рядом с меню |
 | `sidebar.page` | `Main.qml` + `Sidebar.qml` | `fill` | `{}` | Полноценная страница мода (статистика, утилиты, экспорт) |
 | `home.top` | `HomeView.qml` | `column` | `{ narrow }` | Баннер/виджет над Spotlight на Главной |
 | `home.sections` | `HomeView.qml` | `column` | `{ narrow }` | Свои полки и подборки на Главной |
+| `search.top` | `SearchView.qml` | `column` | `{ query, filter, loading }` | Доп. фильтры, результаты из внешних источников, быстрые действия в поиске |
 | `collection.actions` | `CollectionHero.qml` | `row` (`height: 40`) | `{ title, isArtist, kind, playlistKey }` | Кнопки для плейлиста/альбома/артиста (экспорт M3U и т.д.) |
+| `card.overlay` | `CardItem.qml` (`z: 2`) | `fill` | `{ card, index, title, subtitle, isArtist, isPlaylist, hovered }` | Бейджи и мини-кнопки поверх карточек в сетках *(ленивый: 0 накладных расходов, если не используется)* |
 | `trackRow.badges` | `TrackRow.qml` | `row` (`height: 28`) | `{ track, index, isCurrent, hovered }` | Бейджи и мини-кнопки в каждой строке трека *(ленивый: 0 накладных расходов, если не используется)* |
+| `playerBar.left` | `FloatingPlayerBar.qml` | `row` (`height: buttonSize`) | `{ scheme, buttonSize, compact, tiny }` | Кнопки в левой части нижнего бара перед транспортом |
 | `playerBar.controls` | `FloatingPlayerBar.qml` | `row` (`height: buttonSize`) | `{ scheme, buttonSize, compact }` | Кнопки в правом блоке нижнего бара |
 | `playerBar.overlay` | `FloatingPlayerBar.qml` | `fill` (`z: 0`) | `{ scheme, compact, twoRow }` | Фоновый эффект / полоса / свечение поверх нижнего бара |
 | `lyrics.header` | `LyricsPanel.qml` | `row` (`height: 28`) | `{ scheme, trackId, synced, wordSynced }` | Кнопки в шапке текста (перевод, копирование, смещение) |
@@ -155,6 +161,8 @@
 | `immersive.backdrop` | `ImmersivePlayer.qml` | `fill` | `{ scheme }` | Кастомный фон / 3D / шейдер в полном экране |
 | `immersive.overlay` | `ImmersivePlayer.qml` | `fill` (`z: 50`) | `{ scheme, controlsOpacity }` | Бейджи, мини-визуализаторы, часы, инфо-оверлеи |
 | `immersive.panel` | `ImmersivePlayer.qml` | `fill` | `{ scheme }` | Собственная боковая панель (кнопка рядом со свичером панелей) |
+| `immersive.lyrics.header` | `ImmersiveLyrics.qml` | `row` (`height: 30`) | `{ scheme, trackId, synced }` | Кнопки поверх текста в полноэкранном плеере |
+| `immersive.queue.header` | `ImmersiveQueue.qml` | `row` (`height: 32`) | `{ scheme, count }` | Кнопки поверх очереди в полноэкранном плеере |
 | `settings.tab` | `SettingsDialog.qml` + `SettingsPages.qml` | `column` | `{}` | Своя полноценная «глава» в левом меню Настроек |
 | `settings.section.appearance` | `SettingsPages.qml` | `column` | `{}` | Новые секции/пункты в главе «Оформление» |
 | `settings.section.player` | `SettingsPages.qml` | `column` | `{}` | Новые секции/пункты в главе «Плеер и фон» |
