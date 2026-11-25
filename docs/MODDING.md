@@ -1,51 +1,57 @@
-# Руководство по разработке модов для `ymusic`
+# Моддинг ymusic
 
-> Документация от разработчиков клиента — для разработчиков модов.
-> Стек клиента: **Rust (`ymusic_core`) + Qt 6 (C++20) + QML (`ymusic.ui`)**.
-> Моды пишутся на **QML + JavaScript** (плюс опциональные предкомпилированные `.qsb`-шейдеры Qt 6 RHI) и работают одинаково на **Linux и Windows без компиляции**.
+Моды пишутся на QML и JavaScript (плюс опциональные `.qsb`-шейдеры Qt 6 RHI) и работают на Linux и Windows без пересборки клиента.
+
+## Установка и структура
+
+Папка с модами:
+- **Linux:** `~/.local/share/ymusic/mods/`
+- **Windows:** `%LOCALAPPDATA%\ymusic\mods\`
+
+Открыть её можно из **Настройки → Моды → Папка модов**. Там же можно установить готовый архив `.ymmod` или `.zip` (это обычный ZIP с `manifest.json` в корне или внутри одной папки).
+
+Каждый мод — отдельная директория с `manifest.json` внутри, например:
+
+```text
+mods/
+└── my-mod/
+    ├── manifest.json
+    ├── main.qml
+    └── ui/
+        └── Widget.qml
+```
+
+Порядок загрузки и приоритет при конфликте `overrides` задаётся в списке модов стрелками ↑/↓ (выше в списке — выше приоритет).
+
+### Отладка и безопасный режим
+
+- **Режим разработчика** (**Настройки → Моды**) включает `QFileSystemWatcher` и перезагружает включённые моды при сохранении файлов.
+- **`Ctrl+Shift+R`** — ручная перезагрузка всех модов (сбрасывает кэш QML-компонентов и пересоздаёт `ModApi`).
+- Логи и ошибки QML выводятся в **Настройки → Моды → Консоль модов** и в `ymusic.log`.
+- **`ymusic-qml --safe-mode`** или удержание **`Shift`** при запуске отключает все моды и `overrides`.
+- Если `ui:override` ломает загрузку `Main.qml`, клиент автоматически отключает проблемный мод (карантин) и запускает стандартный интерфейс.
+
+Примеры в репозитории:
+- [`examples/mods/hello-ymusic/`](../examples/mods/hello-ymusic/) — скрипт, пункт в `TrackMenu`, страница в сайдбаре, оверлей в `ImmersivePlayer`, окно настроек.
+- [`examples/mods/top-nav-pill/`](../examples/mods/top-nav-pill/) — скрытие сайдбара через `overrides` и верхняя панель навигации в `topbar.center`.
 
 ---
 
-## 1. Быстрый старт (за 3 минуты)
+## Жизненный цикл
 
-1. Откройте папку модов:
-   - Через UI: **Настройки → Моды → Папка модов** (или установите готовый `.ymmod` / `.zip` архив кнопкой **«Установить .ymmod…»**).
-   - Напрямую:
-     - **Linux:** `~/.local/share/ymusic/mods/`
-     - **Windows:** `%LOCALAPPDATA%\ymusic\mods\`
-2. Создайте папку с валидным ID мода (например, `my-first-mod/`), положите туда `manifest.json` и `main.qml`.
-   - Для публикации мода достаточно упаковать папку мода (или её содержимое с `manifest.json` в корне) в обычный ZIP и переименовать в `my-mod.ymmod`.
-   - Если установлено несколько модов, их порядок загрузки и приоритет при конфликте `overrides` регулируются стрелками ↑/↓ в списке модов (выше в списке = выше приоритет).
-3. Включите **Настройки → Моды → Режим разработчика** — клиент начнёт следить за файлами включённых модов (`QFileSystemWatcher`) и автоматически перезагружать их при сохранении.
-4. Горячие клавиши и аварийный запуск:
-   - **`Ctrl+Shift+R`** — мгновенный Hot Reload всех модов (`clearComponentCache()` + `collectGarbage()` + пересоздание `ModApi`).
-   - **`ymusic-qml --safe-mode`** или **удержание `Shift` при старте** — запуск без модов и без UI-оверрайдов.
-   - Если мод с `ui:override` сломает загрузку `Main.qml`, клиент автоматически отправит его в карантин и переподнимет чистый интерфейс.
-
-Готовые эталонные примеры лежат в репозитории:
-- `examples/mods/hello-ymusic/` — фоновый скрипт, пункт в `TrackMenu`, своя страница в сайдбаре, оверлей в `ImmersivePlayer`, окно настроек мода.
-- `examples/mods/top-nav-pill/` — фундаментальная переделка вёрстки: скрытие левого сайдбара через `ui:override` + парящая верхняя пилюля навигации в слоте `topbar.center`.
+При включении мода `ModManager` создаёт отдельный экземпляр C++-объекта `ModApi` (`modApi`). Все подписки, пункты `TrackMenu`, хоткеи и HTTP-запросы привязаны к этому объекту. При выключении или перезагрузке `ModApi` уничтожается: незавершённые `QNetworkReply` отменяются, пункты меню и хоткеи удаляются, кэш QML сбрасывается.
 
 ---
 
-## 2. Как устроен жизненный цикл мода (и почему он не течёт)
-
-1. При включении мода `ModManager` создаёт для него изолированный C++-объект **`ModApi`** (`modApi`).
-2. `ModApi` — единственный владелец всех подписок, таймеров, пунктов `TrackMenu` и асинхронных HTTP-запросов этого мода.
-3. При выключении или `Ctrl+Shift+R` старый `ModApi` уничтожается (`disconnect()` + `deleteLater()`), все его незавершённые `QNetworkReply` обрываются, зарегистрированные пункты меню очищаются, а QML-движок сбрасывает кэш компонентов.
-4. Все ошибки загрузки QML и предупреждения `modApi.warn()` / `modApi.log()` попадают в **Настройки → Моды → Консоль модов** и в `ymusic.log`.
-
----
-
-## 3. Полная спецификация `manifest.json`
+## Формат `manifest.json`
 
 ```json
 {
   "id": "my-mod",
-  "name": "My Awesome Mod",
+  "name": "My Mod",
   "version": "1.0.0",
-  "author": "your-handle",
-  "description": "Краткое описание, отображается в карточке мода.",
+  "author": "handle",
+  "description": "Короткое описание для списка модов.",
   "minAppVersion": "0.3.0",
   "apiVersion": 1,
 
@@ -76,7 +82,7 @@
   },
 
   "shortcuts": [
-    { "id": "toggle-panel", "sequence": "Ctrl+Alt+T", "description": "Переключить панель мода" }
+    { "id": "toggle-panel", "sequence": "Ctrl+Alt+T", "description": "Переключить панель" }
   ],
 
   "overrides": {
@@ -99,143 +105,145 @@
 }
 ```
 
-### Как работает блок `"ui"` (и обратная совместимость)
-Для любого слота в `"ui"` (старый ключ `"slots"` также поддерживается) можно указать:
-- **строку** — просто путь к QML: `"topbar.center": "ui/TopWidget.qml"`;
-- **объект** — путь + метаданные (`id`, `file`, `title`, `symbol`, `shape`), особенно удобно для `sidebar.page`, `settings.tab`, `immersive.panel`;
-- **массив** строк и/или объектов — один мод может добавить сразу несколько страниц, глав настроек, кнопок в плеере или иммерсивных панелей.
+### Поля и валидация
 
-### Ограничения валидации
-- `id`: только `^[a-z0-9][a-z0-9_-]{1,47}$`.
-- `apiVersion`: сейчас строго `1`.
-- `minAppVersion`: если указана (например, `"0.3.0"`), сравнивается с текущей версией клиента через `QVersionNumber`; при несовместимости мод не загружается и показывает понятную ошибку в списке.
-- Все пути в `entry`, `ui`/`slots` и `overrides` обязаны быть относительными и строго внутри папки мода (`..` и симлинки наружу блокируются).
-- Использование `overrides` без разрешения `"ui:override"` отклоняется на этапе парсинга манифеста.
+- `id` — соответствует `^[a-z0-9][a-z0-9_-]{1,47}$`.
+- `apiVersion` — сейчас `1`.
+- `minAppVersion` — минимальная версия клиента (`QVersionNumber`). Если клиент старее, мод не загружается и показывает ошибку в списке.
+- `ui` (старое имя `slots` тоже принимается) — для каждого слота можно указать:
+  - строку с путём к QML (`"topbar.center": "ui/TopWidget.qml"`);
+  - объект с `file` и метаданными (`id`, `title`, `symbol`, `shape`);
+  - массив строк и/или объектов, если нужно добавить несколько элементов в один слот.
+- Все пути в `entry`, `ui` и `overrides` должны быть относительными и оставаться внутри папки мода (`..` и симлинки наружу отклоняются).
+- `overrides` без разрешения `"ui:override"` не принимается.
 
 ---
 
-## 4. Таблица разрешений (`permissions`)
+## Разрешения (`permissions`)
 
-> **Модель безопасности:** моды выполняются на движке QML внутри интерфейса клиента. Разрешения определяют контракт `ModApi` и прозрачно отображаются пользователю в карточке мода (вместе со списком подменяемых файлов `overrideTargets`), но не являются жёсткой изоляцией уровня ОС.
+Моды выполняются в общем QML-движке приложения без песочницы ОС. Разрешения ограничивают методы `ModApi` и показываются пользователю в карточке мода вместе со списком `overrides`.
 
-| Разрешение | Что открывает | Ограничения безопасности |
+| Разрешение | Доступ | Ограничения |
 |---|---|---|
-| `playback:read` | Чтение свойств текущего трека, состояния плеера, прогресса, громкости, темпа | Без OAuth-токена |
-| `playback:control` | `toggle()`, `next()`, `prev()`, `seek()`, `setVolume()`, `toggleLike()`, `playNext()`, `addToQueue()` | Нет доступа к выходу/настройкам аккаунта |
-| `library:read` | `queueTracks()`, `currentTracks()`, `historyTracks()`, сигнал `libraryChanged` | Только чтение снимков списков треков |
-| `lyrics:read` | `lyricsTrackId`, `lyricsSynced`, `lyricsLines`, сигнал `lyricsChanged` | Только чтение загруженного текста |
-| `lyrics:transform` | `setLyricSubtitles(trackId, lines)`, `clearLyricSubtitles()` | Добавляет подстрочник (перевод/транслит) под строками текста |
-| `spectrum:read` | `spectrumLevels()` (48 FFT-полос), `spectrumEnergies()` (5 полос), сигнал `spectrumUpdated` | 60 Hz, без доступа к сырому PCM |
-| `ui:slots` | Встраивание в UI-слоты, навигация (`openHome`, `openPlaylist` и др.), `showToast()`, `openImmersive()`, `openSettings()`, `openCreatePlaylist()`, `openExternalUrl()`, `registerTrackMenuAction()`, `registerShortcut()` | `openExternalUrl` разрешает только `http://` и `https://` |
-| `ui:override` | Подмена любых `.qml` модуля `ymusic.ui` через `ModUrlInterceptor` | Требует перезапуска клиента; автокарантин при падении старта |
-| `storage` | `storageGet`, `storageSet`, `storageRemove`, `storageAll` | Изолированный файл `mod-data/<mod-id>.json` |
-| `clipboard` | `copyText(text)` | Только запись в буфер |
-| `network:<host>` | `httpGet(url, requestId)` и `httpRequest(method, url, headers, body, requestId)` + сигнал `httpFinished(...)` | Только HTTPS (или `http://localhost` / `127.0.0.1`), методы `GET/POST/PUT/PATCH/DELETE`, заголовки `Host`/`Cookie`/`Content-Length` фильтруются, лимит 4 МБ, таймаут 15 сек |
+| `playback:read` | Свойства текущего трека, состояния плеера, прогресса, громкости, темпа | Без доступа к OAuth-токену |
+| `playback:control` | `toggle()`, `next()`, `prev()`, `seek()`, `setVolume()`, `toggleLike()`, `playNext()`, `addToQueue()` | Нет доступа к аккаунту и выходу |
+| `library:read` | `queueTracks()`, `currentTracks()`, `historyTracks()`, сигнал `libraryChanged` | Только чтение |
+| `lyrics:read` | `lyricsTrackId`, `lyricsSynced`, `lyricsLines`, сигнал `lyricsChanged` | Только чтение |
+| `lyrics:transform` | `setLyricSubtitles(trackId, lines)`, `clearLyricSubtitles()` | Добавляет подстрочник под строками текста |
+| `spectrum:read` | `spectrumLevels()` (48 полос), `spectrumEnergies()` (5 полос), сигнал `spectrumUpdated` | 60 Hz, без сырого PCM |
+| `ui:slots` | UI-слоты, навигация (`openHome`, `openPlaylist` и т.д.), `showToast()`, `openImmersive()`, `openSettings()`, `openCreatePlaylist()`, `openExternalUrl()`, `registerTrackMenuAction()`, `registerShortcut()` | `openExternalUrl` принимает только `http://` и `https://` |
+| `ui:override` | Подмена QML-файлов `ymusic.ui` через `ModUrlInterceptor` | Применяется после перезапуска |
+| `storage` | `storageGet`, `storageSet`, `storageRemove`, `storageAll` | Отдельный файл `mod-data/<mod-id>.json` |
+| `clipboard` | `copyText(text)` | Только запись |
+| `network:<host>` | `httpGet(url, requestId)`, `httpRequest(method, url, headers, body, requestId)`, сигнал `httpFinished(...)` | Только HTTPS (или `http://localhost` / `127.0.0.1`), методы `GET/POST/PUT/PATCH/DELETE`, заголовки `Host`/`Cookie`/`Content-Length` вырезаются, лимит ответа 4 МБ, таймаут 15 с |
 
 ---
 
-## 5. Полный справочник UI-слотов (`slots`)
+## UI-слоты (`ui`)
 
-Каждый загружаемый QML-файл слота автоматически получает:
-- `property var modApi: null` — ваш изолированный `ModApi`
-- `property var slotContext: ({})` — контекст конкретного слота
+В каждый компонент слота передаются два свойства:
+- `property var modApi: null`
+- `property var slotContext: ({})`
 
-| Слот | Файл-хост | Режим раскладки | Поля `slotContext` | Типичное применение |
+| Слот | Хост | Раскладка | `slotContext` | Назначение |
 |---|---|---|---|---|
-| `window.backdrop` | `Main.qml` (`z: -1`) | `fill` | `{}` | Кастомные обои окна, градиенты, шейдерный фон |
-| `topbar.center` | `TopBar.qml` | `fill` | `{ topBarWidth, compact }` | Верхняя пилюля навигации, мини-статус |
-| `topbar.right` | `TopBar.qml` | `row` (`height: buttonSize`) | `{ buttonSize, compact }` | Кнопки справа в верхней панели рядом с меню |
-| `sidebar.page` | `Main.qml` + `Sidebar.qml` | `fill` | `{}` | Полноценная страница мода (статистика, утилиты, экспорт) |
-| `home.top` | `HomeView.qml` | `column` | `{ narrow }` | Баннер/виджет над Spotlight на Главной |
-| `home.sections` | `HomeView.qml` | `column` | `{ narrow }` | Свои полки и подборки на Главной |
-| `search.top` | `SearchView.qml` | `column` | `{ query, filter, loading }` | Доп. фильтры, результаты из внешних источников, быстрые действия в поиске |
-| `collection.actions` | `CollectionHero.qml` | `row` (`height: 40`) | `{ title, isArtist, kind, playlistKey }` | Кнопки для плейлиста/альбома/артиста (экспорт M3U и т.д.) |
-| `card.overlay` | `CardItem.qml` (`z: 2`) | `fill` | `{ card, index, title, subtitle, isArtist, isPlaylist, hovered }` | Бейджи и мини-кнопки поверх карточек в сетках *(ленивый: 0 накладных расходов, если не используется)* |
-| `trackRow.badges` | `TrackRow.qml` | `row` (`height: 28`) | `{ track, index, isCurrent, hovered }` | Бейджи и мини-кнопки в каждой строке трека *(ленивый: 0 накладных расходов, если не используется)* |
-| `playerBar.left` | `FloatingPlayerBar.qml` | `row` (`height: buttonSize`) | `{ scheme, buttonSize, compact, tiny }` | Кнопки в левой части нижнего бара перед транспортом |
-| `playerBar.controls` | `FloatingPlayerBar.qml` | `row` (`height: buttonSize`) | `{ scheme, buttonSize, compact }` | Кнопки в правом блоке нижнего бара |
-| `playerBar.overlay` | `FloatingPlayerBar.qml` | `fill` (`z: 0`) | `{ scheme, compact, twoRow }` | Фоновый эффект / полоса / свечение поверх нижнего бара |
-| `lyrics.header` | `LyricsPanel.qml` | `row` (`height: 28`) | `{ scheme, trackId, synced, wordSynced }` | Кнопки в шапке текста (перевод, копирование, смещение) |
-| `queue.header` | `QueuePanel.qml` | `row` (`height: 32`) | `{ scheme, count }` | Действия над очередью (убрать дубликаты, сохранить плейлист) |
-| `wave.overlay` | `WaveHero.qml` | `fill` (`z: 15`) | `{ inWave, applying }` | Оверлей и доп. контролы на экране «Моя волна» |
-| `immersive.backdrop` | `ImmersivePlayer.qml` | `fill` | `{ scheme }` | Кастомный фон / 3D / шейдер в полном экране |
-| `immersive.overlay` | `ImmersivePlayer.qml` | `fill` (`z: 50`) | `{ scheme, controlsOpacity }` | Бейджи, мини-визуализаторы, часы, инфо-оверлеи |
-| `immersive.panel` | `ImmersivePlayer.qml` | `fill` | `{ scheme }` | Собственная боковая панель (кнопка рядом со свичером панелей) |
-| `immersive.lyrics.header` | `ImmersiveLyrics.qml` | `row` (`height: 30`) | `{ scheme, trackId, synced }` | Кнопки поверх текста в полноэкранном плеере |
-| `immersive.queue.header` | `ImmersiveQueue.qml` | `row` (`height: 32`) | `{ scheme, count }` | Кнопки поверх очереди в полноэкранном плеере |
-| `settings.tab` | `SettingsDialog.qml` + `SettingsPages.qml` | `column` | `{}` | Своя полноценная «глава» в левом меню Настроек |
-| `settings.section.appearance` | `SettingsPages.qml` | `column` | `{}` | Новые секции/пункты в главе «Оформление» |
-| `settings.section.player` | `SettingsPages.qml` | `column` | `{}` | Новые секции/пункты в главе «Плеер и фон» |
-| `settings.section.audio` | `SettingsPages.qml` | `column` | `{}` | Новые секции/пункты в главе «Звук» |
-| `settings.section.animations` | `SettingsPages.qml` | `column` | `{}` | Новые секции/пункты в главе «Анимации» |
-| `settings.section.integrations` | `SettingsPages.qml` | `column` | `{}` | Новые секции/пункты в главе «Интеграции» |
-| `settings.section.system` | `SettingsPages.qml` | `column` | `{}` | Новые секции/пункты в главе «Система» |
+| `window.backdrop` | `Main.qml` (`z: -1`) | `fill` | `{}` | Фон окна, шейдеры |
+| `topbar.center` | `TopBar.qml` | `fill` | `{ topBarWidth, compact }` | Центральная часть верхней панели |
+| `topbar.right` | `TopBar.qml` | `row` (`height: buttonSize`) | `{ buttonSize, compact }` | Кнопки справа в верхней панели |
+| `sidebar.page` | `Main.qml` + `Sidebar.qml` | `fill` | `{}` | Отдельная страница в навигации |
+| `home.top` | `HomeView.qml` | `column` | `{ narrow }` | Блок вверху Главной |
+| `home.sections` | `HomeView.qml` | `column` | `{ narrow }` | Секции на Главной |
+| `search.top` | `SearchView.qml` | `column` | `{ query, filter, loading }` | Блок вверху экрана поиска |
+| `collection.actions` | `CollectionHero.qml` | `row` (`height: 40`) | `{ title, isArtist, kind, playlistKey }` | Кнопки в шапке плейлиста / альбома / артиста |
+| `card.overlay` | `CardItem.qml` (`z: 2`) | `fill` | `{ card, index, title, subtitle, isArtist, isPlaylist, hovered }` | Оверлей на карточках (ленивый) |
+| `trackRow.badges` | `TrackRow.qml` | `row` (`height: 28`) | `{ track, index, isCurrent, hovered }` | Бейджи и кнопки в строке трека (ленивый) |
+| `playerBar.left` | `FloatingPlayerBar.qml` | `row` (`height: buttonSize`) | `{ scheme, buttonSize, compact, tiny }` | Кнопки слева в плеере |
+| `playerBar.controls` | `FloatingPlayerBar.qml` | `row` (`height: buttonSize`) | `{ scheme, buttonSize, compact }` | Кнопки справа в плеере |
+| `playerBar.overlay` | `FloatingPlayerBar.qml` | `fill` (`z: 0`) | `{ scheme, compact, twoRow }` | Фоновый слой бара плеера |
+| `lyrics.header` | `LyricsPanel.qml` | `row` (`height: 28`) | `{ scheme, trackId, synced, wordSynced }` | Кнопки в шапке панели текста |
+| `queue.header` | `QueuePanel.qml` | `row` (`height: 32`) | `{ scheme, count }` | Кнопки в шапке панели очереди |
+| `wave.overlay` | `WaveHero.qml` | `fill` (`z: 15`) | `{ inWave, applying }` | Оверлей экрана «Моя волна» |
+| `immersive.backdrop` | `ImmersivePlayer.qml` | `fill` | `{ scheme }` | Фон полноэкранного плеера |
+| `immersive.overlay` | `ImmersivePlayer.qml` | `fill` (`z: 50`) | `{ scheme, controlsOpacity }` | Оверлей в полноэкранном плеере |
+| `immersive.panel` | `ImmersivePlayer.qml` | `fill` | `{ scheme }` | Дополнительная боковая панель |
+| `immersive.lyrics.header` | `ImmersiveLyrics.qml` | `row` (`height: 30`) | `{ scheme, trackId, synced }` | Шапка текста в полноэкранном плеере |
+| `immersive.queue.header` | `ImmersiveQueue.qml` | `row` (`height: 32`) | `{ scheme, count }` | Шапка очереди в полноэкранном плеере |
+| `settings.tab` | `SettingsDialog.qml` + `SettingsPages.qml` | `column` | `{}` | Отдельная вкладка в Настройках |
+| `settings.section.appearance` | `SettingsPages.qml` | `column` | `{}` | Секция в «Оформление» |
+| `settings.section.player` | `SettingsPages.qml` | `column` | `{}` | Секция в «Плеер и фон» |
+| `settings.section.audio` | `SettingsPages.qml` | `column` | `{}` | Секция в «Звук» |
+| `settings.section.animations` | `SettingsPages.qml` | `column` | `{}` | Секция в «Анимации» |
+| `settings.section.integrations` | `SettingsPages.qml` | `column` | `{}` | Секция в «Интеграции» |
+| `settings.section.system` | `SettingsPages.qml` | `column` | `{}` | Секция в «Система» |
 
-> **Важно для `column` и `row` слотов:** корневой элемент вашего QML должен задавать `implicitHeight` (для `column`, например `ContentSection {}` или `Column {}`) или `implicitWidth` / `width` (для `row`, например `IconButton {}` или `Row {}`).
+Для `column`-слотов корневой элемент должен задавать `implicitHeight`, для `row`-слотов — `implicitWidth` (или `width`).
 
 ---
 
-## 6. Справочник `modApi`
+## Справочник `modApi`
 
 ### Свойства (read-only)
-- Идентификация: `modId`, `modName`, `permissions`, `hasPermission(perm)`
-- Трек (`playback:read`): `hasTrack`, `trackId`, `trackTitle`, `trackArtists`, `trackAlbum`, `trackCover`, `trackLiked`, `trackIsAi`
-- Плеер (`playback:read`): `playing`, `buffering`, `volume` (`0..1`), `shuffle`, `repeatMode` (`0`=выкл, `1`=все, `2`=один), `tempo`, `positionSecs`, `durationSecs`, `progress` (`0..1`)
-- Навигация и профиль: `currentPage`, `canGoBack`, `loggedIn`, `userName`, `userAvatar`, `pinnedPlaylists`
-- Текст песни (`lyrics:read`): `lyricsTrackId`, `lyricsSynced`, `lyricsLines` (массив `{ text, time, words }`)
+
+- **Мод:** `modId`, `modName`, `permissions`, `hasPermission(perm)`
+- **Трек (`playback:read`):** `hasTrack`, `trackId`, `trackTitle`, `trackArtists`, `trackAlbum`, `trackCover`, `trackLiked`, `trackIsAi`
+- **Плеер (`playback:read`):** `playing`, `buffering`, `volume` (`0..1`), `shuffle`, `repeatMode` (`0` = выкл, `1` = все, `2` = один), `tempo`, `positionSecs`, `durationSecs`, `progress` (`0..1`)
+- **Навигация и профиль:** `currentPage`, `canGoBack`, `loggedIn`, `userName`, `userAvatar`, `pinnedPlaylists`
+- **Текст (`lyrics:read`):** `lyricsTrackId`, `lyricsSynced`, `lyricsLines` (массив `{ text, time, words }`)
 
 ### Сигналы
-- `trackChanged()` — сменился текущий трек или его метаданные/лайк
-- `playbackChanged()` — play/pause, buffering, volume, shuffle, repeat, tempo
-- `positionChanged()` — обновление позиции трека
-- `navigationChanged()` — смена страницы, статуса входа или закреплённых плейлистов
-- `libraryChanged()` — обновление очереди, текущего списка треков или истории (`library:read`)
-- `lyricsChanged()` — загружен или очищен текст текущей песни (`lyrics:read`)
-- `spectrumUpdated()` — 60 Hz обновление FFT-буфера (только при `spectrum:read`)
-- `trackMenuActionTriggered(actionId, trackId, trackTitle)` — клик по вашему пункту в `TrackMenu`
-- `shortcutTriggered(actionId)` — сработала горячая клавиша мода (из `manifest.json` или `registerShortcut`)
-- `httpFinished(requestId, statusCode, body, error)` — завершение `httpGet(...)` / `httpRequest(...)`
+
+- `trackChanged()`
+- `playbackChanged()`
+- `positionChanged()`
+- `navigationChanged()`
+- `libraryChanged()` *(требует `library:read`)*
+- `lyricsChanged()` *(требует `lyrics:read`)*
+- `spectrumUpdated()` *(60 Hz, требует `spectrum:read`)*
+- `trackMenuActionTriggered(actionId, trackId, trackTitle)`
+- `shortcutTriggered(actionId)`
+- `httpFinished(requestId, statusCode, body, error)`
 
 ### Методы
+
 - **Управление (`playback:control`):** `toggle()`, `next()`, `prev()`, `seek(0..1)`, `setVolume(0..1)`, `toggleLike()`, `playNext(trackId)`, `addToQueue(trackId)`
 - **Навигация (`ui:slots`):** `openHome()`, `openWave()`, `openLikes()`, `openDownloads()`, `openPlaylists()`, `openAlbums()`, `openArtists()`, `openSearch(query)`, `openPlaylist(uid, kind, title)`, `goBack()`, `openCreatePlaylist()`
-- **Библиотека (`library:read`):** `queueTracks()`, `currentTracks()`, `historyTracks()` → массивы `{ id, title, artists, album, durationSecs, coverUrl, liked, available, isAi }`
-- **Субтитры текста (`lyrics:transform`):** `setLyricSubtitles(trackId, subtitles)` (массив строк по индексу), `clearLyricSubtitles()`
-- **Спектр (`spectrum:read`):** `spectrumLevels()` → `number[48]`, `spectrumEnergies()` → `number[5]` (от саб-баса к верхам)
+- **Списки треков (`library:read`):** `queueTracks()`, `currentTracks()`, `historyTracks()` — возвращают массивы `{ id, title, artists, album, durationSecs, coverUrl, liked, available, isAi }`
+- **Субтитры (`lyrics:transform`):** `setLyricSubtitles(trackId, subtitles)`, `clearLyricSubtitles()`
+- **Спектр (`spectrum:read`):** `spectrumLevels()` (`number[48]`), `spectrumEnergies()` (`number[5]`, от низов к верхам)
 - **Хранилище (`storage`):** `storageGet(key, fallback)`, `storageSet(key, value)`, `storageRemove(key)`, `storageAll()`
-- **Интерфейс (`ui:slots`):**
+- **UI (`ui:slots`):**
   - `showToast(message)`
-  - `openImmersive()` / `closeImmersive()`
+  - `openImmersive()`, `closeImmersive()`
   - `openSettings()`
   - `openExternalUrl(url)`
-  - `registerTrackMenuAction(actionId, label, symbol, destructive)` / `unregisterTrackMenuAction(actionId)`
-  - `registerShortcut(actionId, sequence, description)` / `unregisterShortcut(actionId)`
+  - `registerTrackMenuAction(actionId, label, symbol, destructive)`, `unregisterTrackMenuAction(actionId)`
+  - `registerShortcut(actionId, sequence, description)`, `unregisterShortcut(actionId)`
 - **Буфер (`clipboard`):** `copyText(text)`
 - **Сеть (`network:<host>`):**
   - `httpGet(url, requestId)`
-  - `httpRequest(method, url, headers, body, requestId)` — поддержка `GET`, `POST`, `PUT`, `PATCH`, `DELETE` и JSON/текстовых заголовков и тела
+  - `httpRequest(method, url, headers, body, requestId)`
 - **Логи:** `log(message)`, `warn(message)`
 
 ---
 
-## 7. Встроенные компоненты `import ymusic.ui`
+## Компоненты `import ymusic.ui`
 
-Вам не нужно рисовать UI с нуля — все родные компоненты Material 3 Expressive доступны через `import ymusic.ui`:
+Из модуля `ymusic.ui` доступны токены и контролы клиента:
 
-- **Дизайн-токены (`Appearance`):**
+- **Токены (`Appearance`):**
   - `Appearance.colors` (`primary`, `onPrimary`, `primaryContainer`, `onPrimaryContainer`, `surface`, `surfaceContainer`, `surfaceContainerHigh`, `onSurface`, `onSurfaceVariant`, `outlineVariant`, `error`, `layer0`, `layer1`, `layer2Hover`, `dark`)
   - `Appearance.rounding` (`verySmall`, `small`, `normal`, `large`, `veryLarge`, `full`)
   - `Appearance.fontSize` (`smallest`, `smaller`, `small`, `normal`, `large`, `title`, `headline`)
   - `Appearance.fontFamily`, `Appearance.monoFontFamily`
   - `Appearance.curves.expressiveFastSpatial`, `Appearance.duration(ms)`, `Appearance.motion(ms)`, `Appearance.performanceMode`
 - **Контролы:** `StyledText`, `TitleText`, `TextButton` (`Filled` / `Tonal` / `Outlined` / `Text`), `IconButton`, `RippleButton`, `StyledSwitch`, `StyledSlider`, `StyledComboBox`, `OutlinedTextField`, `StyledMenu`, `StyledMenuItem`, `StyledMenuSeparator`, `StyledDialog`, `ArtworkImage`, `MaterialSymbol`, `ShapeIcon`, `SoftShadow`, `SpectrumView`.
-- **Компоненты для Настроек (`import ymusic.ui`):** `ContentSection`, `ConfigSwitch`, `ConfigSlider`, `ConfigSelection`, `NoteText`.
+- **Настройки:** `ContentSection`, `ConfigSwitch`, `ConfigSlider`, `ConfigSelection`, `NoteText`.
 
 ---
 
-## 8. Фундаментальная подмена вёрстки (`ui:override`)
+## Подмена файлов интерфейса (`overrides`)
 
-Любой файл из `ymusic.ui` можно подменить в `manifest.json`:
+Любой QML-файл модуля `ymusic.ui` можно заменить своим:
 
 ```json
 "overrides": {
@@ -244,21 +252,20 @@
 }
 ```
 
-Ключевые файлы и их минимальные контракты (что ожидает `Main.qml`):
-- **`qml/sidebar/Sidebar.qml`** — свойства `compact`, `expandedWidth`, `resizing`, `toggleVisible`, `isCompact`, сигналы `settingsRequested()`, `toggleCompactRequested()`. Чтобы полностью убрать сайдбар, достаточно `implicitWidth: 0; width: 0; visible: false`.
-- **`qml/shell/TopBar.qml`** — `required property Window window`, `property Item backdropSource`, `property bool windowControlsOnRight`, `property bool inspectorShown`, `readonly property bool searchEditing`, методы `focusSearch()`, `dismissSearch()`, `isSearchInteractiveAt(sourceItem, x, y)`.
+Интерфейсы ключевых компонентов, на которые опирается `Main.qml`:
+
+- **`qml/sidebar/Sidebar.qml`** — свойства `compact`, `expandedWidth`, `resizing`, `toggleVisible`, `isCompact`; сигналы `settingsRequested()`, `toggleCompactRequested()`. Чтобы полностью скрыть сайдбар, достаточно вернуть `Item { implicitWidth: 0; width: 0; visible: false }` с этими свойствами и сигналами.
+- **`qml/shell/TopBar.qml`** — `required property Window window`, `property Item backdropSource`, `property bool windowControlsOnRight`, `property bool inspectorShown`, `readonly property bool searchEditing`; методы `focusSearch()`, `dismissSearch()`, `isSearchInteractiveAt(sourceItem, x, y)`.
 - **`qml/player/FloatingPlayerBar.qml`** — сигнал `immersiveRequested()`.
 - **`qml/library/TrackRow.qml`** — `required property int index`, `required property var model`, `property bool queueView`.
-- **`qml/views/HomeView.qml`** / **`qml/immersive/ImmersivePlayer.qml`** / **`qml/Main.qml`** — полная свобода перекомпоновки.
 
 ---
 
-## 9. Практические рецепты (Cookbook)
+## Примеры
 
-### Рецепт 1: Новая «глава» настроек + секция во встроенной главе
+### Вкладка настроек (`settings.tab`)
 
 ```qml
-// ui/MySettingsTab.qml  (slot: "settings.tab")
 import QtQuick
 import ymusic.ui
 
@@ -273,20 +280,19 @@ Column {
         symbol: "auto_awesome"
 
         ConfigSwitch {
-            text: "Включить авто-действие"
-            checked: root.modApi ? Boolean(root.modApi.storageGet("auto", true)) : true
+            text: "Включить функцию"
+            checked: root.modApi ? Boolean(root.modApi.storageGet("enabled", true)) : true
             onToggledTo: (v) => {
-                if (root.modApi) root.modApi.storageSet("auto", v)
+                if (root.modApi) root.modApi.storageSet("enabled", v)
             }
         }
     }
 }
 ```
 
-### Рецепт 2: Кнопка в нижнем плавающем баре (`playerBar.controls`)
+### Кнопка в панели плеера (`playerBar.controls`)
 
 ```qml
-// ui/BarButton.qml
 import QtQuick
 import ymusic.ui
 
@@ -297,12 +303,12 @@ IconButton {
     size: slotContext.buttonSize || 34
     iconSize: 19
     symbol: "auto_awesome"
-    tooltip: "Моё действие"
-    onClicked: if (modApi) modApi.showToast("Нажато из FloatingPlayerBar!")
+    tooltip: "Действие"
+    onClicked: if (modApi) modApi.showToast("Нажато")
 }
 ```
 
-### Рецепт 3: 60 fps визуализатор в `immersive.overlay` (без лишней нагрузки)
+### Реакция на спектр (`immersive.overlay`)
 
 ```qml
 import QtQuick
@@ -316,7 +322,6 @@ Item {
 
     Connections {
         target: root.modApi
-        // Подписка активна только когда виджет реально виден
         enabled: root.visible && root.modApi !== null
         function onSpectrumUpdated() {
             const e = root.modApi.spectrumEnergies()
@@ -337,26 +342,25 @@ Item {
 }
 ```
 
-### Рецепт 4: Предкомпилированные шейдеры `.qsb` для Qt 6 RHI
+### Шейдеры `.qsb`
 
-Qt 6 не компилирует сырой `.frag` с диска в рантайме, но отлично грузит `.qsb` рядом с модом:
+Qt 6 загружает предкомпилированные `.qsb`-файлы (сырой GLSL в рантайме не компилируется):
 
 ```bash
-# Собрать .qsb утилитой из Qt 6 SDK (работает на Vulkan, OpenGL и D3D11):
-qsb --glsl "100es,120,150" --hlsl 50 --msl 12 -o shaders/my_effect.frag.qsb shaders/my_effect.frag
+qsb --glsl "100es,120,150" --hlsl 50 --msl 12 -o shaders/effect.frag.qsb shaders/effect.frag
 ```
 
 ```qml
 ShaderEffect {
     anchors.fill: parent
-    fragmentShader: Qt.resolvedUrl("../shaders/my_effect.frag.qsb")
+    fragmentShader: Qt.resolvedUrl("../shaders/effect.frag.qsb")
 }
 ```
 
-### Рецепт 5: Асинхронный HTTP-запрос (`GET` / `POST`) и скробблинг
+### HTTP-запрос (`POST`)
 
 ```qml
-// В manifest.json: "permissions": ["network:api.listenbrainz.org", "playback:read", "ui:slots"]
+// permissions: ["network:api.listenbrainz.org", "playback:read", "ui:slots"]
 function submitListen(artist, track) {
     const payload = JSON.stringify({
         listen_type: "playing_now",
@@ -381,10 +385,9 @@ Connections {
 }
 ```
 
-### Рецепт 6: Перевод / транслитерация текста песни (`lyrics:read` + `lyrics:transform`)
+### Подстрочник для текста песни (`lyrics:read` + `lyrics:transform`)
 
 ```qml
-// В manifest.json: "permissions": ["lyrics:read", "lyrics:transform", "ui:slots"]
 Connections {
     target: root.modApi
     function onLyricsChanged() {
@@ -395,13 +398,13 @@ Connections {
     }
 }
 ```
-Подстрочник автоматически отобразится и в боковой панели `LyricsPanel`, и в полноэкранном `ImmersiveLyrics`, а при выключении или перезагрузке мода очистится сам.
+
+Подстрочник отображается в `LyricsPanel` и `ImmersiveLyrics` и автоматически очищается при выключении или перезагрузке мода.
 
 ---
 
-## 10. Советы по производительности и подводные камни
+## Частые ошибки и производительность
 
-1. **`contentItem` в `RippleButton` / `AbstractButton`:** не вешайте `anchors.centerIn: parent` напрямую на сам `contentItem` — `AbstractButton` управляет его геометрией сам. Оборачивайте внутренний `Row`/`Column` в `contentItem: Item { Row { anchors.centerIn: parent } }`.
-2. **Берегите UI-поток на 60 Hz:** в `onSpectrumUpdated()` избегайте тяжёлых вычислений, рекурсий и `console.log`. Всегда проверяйте `enabled: root.visible` на `Connections`.
-3. **Слот `trackRow.badges`:** в длинных плейлистах одновременно рендерятся десятки строк — делайте компонент для `trackRow.badges` максимально лёгким (1–2 `Rectangle`/`StyledText`/`IconButton`, без `ShaderEffect` и тяжёлых `Canvas`).
-4. **Отладка:** включите **Режим разработчика**, смотрите ошибки в **Настройки → Моды → Консоль модов** и используйте `Ctrl+Shift+R` после каждого сохранения.
+- **`contentItem` в `RippleButton` / `AbstractButton`:** не задавайте `anchors.centerIn: parent` напрямую на `contentItem` — `AbstractButton` сам управляет его геометрией. Используйте обёртку `contentItem: Item { Row { anchors.centerIn: parent } }`.
+- **Обработка `onSpectrumUpdated()`:** вызывается на 60 Hz в UI-потоке. Отключайте `Connections` через `enabled: root.visible` и не делайте там тяжёлых вычислений или логирования.
+- **`trackRow.badges` и `card.overlay`:** инстанцируются для каждого видимого элемента списка или сетки. Держите компоненты минимальными (без `ShaderEffect` и тяжёлого `Canvas`). Если моды не используют эти слоты, они не создаются.
