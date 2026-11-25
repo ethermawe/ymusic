@@ -147,6 +147,7 @@ T.Popup {
                                     iconSize: 20
                                     shape: root.shapes[destination.index]
                                     symbol: root.symbols[destination.index]
+                                    hovered: destination.hovered
                                 }
                             }
 
@@ -210,6 +211,7 @@ T.Popup {
                                     iconSize: 20
                                     shape: modDest.modelData.shape || modDest.modelData.settingsTabShape || "flower"
                                     symbol: modDest.modelData.symbol || modDest.modelData.settingsTabSymbol || "widgets"
+                                    hovered: modDest.hovered
                                 }
                             }
 

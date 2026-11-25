@@ -80,7 +80,11 @@ Item {
 
         Behavior on spinAngle {
             enabled: !Appearance.performanceMode
-            Bounce {}
+            NumberAnimation {
+                duration: Appearance.motion(260)
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Appearance.curves.expressiveFastSpatial
+            }
         }
         Behavior on color {
             ElementMoveFastColor {}
@@ -102,7 +106,11 @@ Item {
 
         Behavior on spinAngle {
             enabled: !Appearance.performanceMode
-            Bounce {}
+            NumberAnimation {
+                duration: Appearance.motion(260)
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Appearance.curves.expressiveFastSpatial
+            }
         }
         Behavior on color {
             ElementMoveFastColor {}
@@ -126,7 +134,11 @@ Item {
 
         Behavior on rotation {
             enabled: !Appearance.performanceMode
-            Bounce {}
+            NumberAnimation {
+                duration: Appearance.motion(260)
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Appearance.curves.expressiveFastSpatial
+            }
         }
     }
 }
