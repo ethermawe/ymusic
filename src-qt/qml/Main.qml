@@ -22,6 +22,7 @@ import QtQml
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtQuick.Templates as T
 import ymusic.ui
 
 ApplicationWindow {
@@ -104,8 +105,9 @@ ApplicationWindow {
             window.raise();
             window.requestActivate();
         }
-        if (settingsLoader.item) {
-            (settingsLoader.item as SettingsDialog).open();
+        const dialog = settingsLoader.item as T.Popup;
+        if (dialog) {
+            dialog.open();
         } else {
             settingsLoader.active = true;
         }
@@ -1183,15 +1185,15 @@ ApplicationWindow {
         id: settingsLoader
         active: false
         asynchronous: true
-        onLoaded: (item as SettingsDialog).open()
+        onLoaded: {
+            const dialog = item as T.Popup;
+            if (dialog) dialog.open();
+        }
         sourceComponent: SettingsDialog {
             onClosed: Qt.callLater(() => {
-                const dialog = settingsLoader.item as SettingsDialog;
-                if (dialog && !dialog.visible) {
-                    settingsLoader.active = false;
-                    if (ModManager.pendingRestartPrompt) {
-                        restartModsDialog.open();
-                    }
+                const dialog = settingsLoader.item as T.Popup;
+                if (dialog && !dialog.visible && ModManager.pendingRestartPrompt) {
+                    restartModsDialog.open();
                 }
             })
         }

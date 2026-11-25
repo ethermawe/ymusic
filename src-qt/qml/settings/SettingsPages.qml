@@ -29,7 +29,7 @@ Item {
 
     property int page: 0
     property string activeModTabId: ""
-    property string cacheSizeLabel: appSettings.cacheSizeText()
+    property string cacheSizeLabel: "—"
     property int themeListRev: 0
     property var fontOptions: ["По умолчанию (Google Sans Flex / система)"]
 
@@ -56,7 +56,9 @@ Item {
     }
 
     Component.onCompleted: {
-        fontOptions = ["По умолчанию (Google Sans Flex / система)"].concat(Theme.availableFonts());
+        Qt.callLater(() => {
+            root.fontOptions = ["По умолчанию (Google Sans Flex / система)"].concat(Theme.availableFonts());
+        });
     }
 
     Connections {
@@ -78,11 +80,8 @@ Item {
         return best;
     }
 
-    onVisibleChanged: {
-        if (visible) cacheSizeLabel = appSettings.cacheSizeText();
-    }
     onPageChanged: {
-        if (page === 5) cacheSizeLabel = appSettings.cacheSizeText();
+        if (page === 6) Qt.callLater(() => root.cacheSizeLabel = appSettings.cacheSizeText());
     }
 
     component Page: Column {
