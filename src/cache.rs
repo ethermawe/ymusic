@@ -326,10 +326,17 @@ pub fn save_track(track_id: &str, bytes: &[u8]) {
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     ));
-    if fs::write(&tmp, bytes).is_ok() {
-        let _ = fs::rename(&tmp, &path);
-        trim_cache(dir);
+    if let Err(err) = fs::write(&tmp, bytes) {
+        let _ = fs::remove_file(&tmp);
+        eprintln!("[ymusic::cache] не удалось записать кэш трека {track_id}: {err}");
+        return;
     }
+    if let Err(err) = fs::rename(&tmp, &path) {
+        let _ = fs::remove_file(&tmp);
+        eprintln!("[ymusic::cache] не удалось сохранить кэш трека {track_id}: {err}");
+        return;
+    }
+    trim_cache(dir);
 }
 
 /// Stream to a sibling file using bounded buffers; publish only a complete file.
@@ -436,8 +443,42 @@ mod download_tests {
         result.unwrap();
         assert_eq!(fs::read(dir.join("track.mp3")).unwrap(), bytes);
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
-        fs::remove_file(dir.join("track.mp3")).unwrap();
-        fs::remove_dir(dir).unwrap();
+        let _ = fs::remove_file(dir.join("track.mp3"));
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn corrupted_cache_files_return_cache_miss_without_panic() {
+        let id = format!("corrupt-test-{}", std::process::id());
+        // 1. Truncated/corrupted cached track (< 1024 bytes) -> cache miss and auto-cleanup
+        if let Some(p) = track_path(&id) {
+            if let Some(parent) = p.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&p, b"not-enough-bytes").unwrap();
+            assert!(open_cached_track(&id).is_none());
+            assert!(!p.exists());
+        }
+        // 2. Corrupted JSON view cache -> returns None without panic
+        let key = format!("corrupt-view-{}", std::process::id());
+        if let Some(p) = view_cache_path(&key) {
+            if let Some(parent) = p.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&p, b"{broken json!!!").unwrap();
+            assert!(load_view::<serde_json::Value>(&key).is_none());
+            let _ = fs::remove_file(&p);
+        }
+        // 3. Corrupted offline metadata.json -> skipped cleanly by offline_tracks()
+        if let Some(meta) = offline_metadata_path(&id) {
+            if let Some(parent) = meta.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&meta, b"{{invalid").unwrap();
+            let (tracks, _) = offline_tracks().unwrap();
+            assert!(!tracks.iter().any(|t| t.id == id));
+            let _ = remove_offline(&id);
+        }
     }
 
     #[test]

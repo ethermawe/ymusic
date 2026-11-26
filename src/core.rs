@@ -2327,8 +2327,14 @@ impl YMusicCore {
                     if this.login_gen.load(Ordering::SeqCst) != my_gen {
                         return;
                     }
-                    if let Err(e) = config::save_token(&token) {
-                        this.error(format!("Не удалось сохранить токен: {e}"));
+                    match config::save_token(&token) {
+                        Ok(config::TokenSaveOutcome::Keyring) => {}
+                        Ok(config::TokenSaveOutcome::FileFallback { .. }) => {
+                            this.error("Системное хранилище ключей недоступно — токен сохранён в защищённый файл (0600)");
+                        }
+                        Err(e) => {
+                            this.error(format!("Не удалось сохранить токен: {e}"));
+                        }
                     }
                     let avatar = account.avatar_url.clone().unwrap_or_default();
                     let has_avatar = !avatar.is_empty();
