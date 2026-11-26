@@ -168,6 +168,17 @@ Window {
     Shortcut { sequence: "F12"; onActivated: win.toggleWindow() }
     Shortcut { sequence: "Ctrl+Shift+I"; onActivated: win.toggleWindow() }
     Shortcut { sequence: "Ctrl+Shift+C"; onActivated: win.picking = !win.picking }
+    Shortcut {
+        sequence: "Escape"
+        onActivated: {
+            if (win.picking) {
+                win.picking = false;
+            } else if (win.inspectedItem) {
+                win.inspectedItem = null;
+                win.inspectedInfo = ({});
+            }
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -601,11 +612,12 @@ Window {
 
                             TextButton {
                                 variant: TextButton.Tonal
-                                symbol: win.inspectedInfo.visible ? "visibility_off" : "visibility"
-                                text: win.inspectedInfo.visible ? "Скрыть" : "Показать"
+                                enabled: win.inspectedItem !== null && win.inspectedItem !== win.sceneRoot
+                                symbol: Boolean(win.inspectedInfo.visible) ? "visibility_off" : "visibility"
+                                text: Boolean(win.inspectedInfo.visible) ? "Скрыть" : "Показать"
                                 onClicked: {
-                                    if (win.inspectedItem) {
-                                        win.inspectedItem.visible = !win.inspectedItem.visible;
+                                    if (win.inspectedItem && win.inspectedItem !== win.sceneRoot) {
+                                        win.inspectedItem.visible = !Boolean(win.inspectedInfo.visible);
                                         win.refreshAll();
                                     }
                                 }
@@ -618,6 +630,17 @@ Window {
                                 onClicked: {
                                     devTools.copyToClipboard(JSON.stringify(win.inspectedInfo, null, 2));
                                     win.showToastRequested("JSON скопирован");
+                                }
+                            }
+
+                            IconButton {
+                                symbol: "close"
+                                size: 32
+                                iconSize: 18
+                                tooltip: "Снять выделение"
+                                onClicked: {
+                                    win.inspectedItem = null;
+                                    win.inspectedInfo = ({});
                                 }
                             }
                         }
