@@ -180,6 +180,7 @@ Window {
             spacing: 10
 
             SegmentedControl {
+                horizontalPadding: 11
                 currentIndex: win.activeTab
                 onActivated: (index) => win.activeTab = index
                 segments: [
@@ -190,9 +191,11 @@ Window {
                 ]
             }
 
-            Item { Layout.fillWidth: true }
-
             StyledText {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
                 text: win.fps + " fps · " + win.frameMs.toFixed(1) + " мс · "
                     + devTools.memoryPssMb.toFixed(0) + " МБ · " + devTools.graphicsApi
                 font.family: Appearance.monoFontFamily
@@ -273,6 +276,7 @@ Window {
 
                     Rectangle {
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 80
                         Layout.preferredHeight: 36
                         radius: height / 2
                         color: Appearance.colors.surfaceContainer
@@ -348,7 +352,7 @@ Window {
                         delegate: Rectangle {
                             required property var modelData
                             required property int index
-                            width: logList.width
+                            width: Math.max(0, logList.width - 10)
                             height: Math.max(28, msgText.implicitHeight + 10)
                             radius: Appearance.rounding.verySmall
                             color: index % 2 === 0 ? "transparent" : Qt.alpha(Appearance.colors.onSurface, 0.03)
@@ -502,7 +506,7 @@ Window {
                 Flow {
                     Layout.fillWidth: true
                     spacing: 6
-                    visible: win.inspectedInfo && win.inspectedInfo.chain && win.inspectedInfo.chain.length > 0
+                    visible: Boolean(win.inspectedInfo && win.inspectedInfo.chain && win.inspectedInfo.chain.length > 0)
 
                     Repeater {
                         model: (win.inspectedInfo && win.inspectedInfo.chain) ? win.inspectedInfo.chain : []
