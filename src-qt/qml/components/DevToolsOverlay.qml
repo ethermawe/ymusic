@@ -48,28 +48,26 @@ Item {
             y: modelData.y || 0
             width: Math.max(24, modelData.width || 0)
             height: Math.max(18, modelData.height || 0)
-            color: Qt.rgba(0.95, 0.65, 0.2, 0.08)
+            color: Qt.alpha(Appearance.colors.tertiary, 0.12)
             border.width: 1
-            border.color: "#e09f3e"
-            radius: 4
+            border.color: Appearance.colors.tertiary
+            radius: Appearance.rounding.verySmall
 
             Rectangle {
                 anchors.left: parent.left
                 anchors.top: parent.top
-                width: slotTag.implicitWidth + 8
-                height: 16
-                radius: 3
-                color: "#1a1b1f"
-                border.width: 1
-                border.color: "#e09f3e"
+                width: slotTag.implicitWidth + 10
+                height: 18
+                radius: Appearance.rounding.verySmall
+                color: Appearance.colors.tertiaryContainer
 
-                Text {
+                StyledText {
                     id: slotTag
                     anchors.centerIn: parent
                     text: modelData.slotName || ""
                     font.family: Appearance.monoFontFamily
                     font.pixelSize: 10
-                    color: "#f4c97a"
+                    color: Appearance.colors.onTertiaryContainer
                 }
             }
         }
@@ -82,10 +80,10 @@ Item {
         y: root.highlightedInfo.sceneY || 0
         width: root.highlightedInfo.width || 0
         height: root.highlightedInfo.height || 0
-        color: Qt.alpha(Appearance.colors.primary, 0.1)
-        border.width: 1
+        color: Qt.alpha(Appearance.colors.primary, 0.12)
+        border.width: 1.5
         border.color: Appearance.colors.primary
-        radius: 2
+        radius: 4
     }
 
     // Active hover highlight during Element Picker mode
@@ -96,22 +94,22 @@ Item {
         y: root.hoveredInfo.sceneY || 0
         width: root.hoveredInfo.width || 0
         height: root.hoveredInfo.height || 0
-        color: Qt.alpha(Appearance.colors.primary, 0.14)
-        border.width: 1
+        color: Qt.alpha(Appearance.colors.primary, 0.16)
+        border.width: 1.5
         border.color: Appearance.colors.primary
-        radius: 2
+        radius: 4
 
         Rectangle {
             x: 0
-            y: hoverBox.y > 24 ? -22 : hoverBox.height + 4
-            width: hoverLabel.implicitWidth + 12
-            height: 20
-            radius: 4
-            color: "#141518"
+            y: hoverBox.y > 28 ? -26 : hoverBox.height + 6
+            width: hoverLabel.implicitWidth + 14
+            height: 22
+            radius: Appearance.rounding.verySmall
+            color: Appearance.colors.surfaceContainerHighest
             border.width: 1
-            border.color: Appearance.colors.primary
+            border.color: Appearance.colors.outlineVariant
 
-            Text {
+            StyledText {
                 id: hoverLabel
                 anchors.centerIn: parent
                 text: (root.hoveredInfo.type || "Item")
@@ -119,31 +117,30 @@ Item {
                     + " · " + Math.round(root.hoveredInfo.width || 0) + "×" + Math.round(root.hoveredInfo.height || 0)
                 font.family: Appearance.monoFontFamily
                 font.pixelSize: 11
-                color: "#eceef2"
+                color: Appearance.colors.onSurface
             }
         }
     }
 
-    // Picker banner at top center
+    // Picker hint pill at top center
     Rectangle {
         visible: root.picking
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: 12
-        width: pickHint.implicitWidth + 20
-        height: 28
-        radius: 6
-        color: "#141518"
+        width: pickHint.implicitWidth + 24
+        height: 32
+        radius: height / 2
+        color: Appearance.colors.surfaceContainerHighest
         border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.14)
+        border.color: Appearance.colors.outlineVariant
 
-        Text {
+        StyledText {
             id: pickHint
             anchors.centerIn: parent
-            text: "Инспектор: кликните по элементу · ПКМ или Esc — отмена"
-            font.family: Appearance.fontFamily
-            font.pixelSize: 12
-            color: "#eceef2"
+            text: "Инспектор: кликните по элементу · ПКМ или Esc для отмены"
+            font.pixelSize: Appearance.fontSize.smaller
+            color: Appearance.colors.onSurface
         }
     }
 
