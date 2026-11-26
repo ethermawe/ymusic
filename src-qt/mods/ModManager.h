@@ -29,6 +29,7 @@ class SpectrumSource;
 namespace ymusic::mods {
 
 class ModApi;
+class ModScriptHost;
 
 struct ModTrackMenuAction {
     QString modId;
@@ -147,6 +148,17 @@ public:
     void unregisterShortcut(const QString &modId, const QString &actionId);
     void clearShortcutsForMod(const QString &modId);
 
+    void registerDynamicPage(const QString &modId,
+                             const QString &pageId,
+                             const QString &title,
+                             const QString &icon,
+                             const QString &resolvedQmlPath);
+    QVariant modExports(const QString &modId) const;
+    QVariant callModExposed(const QString &modId, const QString &name, const QVariantList &args);
+    ModScriptHost *scriptHostForMod(const QString &modId) const;
+    QVariantMap runHookChain(const QString &point, const QVariant &payload);
+    QStringList activationOrder() const { return m_scriptOrder; }
+
     QString lyricsTrackId() const { return m_lyricsTrackId; }
     bool lyricsSynced() const { return m_lyricsSynced; }
     QVariantList lyricsLines() const { return m_lyricsLines; }
@@ -176,6 +188,9 @@ private:
     void rebuildWatcher();
     void destroyAllApis();
     void destroyAllSandboxes();
+    void destroyAllScripts();
+    void syncHookSubscriptions();
+    void handleHookRequest(quint64 id, const QString &point, const QVariant &payload);
     const ModManifest *manifestForMod(const QString &modId) const;
 
     AppSettings *m_settings = nullptr;
@@ -192,6 +207,10 @@ private:
     QHash<QString, QStringList> m_overrideConflicts;
     QHash<QString, QString> m_startupOverrides;
     QHash<QString, QPointer<ModApi>> m_apis;
+    QHash<QString, QPointer<ModScriptHost>> m_scriptHosts;
+    QStringList m_scriptOrder;
+    QStringList m_subscribedHookPoints;
+    QList<QPair<QString, ModSlotItem>> m_dynamicPages;
     QHash<QString, ModSandbox> m_sandboxes;
     QList<ModTrackMenuAction> m_trackMenuActions;
     QList<ModShortcutEntry> m_shortcuts;

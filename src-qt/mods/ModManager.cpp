@@ -4,7 +4,9 @@
 #include "app/Paths.h"
 #include "mods/ModApi.h"
 #include "mods/ModNetworkAccessManager.h"
+#include "mods/ModScriptHost.h"
 #ifndef YMUSIC_MOD_TEST_NO_BACKEND
+#include "YMusicBackend.h"
 #include "artwork/ArtworkCache.h"
 #endif
 
@@ -16,12 +18,16 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJSEngine>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLoggingCategory>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQmlError>
+#include <QSet>
 #include <QTemporaryDir>
+#include <QVersionNumber>
 
 #if __has_include(<QtCore/private/qzipreader_p.h>)
 #include <QtCore/private/qzipreader_p.h>
@@ -106,6 +112,36 @@ ModManager::ModManager(AppSettings *settings,
             scanAndSync(false);
         });
     }
+
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    if (m_backend) {
+        connect(m_backend, &YMusicBackend::hookRequestReceived, this, &ModManager::handleHookRequest);
+        connect(m_backend, &YMusicBackend::modWarningReceived, this, [this](const QString &msg) {
+            appendLog(QStringLiteral("hooks"), QStringLiteral("warn"), msg);
+        });
+        connect(m_backend, &YMusicBackend::nowPlayingChanged, this, [this]() {
+            QVariantMap data{
+                {QStringLiteral("id"), m_backend->nowId()},
+                {QStringLiteral("title"), m_backend->nowTitle()},
+                {QStringLiteral("artists"), m_backend->nowArtists()},
+                {QStringLiteral("album"), m_backend->nowAlbum()},
+            };
+            for (const QString &id : m_scriptOrder) {
+                if (auto *host = m_scriptHosts.value(id).data()) {
+                    host->dispatchEvent(QStringLiteral("trackChanged"), data);
+                }
+            }
+        });
+        connect(m_backend, &YMusicBackend::playbackStateChanged, this, [this]() {
+            QVariantMap data{{QStringLiteral("playing"), m_backend->playing()}};
+            for (const QString &id : m_scriptOrder) {
+                if (auto *host = m_scriptHosts.value(id).data()) {
+                    host->dispatchEvent(QStringLiteral("playbackChanged"), data);
+                }
+            }
+        });
+    }
+#endif
 
     if (m_safeMode) {
         appendLog(QStringLiteral("system"), QStringLiteral("warn"),
@@ -300,8 +336,135 @@ QObject *ModManager::createSandboxedObject(const QString &modId,
     return obj;
 }
 
+void ModManager::destroyAllScripts()
+{
+    const QStringList order = m_scriptOrder;
+    m_scriptOrder.clear();
+    for (int i = order.size() - 1; i >= 0; --i) {
+        if (ModScriptHost *host = m_scriptHosts.take(order.at(i)).data()) {
+            host->disconnect(this);
+            host->deactivate();
+            delete host;
+        }
+    }
+    for (const QPointer<ModScriptHost> &host : m_scriptHosts) {
+        if (host) {
+            host->disconnect(this);
+            host->deactivate();
+            delete host.data();
+        }
+    }
+    m_scriptHosts.clear();
+    m_dynamicPages.clear();
+    syncHookSubscriptions();
+}
+
+void ModManager::syncHookSubscriptions()
+{
+    QStringList nextPoints;
+    for (const QString &id : m_scriptOrder) {
+        if (const ModScriptHost *host = m_scriptHosts.value(id).data()) {
+            for (const QString &pt : host->subscribedHookPoints()) {
+                if (!nextPoints.contains(pt)) {
+                    nextPoints.append(pt);
+                }
+            }
+        }
+    }
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    if (m_backend) {
+        for (const QString &oldPt : m_subscribedHookPoints) {
+            if (!nextPoints.contains(oldPt)) {
+                m_backend->hookSubscribe(oldPt, false);
+            }
+        }
+        for (const QString &newPt : nextPoints) {
+            if (!m_subscribedHookPoints.contains(newPt)) {
+                m_backend->hookSubscribe(newPt, true);
+            }
+        }
+    }
+#endif
+    m_subscribedHookPoints = nextPoints;
+}
+
+QVariantMap ModManager::runHookChain(const QString &point, const QVariant &payload)
+{
+    QVariant current = payload;
+    for (const QString &id : m_scriptOrder) {
+        ModScriptHost *host = m_scriptHosts.value(id).data();
+        if (!host || !host->isLoaded()) continue;
+        const HookInvokeResult res = host->invokeHook(point, current);
+        if (res.cancelled) {
+            return {
+                {QStringLiteral("action"), QStringLiteral("cancel")},
+                {QStringLiteral("reason"), res.cancelReason},
+            };
+        }
+        if (res.handled) {
+            current = res.payload;
+        }
+    }
+    return {
+        {QStringLiteral("action"), QStringLiteral("continue")},
+        {QStringLiteral("payload"), current},
+    };
+}
+
+void ModManager::handleHookRequest(quint64 id, const QString &point, const QVariant &payload)
+{
+    const QVariantMap result = runHookChain(point, payload);
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    if (m_backend) {
+        const QByteArray json = QJsonDocument::fromVariant(result).toJson(QJsonDocument::Compact);
+        m_backend->hookResponse(id, QString::fromUtf8(json));
+    }
+#else
+    Q_UNUSED(id);
+    Q_UNUSED(result);
+#endif
+}
+
+void ModManager::registerDynamicPage(const QString &modId,
+                                     const QString &pageId,
+                                     const QString &title,
+                                     const QString &icon,
+                                     const QString &resolvedQmlPath)
+{
+    ModSlotItem item;
+    item.entryId = modId + u':' + pageId;
+    item.file = resolvedQmlPath;
+    item.title = title;
+    item.symbol = icon.isEmpty() ? QStringLiteral("extension") : icon;
+    m_dynamicPages.append(qMakePair(modId, item));
+    ++m_reloadRevision;
+    emit reloadRevisionChanged();
+}
+
+QVariant ModManager::modExports(const QString &modId) const
+{
+    if (const ModScriptHost *host = m_scriptHosts.value(modId).data()) {
+        return host->exportsVariant();
+    }
+    return {};
+}
+
+QVariant ModManager::callModExposed(const QString &modId, const QString &name, const QVariantList &args)
+{
+    if (ModScriptHost *host = m_scriptHosts.value(modId).data()) {
+        return host->callExposed(name, args);
+    }
+    return {};
+}
+
+ModScriptHost *ModManager::scriptHostForMod(const QString &modId) const
+{
+    return m_scriptHosts.value(modId).data();
+}
+
 void ModManager::destroyAllApis()
 {
+    destroyAllScripts();
     destroyAllSandboxes();
     const auto apis = m_apis.values();
     m_apis.clear();
@@ -340,6 +503,36 @@ void ModManager::scanAndSync(bool initialStartup)
                 appendLog(parsed.id, QStringLiteral("warn"), w);
             }
             m_manifests.append(std::move(parsed));
+        }
+    }
+
+    // Validate manifest dependencies (modId -> ">=x.y")
+    QHash<QString, QVersionNumber> validVersions;
+    for (const ModManifest &m : m_manifests) {
+        if (m.valid) {
+            validVersions.insert(m.id, QVersionNumber::fromString(m.version));
+        }
+    }
+    for (ModManifest &m : m_manifests) {
+        if (!m.valid || m.dependencies.isEmpty()) continue;
+        for (auto it = m.dependencies.constBegin(); it != m.dependencies.constEnd(); ++it) {
+            const QString &depId = it.key();
+            const QString &constraint = it.value();
+            if (!validVersions.contains(depId)) {
+                m.valid = false;
+                m.error = QStringLiteral("Отсутствует обязательная зависимость: %1 (%2)").arg(depId, constraint);
+                break;
+            }
+            if (constraint.startsWith(QLatin1StringView(">="))) {
+                const QVersionNumber req = QVersionNumber::fromString(constraint.mid(2).trimmed());
+                const QVersionNumber actual = validVersions.value(depId);
+                if (!req.isNull() && !actual.isNull() && actual < req) {
+                    m.valid = false;
+                    m.error = QStringLiteral("Зависимость '%1' версии %2 не удовлетворяет %3")
+                                  .arg(depId, actual.toString(), constraint);
+                    break;
+                }
+            }
         }
     }
 
@@ -406,12 +599,52 @@ void ModManager::rebuildApis()
     if (!modsEnabled()) return;
 
     const QStringList enabledIds = m_settings ? m_settings->enabledModIds() : QStringList();
+    QList<const ModManifest *> activeManifests;
+    QHash<QString, const ModManifest *> activeById;
     for (const ModManifest &m : m_manifests) {
         if (!m.valid || !enabledIds.contains(m.id)) continue;
         auto *api = new ModApi(m, this, m_backend, m_spectrum, this);
         QJSEngine::setObjectOwnership(api, QJSEngine::CppOwnership);
         m_apis.insert(m.id, api);
+        activeManifests.append(&m);
+        activeById.insert(m.id, &m);
     }
+
+    // Topological sort for JS script activation (dependencies activate before dependents)
+    QList<const ModManifest *> ordered;
+    QSet<QString> visited;
+    QSet<QString> visiting;
+    std::function<void(const ModManifest *)> visit = [&](const ModManifest *m) {
+        if (!m || visited.contains(m->id) || visiting.contains(m->id)) return;
+        visiting.insert(m->id);
+        for (auto it = m->dependencies.constBegin(); it != m->dependencies.constEnd(); ++it) {
+            if (const ModManifest *dep = activeById.value(it.key(), nullptr)) {
+                visit(dep);
+            }
+        }
+        visiting.remove(m->id);
+        visited.insert(m->id);
+        ordered.append(m);
+    };
+    for (const ModManifest *m : activeManifests) {
+        visit(m);
+    }
+
+    for (const ModManifest *m : ordered) {
+        if (m->mainScript.isEmpty()) continue;
+        ModApi *api = m_apis.value(m->id).data();
+        auto *host = new ModScriptHost(*m, this, api, this);
+        connect(host, &ModScriptHost::hookSubscriptionsChanged, this, &ModManager::syncHookSubscriptions);
+        connect(host, &ModScriptHost::autoDisabled, this, [this](const QString &id) {
+            QTimer::singleShot(0, this, [this, id]() {
+                setModEnabled(id, false);
+            });
+        });
+        m_scriptHosts.insert(m->id, host);
+        m_scriptOrder.append(m->id);
+        host->loadAndActivate();
+    }
+    syncHookSubscriptions();
 }
 
 void ModManager::rebuildWatcher()
@@ -609,6 +842,23 @@ QVariantList ModManager::slotEntries(const QString &slotName) const
             entries.append(entry);
         }
     }
+
+    if (slotName == QLatin1StringView("sidebar.page")) {
+        for (const auto &pair : m_dynamicPages) {
+            ModApi *api = m_apis.value(pair.first).data();
+            if (!api) continue;
+            const ModSlotItem &s = pair.second;
+            QVariantMap entry;
+            entry.insert(QStringLiteral("entryId"), s.entryId);
+            entry.insert(QStringLiteral("modId"), pair.first);
+            entry.insert(QStringLiteral("modName"), api->modName());
+            entry.insert(QStringLiteral("sourceUrl"), QUrl::fromLocalFile(s.file));
+            entry.insert(QStringLiteral("title"), s.title);
+            entry.insert(QStringLiteral("symbol"), s.symbol);
+            entry.insert(QStringLiteral("api"), QVariant::fromValue(static_cast<QObject *>(api)));
+            entries.append(entry);
+        }
+    }
     return entries;
 }
 
@@ -757,6 +1007,11 @@ QVariantList ModManager::shortcutsVariantList() const
 
 void ModManager::triggerShortcut(const QString &modId, const QString &actionId)
 {
+    if (ModScriptHost *host = m_scriptHosts.value(modId).data()) {
+        if (host->invokeCommand(actionId)) {
+            return;
+        }
+    }
     if (ModApi *api = m_apis.value(modId).data()) {
         api->notifyShortcut(actionId);
     }

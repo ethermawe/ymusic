@@ -1,0 +1,14 @@
+{
+  "id": "hide-explicit",
+  "name": "Hide Explicit",
+  "version": "1.0.0",
+  "author": "ymusic",
+  "description": "Фильтрует треки с пометкой Explicit из результатов поиска и следующей пачки «Моей волны».",
+  "apiVersion": "1.0",
+  "main": "main.js",
+  "permissions": [
+    "hooks:search_results",
+    "hooks:wave_next_batch",
+    "storage"
+  ]
+}

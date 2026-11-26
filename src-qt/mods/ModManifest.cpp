@@ -27,12 +27,38 @@ bool isKnownPermission(const QString &perm)
         QStringLiteral("spectrum:read"),
         QStringLiteral("ui:slots"),
         QStringLiteral("ui:override"),
+        QStringLiteral("ui:pages"),
+        QStringLiteral("player"),
+        QStringLiteral("library"),
         QStringLiteral("storage"),
         QStringLiteral("clipboard"),
         QStringLiteral("external"),
     };
     if (kSimple.contains(perm)) {
         return true;
+    }
+    if (perm.startsWith(QLatin1StringView("hooks:"))) {
+        const QString point = perm.mid(6).trimmed();
+        static const QStringList kHooks {
+            QStringLiteral("*"),
+            QStringLiteral("search"),
+            QStringLiteral("search_results"),
+            QStringLiteral("wave"),
+            QStringLiteral("wave_next_batch"),
+            QStringLiteral("queue"),
+            QStringLiteral("queue_before_add"),
+            QStringLiteral("track_before_play"),
+            QStringLiteral("track_after_play"),
+            QStringLiteral("lyrics"),
+            QStringLiteral("lyrics_loaded"),
+            QStringLiteral("playlist"),
+            QStringLiteral("playlist_loaded"),
+            QStringLiteral("album"),
+            QStringLiteral("album_loaded"),
+            QStringLiteral("scrobble"),
+            QStringLiteral("scrobble_before"),
+        };
+        return kHooks.contains(point);
     }
     if (perm.startsWith(QLatin1StringView("network:"))) {
         const QString host = perm.mid(8).trimmed().toLower();
@@ -231,6 +257,29 @@ ModManifest parseManifest(const QString &modDirectory)
         if (!m.permissions.contains(p)) {
             m.permissions.append(p);
         }
+    }
+
+    if (root.contains(QStringLiteral("main"))) {
+        const QString rel = root.value(QStringLiteral("main")).toString().trimmed();
+        if (!rel.isEmpty()) {
+            const QString resolved = resolveModPath(m.directory, rel, true);
+            if (resolved.isEmpty()) {
+                m.error = QStringLiteral("Некорректный или отсутствующий main: %1").arg(rel);
+                return m;
+            }
+            m.mainScript = resolved;
+        }
+    }
+
+    const QJsonObject depsObj = root.value(QStringLiteral("dependencies")).toObject();
+    for (auto it = depsObj.constBegin(); it != depsObj.constEnd(); ++it) {
+        const QString depId = it.key().trimmed();
+        const QString constraint = it.value().toString().trimmed();
+        if (!isValidModId(depId)) {
+            m.error = QStringLiteral("Некорректный id зависимости в manifest.json: %1").arg(depId);
+            return m;
+        }
+        m.dependencies.insert(depId, constraint);
     }
 
     const QJsonObject entry = root.value(QStringLiteral("entry")).toObject();

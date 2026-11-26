@@ -162,6 +162,8 @@ set(YMUSIC_CPP_SOURCES
     mods/ModManifest.cpp
     mods/ModNetworkAccessManager.h
     mods/ModNetworkAccessManager.cpp
+    mods/ModScriptHost.h
+    mods/ModScriptHost.cpp
     mods/ModSlotItem.h
     mods/ModSlotItem.cpp
     mods/ModUrlInterceptor.h
@@ -566,6 +568,8 @@ if(BUILD_TESTING)
         mods/ModManifest.cpp
         mods/ModNetworkAccessManager.h
         mods/ModNetworkAccessManager.cpp
+        mods/ModScriptHost.h
+        mods/ModScriptHost.cpp
         mods/ModSlotItem.h
         mods/ModSlotItem.cpp
         mods/ModUrlInterceptor.h

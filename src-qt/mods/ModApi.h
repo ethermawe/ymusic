@@ -193,6 +193,9 @@ public:
     Q_INVOKABLE void log(const QString &message);
     Q_INVOKABLE void warn(const QString &message);
 
+    // Bridge to mod's JS main.js (`ym.ui.expose`)
+    Q_INVOKABLE QVariant call(const QString &name, const QVariantList &args = {});
+
     void notifyTrackMenuAction(const QString &actionId, const QString &trackId, const QString &trackTitle);
     void notifyShortcut(const QString &actionId);
     void notifyLyricsChanged();

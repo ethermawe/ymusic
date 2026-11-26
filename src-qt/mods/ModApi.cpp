@@ -1021,6 +1021,11 @@ void ModApi::warn(const QString &message)
     }
 }
 
+QVariant ModApi::call(const QString &name, const QVariantList &args)
+{
+    return m_manager ? m_manager->callModExposed(m_manifest.id, name, args) : QVariant();
+}
+
 void ModApi::notifyTrackMenuAction(const QString &actionId, const QString &trackId, const QString &trackTitle)
 {
     emit trackMenuActionTriggered(actionId, trackId, trackTitle);

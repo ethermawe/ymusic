@@ -3,6 +3,7 @@
 #include "mods/ModApi.h"
 #include "mods/ModManager.h"
 #include "mods/ModManifest.h"
+#include "mods/ModScriptHost.h"
 #include "mods/ModUrlInterceptor.h"
 
 #include <QDir>
@@ -504,6 +505,151 @@ int main(int argc, char *argv[]) {
     CHECK(safeManager.safeMode());
     CHECK(safeManager.activeModCount() == 0);
     CHECK(safeManager.activeOverrideCount() == 0);
+
+    // --- B2/B3/B4 Logic mods (main.js, hooks, permissions, watchdog, auto-disable, dependencies) ---
+    // 1. Dependency validation: missing dep -> invalid
+    const QString missingDepDir = ymusic::paths::modsDirectory() + QStringLiteral("/needs-missing");
+    CHECK(writeText(missingDepDir + QStringLiteral("/main.js"), "function activate(ym) {}\n"));
+    CHECK(writeText(missingDepDir + QStringLiteral("/manifest.json"), R"({
+        "id": "needs-missing",
+        "name": "Needs Missing",
+        "version": "1.0.0",
+        "apiVersion": "1.0",
+        "main": "main.js",
+        "dependencies": { "nonexistent-lib": ">=1.0" },
+        "permissions": []
+    })"));
+    manager.reloadMods();
+    {
+        bool foundInvalid = false;
+        for (const QVariant &v : manager.modsVariantList()) {
+            const QVariantMap m = v.toMap();
+            if (m.value(QStringLiteral("id")).toString() == QStringLiteral("needs-missing")) {
+                CHECK(!m.value(QStringLiteral("valid")).toBool());
+                foundInvalid = true;
+            }
+        }
+        CHECK(foundInvalid);
+    }
+    QDir(missingDepDir).removeRecursively();
+
+    // 2. Topological dependency activation order + ym.exports / ym.require + hooks + permission denial
+    const QString depBaseDir = ymusic::paths::modsDirectory() + QStringLiteral("/z-dep-base");
+    CHECK(writeText(depBaseDir + QStringLiteral("/main.js"), R"(
+        export function activate(ym) {
+            ym.exports.tag = "from-base";
+            ym.hooks.on("search_results", function(p) {
+                p.byBase = true;
+                return p;
+            });
+        }
+    )"));
+    CHECK(writeText(depBaseDir + QStringLiteral("/manifest.json"), R"({
+        "id": "z-dep-base",
+        "name": "Base Lib",
+        "version": "1.2.0",
+        "apiVersion": "1.0",
+        "main": "main.js",
+        "permissions": ["hooks:search_results"]
+    })"));
+
+    const QString depChildDir = ymusic::paths::modsDirectory() + QStringLiteral("/a-dep-child");
+    CHECK(writeText(depChildDir + QStringLiteral("/main.js"), R"(
+        export function activate(ym) {
+            const base = ym.require("z-dep-base");
+            ym.exports.sawBase = (base && base.tag === "from-base");
+            // Should be denied because hooks:wave_next_batch is NOT granted
+            ym.exports.deniedWave = !ym.hooks.on("wave_next_batch", function(p) { return p; });
+            // Allowed hook
+            ym.hooks.on("search_results", function(p) {
+                p.byChild = true;
+                return p;
+            });
+            ym.hooks.on("queue_before_add", function(p) {
+                if (p && p.blockMe) return ym.cancel("blocked-by-child");
+                return p;
+            });
+        }
+    )"));
+    CHECK(writeText(depChildDir + QStringLiteral("/manifest.json"), R"({
+        "id": "a-dep-child",
+        "name": "Child Consumer",
+        "version": "1.0.0",
+        "apiVersion": "1.0",
+        "main": "main.js",
+        "dependencies": { "z-dep-base": ">=1.0" },
+        "permissions": ["hooks:search_results", "hooks:queue_before_add"]
+    })"));
+
+    manager.reloadMods();
+    manager.setModEnabled(QStringLiteral("a-dep-child"), true);
+    manager.setModEnabled(QStringLiteral("z-dep-base"), true);
+
+    // Even though "a-dep-child" sorts before "z-dep-base", z-dep-base MUST activate first!
+    const QStringList order = manager.activationOrder();
+    CHECK(order.indexOf(QStringLiteral("z-dep-base")) >= 0);
+    CHECK(order.indexOf(QStringLiteral("a-dep-child")) > order.indexOf(QStringLiteral("z-dep-base")));
+
+    const QVariantMap childExports = manager.modExports(QStringLiteral("a-dep-child")).toMap();
+    CHECK(childExports.value(QStringLiteral("sawBase")).toBool());
+    CHECK(childExports.value(QStringLiteral("deniedWave")).toBool());
+
+    // Hook chain transformation
+    const QVariantMap hookRes = manager.runHookChain(
+        QStringLiteral("search_results"),
+        QVariantMap{{QStringLiteral("q"), QStringLiteral("test")}});
+    CHECK(hookRes.value(QStringLiteral("action")).toString() == QStringLiteral("continue"));
+    const QVariantMap hookPayload = hookRes.value(QStringLiteral("payload")).toMap();
+    CHECK(hookPayload.value(QStringLiteral("byBase")).toBool());
+    CHECK(hookPayload.value(QStringLiteral("byChild")).toBool());
+
+    // Hook cancel
+    const QVariantMap cancelRes = manager.runHookChain(
+        QStringLiteral("queue_before_add"),
+        QVariantMap{{QStringLiteral("blockMe"), true}});
+    CHECK(cancelRes.value(QStringLiteral("action")).toString() == QStringLiteral("cancel"));
+    CHECK(cancelRes.value(QStringLiteral("reason")).toString() == QStringLiteral("blocked-by-child"));
+
+    manager.setModEnabled(QStringLiteral("a-dep-child"), false);
+    manager.setModEnabled(QStringLiteral("z-dep-base"), false);
+
+    // 3. Watchdog interrupts infinite loop & auto-disables after 5 consecutive errors
+    const QString hangModDir = ymusic::paths::modsDirectory() + QStringLiteral("/hang-mod");
+    CHECK(writeText(hangModDir + QStringLiteral("/main.js"), R"(
+        export function activate(ym) {
+            ym.hooks.on("search_results", function(p) {
+                if (p && p.hang) {
+                    while (true) {}
+                }
+                if (p && p.crash) {
+                    throw new Error("boom");
+                }
+                return p;
+            });
+        }
+    )"));
+    CHECK(writeText(hangModDir + QStringLiteral("/manifest.json"), R"({
+        "id": "hang-mod",
+        "name": "Hang Mod",
+        "version": "1.0.0",
+        "apiVersion": "1.0",
+        "main": "main.js",
+        "permissions": ["hooks:search_results"]
+    })"));
+    manager.reloadMods();
+    manager.setModEnabled(QStringLiteral("hang-mod"), true);
+    ModScriptHost *hangHost = manager.scriptHostForMod(QStringLiteral("hang-mod"));
+    CHECK(hangHost != nullptr);
+    hangHost->setWatchdogTimeoutMs(80);
+    // 1st error: infinite loop interrupted by watchdog
+    manager.runHookChain(QStringLiteral("search_results"), QVariantMap{{QStringLiteral("hang"), true}});
+    CHECK(hangHost->consecutiveErrors() == 1);
+    // 4 more errors -> reaches 5 consecutive errors -> auto-disabled!
+    for (int i = 0; i < 4; ++i) {
+        manager.runHookChain(QStringLiteral("search_results"), QVariantMap{{QStringLiteral("crash"), true}});
+    }
+    CHECK(hangHost->isAutoDisabled());
+    QCoreApplication::processEvents();
 
     return 0;
 }

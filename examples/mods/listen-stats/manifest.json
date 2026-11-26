@@ -1,0 +1,15 @@
+{
+  "id": "listen-stats",
+  "name": "Listen Stats",
+  "version": "1.0.0",
+  "author": "ymusic",
+  "description": "Собирает статистику прослушиваний через ym.events.trackChanged и показывает её на отдельной странице ym.pages.",
+  "apiVersion": "1.0",
+  "main": "main.js",
+  "permissions": [
+    "playback:read",
+    "storage",
+    "ui:pages",
+    "ui:slots"
+  ]
+}

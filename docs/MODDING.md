@@ -463,3 +463,34 @@ Component.onCompleted: {
 - **`contentItem` в `RippleButton` / `AbstractButton`:** не задавайте `anchors.centerIn: parent` напрямую на `contentItem` — `AbstractButton` сам управляет его геометрией. Используйте обёртку `contentItem: Item { Row { anchors.centerIn: parent } }`.
 - **Обработка `onSpectrumUpdated()`:** вызывается на 60 Hz в UI-потоке. Отключайте `Connections` через `enabled: root.visible` и не делайте там тяжёлых вычислений или логирования.
 - **`trackRow.badges` и `card.overlay`:** инстанцируются для каждого видимого элемента списка или сетки. Держите компоненты минимальными (без `ShaderEffect` и тяжёлого `Canvas`). Если моды не используют эти слоты, они не создаются.
+
+---
+
+## Логические моды (`main.js`, хуки и `ym` API)
+
+Помимо UI-слотов на QML, мод может содержать логический скрипт `"main": "main.js"` в `manifest.json`. Каждый такой мод выполняется в **отдельном `QJSEngine`** без доступа к QML, файловой системе и `Backend`.
+
+### Жизненный цикл и защита от зависаний
+- Скрипт экспортирует `activate(ym)` и опционально `deactivate()`.
+- Глобальные объекты: только `ym` и `console` (перенаправлен в Консоль модов).
+- Сторожевой таймер прерывает синхронные вызовы, работающие дольше **500 мс** (`QJSEngine::setInterrupted(true)`).
+- После **5 ошибок подряд** мод автоматически отключается с записью в лог.
+- Таймаут ответа хука на стороне Rust-ядра по умолчанию **150 мс** — при превышении или невалидной схеме ядро оставляет исходный payload и отправляет предупреждение.
+
+### Точки хуков (`ym.hooks.on(point, fn)`)
+Требуют разрешения `hooks:<point>` (или `hooks:<группа>`, например `hooks:search`, `hooks:wave`, `hooks:queue`):
+- `search_results`, `wave_next_batch`, `queue_before_add`, `track_before_play`, `track_after_play`, `lyrics_loaded`, `playlist_loaded`, `album_loaded`, `scrobble_before`.
+- Обработчик возвращает изменённый payload или `ym.cancel("причина")` для отмены действия.
+
+### Зависимости (`dependencies`) и обмен сервисами
+```json
+"dependencies": {
+  "base-helper": ">=1.0"
+}
+```
+Зависимости проверяются при загрузке и активируются раньше зависимых модов. Доступ к экспортированным сервисам: `ym.exports.myFn = ...` и `ym.require("base-helper")`.
+
+Полные TypeScript-типы API доступны в [`docs/ymusic.d.ts`](ymusic.d.ts). Примеры логических модов:
+- [`examples/mods/hide-explicit/`](../examples/mods/hide-explicit/)
+- [`examples/mods/queue-dedupe/`](../examples/mods/queue-dedupe/)
+- [`examples/mods/listen-stats/`](../examples/mods/listen-stats/)
