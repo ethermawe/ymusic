@@ -776,14 +776,18 @@ mod queue_tests {
         }
     }
 
+    fn shared_test_rt_handle() -> tokio::runtime::Handle {
+        static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+        RT.get_or_init(|| tokio::runtime::Runtime::new().expect("test tokio runtime")).handle().clone()
+    }
+
     #[test]
     fn session_save_and_restore_preserves_track_queue_and_position() {
 
         let mut t2 = track("t2");
         t2.duration_ms = 180_000;
         let events = Arc::new(Mutex::new(Vec::new()));
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let rt_handle = rt.handle().clone();
+        let rt_handle = shared_test_rt_handle();
         let mpris = Mpris::spawn(&rt_handle, |_| {});
         let core = Arc::new(YMusicCore {
             batch_running: AtomicBool::new(false),
@@ -792,7 +796,7 @@ mod queue_tests {
             playlist_creating: AtomicBool::new(false),
             login_gen: std::sync::atomic::AtomicU64::new(0),
             rt_handle,
-            runtime: Some(rt),
+            runtime: None,
             http: api::http_client(),
             state: Arc::new(Mutex::new(State {
                 queue: vec![track("t1"), t2.clone()],
@@ -833,8 +837,7 @@ mod queue_tests {
         assert_eq!(restored_session.current_index, 1);
         assert!((restored_session.position_secs - 42.5).abs() < 1e-6);
 
-        let rt2 = tokio::runtime::Runtime::new().unwrap();
-        let rt2_handle = rt2.handle().clone();
+        let rt2_handle = shared_test_rt_handle();
         let mpris2 = Mpris::spawn(&rt2_handle, |_| {});
         let events2 = Arc::new(Mutex::new(Vec::new()));
         let core2 = Arc::new(YMusicCore {
@@ -844,7 +847,7 @@ mod queue_tests {
             playlist_creating: AtomicBool::new(false),
             login_gen: std::sync::atomic::AtomicU64::new(0),
             rt_handle: rt2_handle,
-            runtime: Some(rt2),
+            runtime: None,
             http: api::http_client(),
             state: Arc::new(Mutex::new(State::default())),
             cover_sem: Arc::new(Semaphore::new(4)),
@@ -904,8 +907,7 @@ mod queue_tests {
 
     #[test]
     fn toggle_pin_playlist_updates_state_and_emits_events() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let rt_handle = rt.handle().clone();
+        let rt_handle = shared_test_rt_handle();
         let mpris = Mpris::spawn(&rt_handle, |_| {});
         let events = Arc::new(Mutex::new(Vec::new()));
         let core = Arc::new(YMusicCore {
@@ -915,7 +917,7 @@ mod queue_tests {
             playlist_creating: AtomicBool::new(false),
             login_gen: std::sync::atomic::AtomicU64::new(0),
             rt_handle,
-            runtime: Some(rt),
+            runtime: None,
             http: api::http_client(),
             state: Arc::new(Mutex::new(State {
                 cards: vec![CardTarget::Playlist {
@@ -949,8 +951,7 @@ mod queue_tests {
 
     #[test]
     fn toggle_shuffle_moves_current_to_front_and_reorders_queue() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let rt_handle = rt.handle().clone();
+        let rt_handle = shared_test_rt_handle();
         let mpris = Mpris::spawn(&rt_handle, |_| {});
         let events = Arc::new(Mutex::new(Vec::new()));
         let core = Arc::new(YMusicCore {
@@ -960,7 +961,7 @@ mod queue_tests {
             playlist_creating: AtomicBool::new(false),
             login_gen: std::sync::atomic::AtomicU64::new(0),
             rt_handle,
-            runtime: Some(rt),
+            runtime: None,
             http: api::http_client(),
             state: Arc::new(Mutex::new(State {
                 queue: vec![track("a"), track("b"), track("c"), track("d")],
@@ -1001,8 +1002,7 @@ mod queue_tests {
 
     #[test]
     fn should_fetch_view_deduplicates_and_respects_cooldown() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let rt_handle = rt.handle().clone();
+        let rt_handle = shared_test_rt_handle();
         let mpris = Mpris::spawn(&rt_handle, |_| {});
         let events = Arc::new(Mutex::new(Vec::new()));
         let core = Arc::new(YMusicCore {
@@ -1012,7 +1012,7 @@ mod queue_tests {
             playlist_creating: AtomicBool::new(false),
             login_gen: std::sync::atomic::AtomicU64::new(0),
             rt_handle,
-            runtime: Some(rt),
+            runtime: None,
             http: api::http_client(),
             state: Arc::new(Mutex::new(State::default())),
             cover_sem: Arc::new(Semaphore::new(2)),
@@ -1047,8 +1047,7 @@ mod queue_tests {
 
     #[test]
     fn apply_cached_view_updates_when_returned_to_same_active_key() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let rt_handle = rt.handle().clone();
+        let rt_handle = shared_test_rt_handle();
         let mpris = Mpris::spawn(&rt_handle, |_| {});
         let events = Arc::new(Mutex::new(Vec::new()));
         let core = Arc::new(YMusicCore {
@@ -1058,7 +1057,7 @@ mod queue_tests {
             playlist_creating: AtomicBool::new(false),
             login_gen: std::sync::atomic::AtomicU64::new(0),
             rt_handle,
-            runtime: Some(rt),
+            runtime: None,
             http: api::http_client(),
             state: Arc::new(Mutex::new(State::default())),
             cover_sem: Arc::new(Semaphore::new(2)),

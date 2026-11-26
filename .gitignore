@@ -1,6 +1,10 @@
 /target
+target/
+packaging/**/target/
 /pkg
 /build*
+build-qt/
+build-makepkg/
 .vscode/
 *.pkg.tar.zst
 *.pkg.tar.xz

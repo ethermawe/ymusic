@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 use std::backtrace::Backtrace;
 use std::cell::Cell;
 use std::ffi::{CStr, CString};

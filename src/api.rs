@@ -80,7 +80,7 @@ pub fn cover_url(uri: Option<&str>, size: u32) -> Option<String> {
         .filter(|s| !s.is_empty())
         .map(|u| {
             let sized = u.replace("%%", &format!("{size}x{size}"));
-            if sized.starts_with("https://") || sized.starts_with("http://") {
+            if sized.starts_with("https://") || sized.starts_with("http://") || sized.starts_with("file://") {
                 sized
             } else if sized.starts_with("//") {
                 format!("https:{sized}")
@@ -3132,5 +3132,48 @@ mod tests {
             }
         }));
         assert!(matches!(best, Some(SearchBest::Track(t)) if t.id == "77" && t.cover_uri.is_some()));
+    }
+
+    async fn spawn_mock_http(response: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock.write_all(response.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn http_client_handles_401_500_and_malformed_json() {
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+        let url_401 = spawn_mock_http(
+            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 18\r\nConnection: close\r\n\r\n{\"error\":\"unauth\"}",
+        )
+        .await;
+        let r401 = client.get(&url_401).send().await.unwrap();
+        assert_eq!(r401.status(), reqwest::StatusCode::UNAUTHORIZED);
+        assert!(r401.error_for_status().is_err());
+
+        let url_500 = spawn_mock_http(
+            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 4\r\nConnection: close\r\n\r\nfail",
+        )
+        .await;
+        let r500 = client.get(&url_500).send().await.unwrap();
+        assert_eq!(r500.status(), reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(r500.error_for_status().is_err());
+
+        let url_bad_json = spawn_mock_http(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{not_json!!",
+        )
+        .await;
+        let r_bad = client.get(&url_bad_json).send().await.unwrap();
+        assert!(r_bad.json::<serde_json::Value>().await.is_err());
     }
 }
