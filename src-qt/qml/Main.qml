@@ -86,6 +86,7 @@ ApplicationWindow {
         function onToastRequested(message: string) { toast.show(message); }
         function onCreatePlaylistRequested() { createPlaylist.open(); }
         function onSettingsRequested() { window.openSettings(); }
+        function onDevToolsRequested() { window.openDevTools(); }
     }
 
     Connections {
@@ -110,6 +111,70 @@ ApplicationWindow {
             dialog.open();
         } else {
             settingsLoader.active = true;
+        }
+    }
+
+    function openDevTools() {
+        if (!devToolsLoader.active) {
+            devToolsLoader.active = true;
+            return;
+        }
+        if (devToolsLoader.item) {
+            devToolsLoader.item.openWindow();
+        }
+    }
+
+    function toggleDevTools() {
+        if (!devToolsLoader.active) {
+            devToolsLoader.active = true;
+            return;
+        }
+        if (devToolsLoader.item) {
+            devToolsLoader.item.toggleWindow();
+        }
+    }
+
+    function toggleDevPicker() {
+        if (!devToolsLoader.active) {
+            devToolsLoader.active = true;
+            Qt.callLater(() => {
+                if (devToolsLoader.item) devToolsLoader.item.picking = true;
+            });
+            return;
+        }
+        if (devToolsLoader.item) {
+            devToolsLoader.item.picking = !devToolsLoader.item.picking;
+        }
+    }
+
+    function evalInMain(code: string): var {
+        try {
+            const fn = new Function(
+                "window", "backend", "appSettings", "UiState", "Appearance", "ModManager", "updater", "devTools",
+                "return (" + code + ");"
+            );
+            const val = fn(window, backend, appSettings, UiState, Appearance, ModManager, updater, devTools);
+            if (val === undefined) return { ok: true, output: "undefined" };
+            if (val === null) return { ok: true, output: "null" };
+            if (typeof val === "object") {
+                try {
+                    return { ok: true, output: JSON.stringify(val) };
+                } catch (e) {
+                    return { ok: true, output: String(val) };
+                }
+            }
+            return { ok: true, output: String(val) };
+        } catch (err) {
+            try {
+                const fnStmt = new Function(
+                    "window", "backend", "appSettings", "UiState", "Appearance", "ModManager", "updater", "devTools",
+                    code
+                );
+                const res = fnStmt(window, backend, appSettings, UiState, Appearance, ModManager, updater, devTools);
+                return { ok: true, output: res === undefined ? "ok" : String(res) };
+            } catch (err2) {
+                return { ok: false, output: String(err2) };
+            }
         }
     }
 
@@ -149,6 +214,16 @@ ApplicationWindow {
         windowController.attach(window, appSettings.nativeTitleBar);
         syncOverlayZoom();
         Qt.callLater(window.syncOverlayZoom);
+        Qt.callLater(() => {
+            const current = updater.currentVersion;
+            if (!current || current.length === 0) return;
+            const seen = appSettings.lastSeenVersion;
+            if (seen.length === 0) {
+                appSettings.lastSeenVersion = current;
+            } else if (seen !== current && whatsNewDialog.items.length > 0) {
+                whatsNewDialog.open();
+            }
+        });
     }
 
     Connections {
@@ -1235,6 +1310,47 @@ ApplicationWindow {
         parent: Overlay.overlay
     }
 
+    WhatsNewDialog {
+        id: whatsNewDialog
+        parent: Overlay.overlay
+    }
+
+    DevToolsOverlay {
+        id: devToolsOverlay
+        parent: window.contentItem
+        anchors.fill: parent
+        z: 240
+        sceneRoot: window.contentItem
+        picking: devToolsLoader.item ? devToolsLoader.item.picking : false
+        showModSlots: devToolsLoader.item ? devToolsLoader.item.showModSlots : false
+        highlightedInfo: devToolsLoader.item && devToolsLoader.item.visible ? devToolsLoader.item.inspectedInfo : ({})
+        onItemPicked: (item) => {
+            if (devToolsLoader.item) {
+                devToolsLoader.item.picking = false;
+                devToolsLoader.item.selectInspectedItem(item);
+            }
+        }
+        onPickingCancelled: {
+            if (devToolsLoader.item) {
+                devToolsLoader.item.picking = false;
+            }
+        }
+    }
+
+    Loader {
+        id: devToolsLoader
+        active: false
+        onLoaded: {
+            if (item) item.openWindow();
+        }
+        sourceComponent: DevToolsWindow {
+            sceneRoot: window.contentItem
+            evalJs: window.evalInMain
+            onPreviewWhatsNewRequested: whatsNewDialog.open()
+            onShowToastRequested: (message) => toast.show(message)
+        }
+    }
+
     TrackMenu {
         id: trackMenu
         parent: Overlay.overlay
@@ -1266,6 +1382,21 @@ ApplicationWindow {
     Shortcut { sequences: ["Ctrl++", "Ctrl+="]; onActivated: window.setZoom(window.zoom + window.zoomStep) }
     Shortcut { sequences: ["Ctrl+-"]; onActivated: window.setZoom(window.zoom - window.zoomStep) }
     Shortcut { sequence: "Ctrl+0"; onActivated: window.setZoom(1.0) }
+    Shortcut {
+        sequence: "F12"
+        enabled: appSettings.debuggingEnabled || appSettings.modDevMode
+        onActivated: window.toggleDevTools()
+    }
+    Shortcut {
+        sequence: "Ctrl+Shift+I"
+        enabled: appSettings.debuggingEnabled || appSettings.modDevMode
+        onActivated: window.toggleDevTools()
+    }
+    Shortcut {
+        sequence: "Ctrl+Shift+C"
+        enabled: appSettings.debuggingEnabled || appSettings.modDevMode
+        onActivated: window.toggleDevPicker()
+    }
     Shortcut {
         sequence: "Ctrl+Shift+R"
         enabled: ModManager.modsEnabled

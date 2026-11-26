@@ -1790,7 +1790,7 @@ Item {
                 symbol: "bug_report"
 
                 ConfigSwitch {
-                    text: "Отладочный циферблат (секунды в таймере сна)"
+                    text: "Режим разработчика (DevTools по F12, секунды в таймере сна)"
                     checked: appSettings.debuggingEnabled
                     onToggledTo: (checked) => appSettings.debuggingEnabled = checked
                 }
@@ -1801,6 +1801,13 @@ Item {
                     spacing: 8
                     topPadding: 4
 
+                    TextButton {
+                        variant: TextButton.Filled
+                        symbol: "terminal"
+                        text: "Открыть DevTools"
+                        visible: appSettings.debuggingEnabled || appSettings.modDevMode
+                        onClicked: UiState.devToolsRequested()
+                    }
                     TextButton {
                         variant: TextButton.Tonal
                         symbol: "description"

@@ -47,6 +47,7 @@
 #include "app/UpdateChecker.h"
 #include "app/WindowController.h"
 #include "artwork/ArtworkCache.h"
+#include "app/DevToolsBridge.h"
 #include "motion/AmbientClock.h"
 #include "motion/ScrollMomentum.h"
 #include "mods/ModManager.h"
@@ -77,6 +78,9 @@ void fileMessageHandler(QtMsgType type, const QMessageLogContext &ctx, const QSt
                 << " [" << lvl << "] " << msg << '\n';
             out.flush();
         }
+    }
+    if (auto *dt = ymusic::DevToolsBridge::instance()) {
+        dt->pushQtLog(type, msg);
     }
     if (g_prevHandler) {
         g_prevHandler(type, ctx, msg);
@@ -293,12 +297,14 @@ int main(int argc, char *argv[]) {
 
     ymusic::WindowController windowController;
     ymusic::UpdateChecker updateChecker;
+    ymusic::DevToolsBridge devToolsBridge;
     updateChecker.setAutoCheckEnabled(settings.autoUpdateEnabled());
     QObject::connect(&settings, &AppSettings::autoUpdateEnabledChanged, &updateChecker, [&]() {
         updateChecker.setAutoCheckEnabled(settings.autoUpdateEnabled());
     });
 
     QQmlApplicationEngine engine;
+    devToolsBridge.attachEngine(&engine);
     modManager.attachEngine(&engine);
     engine.addUrlInterceptor(modManager.urlInterceptor());
     engine.setNetworkAccessManagerFactory(new CustomNamFactory);
@@ -311,6 +317,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("trayAvailable", trayAvailable);
     engine.rootContext()->setContextProperty("windowController", &windowController);
     engine.rootContext()->setContextProperty("updater", &updateChecker);
+    engine.rootContext()->setContextProperty("devTools", &devToolsBridge);
 
     QStringList qmlErrors;
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app, [&](const QList<QQmlError> &warnings) {

@@ -118,6 +118,8 @@ set(YMUSIC_CPP_SOURCES
     app/UpdateChecker.cpp
     app/WindowController.h
     app/WindowController.cpp
+    app/DevToolsBridge.h
+    app/DevToolsBridge.cpp
     artwork/ArtworkCache.h
     artwork/ArtworkCache.cpp
     artwork/ArtworkColors.h
@@ -201,6 +203,7 @@ set(QML_FILES
     qml/components/ArtistLinks.qml
     qml/components/ArtworkImage.qml
     qml/components/CornerCaps.qml
+    qml/components/DevToolsOverlay.qml
     qml/components/EmptyState.qml
     qml/components/FastWheel.qml
     qml/components/HomeShortcut.qml
@@ -247,6 +250,7 @@ set(QML_FILES
     qml/components/TransportButton.qml
     qml/components/WavyClip.qml
     qml/components/WavyPill.qml
+    qml/components/WhatsNewDialog.qml
     qml/shell/NavigationItem.qml
     qml/shell/PlaybackMenu.qml
     qml/shell/SectionLabel.qml
@@ -275,6 +279,7 @@ set(QML_FILES
     qml/settings/NoteText.qml
     qml/settings/SettingsPages.qml
     qml/views/HomeView.qml
+    qml/views/DevToolsWindow.qml
     qml/views/LoginView.qml
     qml/views/SearchView.qml
     qml/views/SettingsDialog.qml
@@ -406,7 +411,7 @@ if(WIN32)
     else()
         target_link_libraries(ymusic-qml PRIVATE ymusic_core)
     endif()
-    target_link_libraries(ymusic-qml PRIVATE comctl32 dwmapi user32)
+    target_link_libraries(ymusic-qml PRIVATE comctl32 dwmapi user32 psapi)
     set_target_properties(ymusic-qml PROPERTIES WIN32_EXECUTABLE TRUE)
     add_custom_command(TARGET ymusic-qml POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

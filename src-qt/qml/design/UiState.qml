@@ -328,6 +328,7 @@ QtObject {
     signal burstRequested(Item item, string kind)
     signal createPlaylistRequested()
     signal settingsRequested()
+    signal devToolsRequested()
 
     function burst(item: Item, kind: string) {
         if (item !== null && !Appearance.performanceMode && appSettings.burstsEnabled) {
