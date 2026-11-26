@@ -6,16 +6,29 @@
 #include "mods/ModUrlInterceptor.h"
 
 #include <QDir>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QGuiApplication>
+#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QProcess>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QUrl>
 
+#if __has_include(<QtCore/private/qzipwriter_p.h>)
+#include <QtCore/private/qzipwriter_p.h>
+#elif __has_include(<QtGui/private/qzipwriter_p.h>)
+#include <QtGui/private/qzipwriter_p.h>
+#else
+#error "QZipWriter private header not found"
+#endif
+
 #include <iostream>
+#include <memory>
 
 using namespace ymusic::mods;
 
@@ -240,33 +253,250 @@ int main(int argc, char *argv[]) {
         QUrl(QStringLiteral("qrc:/qt/qml/ymusic/ui/qml/player/FloatingPlayerBar.qml")),
         QQmlAbstractUrlInterceptor::QmlFile).toLocalFile().endsWith(QStringLiteral("/overrides/BarZ.qml")));
 
-    // Install mod from .ymmod ZIP archive
-    const QString archiveSrcDir = tmpDir.path() + QStringLiteral("/pack-src/zip-mod");
-    CHECK(writeText(archiveSrcDir + QStringLiteral("/manifest.json"), R"({
-        "id": "zip-mod",
-        "name": "Zip Mod",
-        "version": "1.0.0",
-        "apiVersion": 1,
-        "permissions": ["ui:slots"]
-    })"));
+    // Install mod from .ymmod ZIP archive (using built-in QZipReader, plus zip-slip/symlink/limit rejection)
     const QString ymmodPath = tmpDir.path() + QStringLiteral("/zip-mod.ymmod");
-    QProcess zipProc;
-    zipProc.start(QStringLiteral("python3"), {
-        QStringLiteral("-c"),
-        QStringLiteral("import zipfile, sys; z=zipfile.ZipFile(sys.argv[1],'w'); z.write(sys.argv[2],'zip-mod/manifest.json'); z.close()"),
-        ymmodPath,
-        archiveSrcDir + QStringLiteral("/manifest.json")
-    });
-    if (zipProc.waitForFinished(5000) && zipProc.exitCode() == 0) {
+    {
+        QZipWriter writer(ymmodPath);
+        writer.addFile(QStringLiteral("zip-mod/manifest.json"), R"({
+            "id": "zip-mod",
+            "name": "Zip Mod",
+            "version": "1.0.0",
+            "apiVersion": "1.0",
+            "permissions": ["ui:slots"]
+        })");
+        writer.close();
+    }
+    {
         const QVariantMap zipRes = manager.installModFromArchive(QUrl::fromLocalFile(ymmodPath));
         CHECK(zipRes.value(QStringLiteral("ok")).toBool());
         CHECK(zipRes.value(QStringLiteral("id")).toString() == QStringLiteral("zip-mod"));
     }
 
+    // Archive zip-slip rejection
+    const QString slipPath = tmpDir.path() + QStringLiteral("/slip.ymmod");
+    {
+        QZipWriter writer(slipPath);
+        writer.addFile(QStringLiteral("../escape.txt"), "pwned");
+        writer.close();
+    }
+    CHECK(!manager.installModFromArchive(QUrl::fromLocalFile(slipPath)).value(QStringLiteral("ok")).toBool());
+
+    // Archive symlink rejection
+    const QString symPath = tmpDir.path() + QStringLiteral("/sym.ymmod");
+    {
+        QZipWriter writer(symPath);
+        writer.addSymLink(QStringLiteral("link-mod/evil"), QStringLiteral("/etc/passwd"));
+        writer.close();
+    }
+    CHECK(!manager.installModFromArchive(QUrl::fromLocalFile(symPath)).value(QStringLiteral("ok")).toBool());
+
+    // Archive file count limit (> 2000 files) rejection
+    const QString manyFilesPath = tmpDir.path() + QStringLiteral("/many.ymmod");
+    {
+        QZipWriter writer(manyFilesPath);
+        for (int i = 0; i < 2005; ++i) {
+            writer.addFile(QStringLiteral("m/f%1.txt").arg(i), "x");
+        }
+        writer.close();
+    }
+    CHECK(!manager.installModFromArchive(QUrl::fromLocalFile(manyFilesPath)).value(QStringLiteral("ok")).toBool());
+
+    // Archive uncompressed size limit (> 50 MB) rejection
+    const QString hugePath = tmpDir.path() + QStringLiteral("/huge.ymmod");
+    {
+        QZipWriter writer(hugePath);
+        QByteArray chunk(1024 * 1024, 'A'); // 1 MB highly compressible
+        for (int i = 0; i < 52; ++i) {
+            writer.addFile(QStringLiteral("h/part%1.bin").arg(i), chunk);
+        }
+        writer.close();
+    }
+    CHECK(!manager.installModFromArchive(QUrl::fromLocalFile(hugePath)).value(QStringLiteral("ok")).toBool());
+
+    // apiVersion semver checks: incompatible major -> rejected; missing -> valid with warning; "1.0" -> valid
+    const QString badApiDir = ymusic::paths::modsDirectory() + QStringLiteral("/bad-api-mod");
+    CHECK(writeText(badApiDir + QStringLiteral("/manifest.json"), R"({
+        "id": "bad-api-mod",
+        "name": "Bad API",
+        "version": "1.0.0",
+        "apiVersion": "2.0",
+        "permissions": ["ui:slots"]
+    })"));
+    CHECK(!parseManifest(badApiDir).valid);
+    QDir(badApiDir).removeRecursively();
+
+    const QString noApiDir = ymusic::paths::modsDirectory() + QStringLiteral("/no-api-mod");
+    CHECK(writeText(noApiDir + QStringLiteral("/manifest.json"), R"({
+        "id": "no-api-mod",
+        "name": "No API",
+        "version": "1.0.0",
+        "permissions": ["ui:slots"]
+    })"));
+    const ModManifest noApiParsed = parseManifest(noApiDir);
+    CHECK(noApiParsed.valid);
+    CHECK(!noApiParsed.warnings.isEmpty());
+    QDir(noApiDir).removeRecursively();
+
+    // Sandbox isolation tests:
+    //  a) No access to backend / appSettings / Backend / AppSettings; has modApi + ymusic.sdk Theme
+    //  b) import ymusic.ui is rejected
+    //  c) XMLHttpRequest to disallowed host is blocked; to allowed local server succeeds
+    //  d) openExternalUrl requires 'external' permission
+    QTcpServer httpServer;
+    CHECK(httpServer.listen(QHostAddress::LocalHost, 0));
+    const quint16 port = httpServer.serverPort();
+    QObject::connect(&httpServer, &QTcpServer::newConnection, &httpServer, [&]() {
+        while (QTcpSocket *sock = httpServer.nextPendingConnection()) {
+            QObject::connect(sock, &QTcpSocket::readyRead, sock, [sock]() {
+                sock->readAll();
+                sock->write("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK");
+                sock->flush();
+                sock->disconnectFromHost();
+            });
+            QObject::connect(sock, &QTcpSocket::disconnected, sock, &QObject::deleteLater);
+        }
+    });
+
+    const QString sbModDir = ymusic::paths::modsDirectory() + QStringLiteral("/sandbox-mod");
+    CHECK(writeText(sbModDir + QStringLiteral("/manifest.json"), R"({
+        "id": "sandbox-mod",
+        "name": "Sandbox Mod",
+        "version": "1.0.0",
+        "apiVersion": "1.0",
+        "permissions": ["ui:slots", "network:127.0.0.1"]
+    })"));
+    CHECK(writeText(sbModDir + QStringLiteral("/good.qml"), R"(
+        import QtQuick
+        import ymusic.sdk 1.0
+        QtObject {
+            property var modApi: null
+            property var slotContext: ({})
+            property bool backendHidden: typeof backend === "undefined" && typeof Backend === "undefined"
+            property bool settingsHidden: typeof appSettings === "undefined" && typeof AppSettings === "undefined"
+            property bool hasApi: modApi !== null && modApi.modId === "sandbox-mod"
+            property bool hasSdkTheme: Theme.colors !== null && Theme.fontSize.normal === 14
+        }
+    )"));
+    CHECK(writeText(sbModDir + QStringLiteral("/bad_import.qml"), R"(
+        import QtQuick
+        import ymusic.ui
+        QtObject {}
+    )"));
+    CHECK(writeText(sbModDir + QStringLiteral("/xhr_test.qml"), QStringLiteral(R"(
+        import QtQuick
+        QtObject {
+            property int allowedStatus: -1
+            property string allowedBody: ""
+            property bool blockedFailed: false
+            property bool doneAllowed: false
+            property bool doneBlocked: false
+            Component.onCompleted: {
+                var okReq = new XMLHttpRequest();
+                okReq.onreadystatechange = function() {
+                    if (okReq.readyState === XMLHttpRequest.DONE) {
+                        allowedStatus = okReq.status;
+                        allowedBody = okReq.responseText;
+                        doneAllowed = true;
+                    }
+                };
+                okReq.open("GET", "http://127.0.0.1:%1/ping");
+                okReq.send();
+
+                var badReq = new XMLHttpRequest();
+                badReq.onreadystatechange = function() {
+                    if (badReq.readyState === XMLHttpRequest.DONE) {
+                        blockedFailed = (badReq.status === 0);
+                        doneBlocked = true;
+                    }
+                };
+                badReq.open("GET", "https://disallowed.example.invalid/steal");
+                badReq.send();
+            }
+        }
+    )").arg(port).toUtf8()));
+
+    manager.reloadMods();
+    manager.setModEnabled(QStringLiteral("sandbox-mod"), true);
+
+    ModApi *sbApi = manager.apiForMod(QStringLiteral("sandbox-mod"));
+    CHECK(sbApi != nullptr);
+    CHECK(!sbApi->openExternalUrl(QStringLiteral("https://example.com"))); // missing 'external'
+
+    QString sbErr;
+    std::unique_ptr<QObject> goodObj(manager.createSandboxedObject(
+        QStringLiteral("sandbox-mod"),
+        QUrl::fromLocalFile(sbModDir + QStringLiteral("/good.qml")),
+        {{QStringLiteral("k"), 1}},
+        &sbErr));
+    CHECK(goodObj != nullptr);
+    CHECK(goodObj->property("backendHidden").toBool());
+    CHECK(goodObj->property("settingsHidden").toBool());
+    CHECK(goodObj->property("hasApi").toBool());
+    CHECK(goodObj->property("hasSdkTheme").toBool());
+
+    QString badImportErr;
+    std::unique_ptr<QObject> badImportObj(manager.createSandboxedObject(
+        QStringLiteral("sandbox-mod"),
+        QUrl::fromLocalFile(sbModDir + QStringLiteral("/bad_import.qml")),
+        {},
+        &badImportErr));
+    CHECK(badImportObj == nullptr);
+    CHECK(!badImportErr.isEmpty());
+
+    QString xhrErr;
+    std::unique_ptr<QObject> xhrObj(manager.createSandboxedObject(
+        QStringLiteral("sandbox-mod"),
+        QUrl::fromLocalFile(sbModDir + QStringLiteral("/xhr_test.qml")),
+        {},
+        &xhrErr));
+    CHECK(xhrObj != nullptr);
+    QElapsedTimer waitTimer;
+    waitTimer.start();
+    while (waitTimer.elapsed() < 5000
+           && (!xhrObj->property("doneAllowed").toBool() || !xhrObj->property("doneBlocked").toBool())) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+    CHECK(xhrObj->property("doneAllowed").toBool());
+    CHECK(xhrObj->property("allowedStatus").toInt() == 200);
+    CHECK(xhrObj->property("allowedBody").toString() == QStringLiteral("OK"));
+    CHECK(xhrObj->property("doneBlocked").toBool());
+    CHECK(xhrObj->property("blockedFailed").toBool());
+    xhrObj.reset();
+    goodObj.reset();
+    manager.setModEnabled(QStringLiteral("sandbox-mod"), false);
+
     // Quarantine disables override mods
     manager.quarantineOverrideMods(QStringLiteral("simulated crash"));
     CHECK(manager.activeOverrideCount() == 0);
     CHECK(manager.activeModCount() == 0);
+
+    // Catalog & audio override permissions gating
+    const QString overrideModDir = ymusic::paths::modsDirectory() + QStringLiteral("/catalog-mod");
+    CHECK(writeText(overrideModDir + QStringLiteral("/manifest.json"), R"({
+        "id": "catalog-mod",
+        "name": "Catalog Override Mod",
+        "version": "1.0.0",
+        "apiVersion": 1,
+        "permissions": ["catalog:override", "audio:override"]
+    })"));
+    manager.reloadMods();
+    manager.setModEnabled(QStringLiteral("catalog-mod"), true);
+    ModApi *catApi = manager.apiForMod(QStringLiteral("catalog-mod"));
+    CHECK(catApi != nullptr);
+    QVariantMap overrides;
+    QVariantMap trackOv;
+    trackOv.insert(QStringLiteral("title"), QStringLiteral("Uncensored Title"));
+    trackOv.insert(QStringLiteral("audioUrl"), QStringLiteral("https://cdn.example.com/track.mp3"));
+    overrides.insert(QStringLiteral("12345"), trackOv);
+    CHECK(catApi->setTrackOverrides(overrides));
+    QVariantList injected;
+    QVariantMap extraTrack;
+    extraTrack.insert(QStringLiteral("id"), QStringLiteral("99999"));
+    extraTrack.insert(QStringLiteral("title"), QStringLiteral("Restored Track"));
+    injected.append(extraTrack);
+    CHECK(catApi->setAlbumInjections(QStringLiteral("555"), injected));
+    catApi->clearTrackOverrides();
+    manager.setModEnabled(QStringLiteral("catalog-mod"), false);
 
     // Safe mode never activates mods or overrides
     manager.setModEnabled(QStringLiteral("demo-mod"), true);

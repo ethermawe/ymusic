@@ -1,5 +1,5 @@
 import QtQuick
-import ymusic.ui
+import ymusic.sdk 1.0
 
 Column {
     id: root
@@ -11,7 +11,7 @@ Column {
         width: parent.width
         wrapMode: Text.WordWrap
         text: "Настройки демонстрационного мода сохраняются в изолированном JSON-файле mod-data/hello-ymusic.json."
-        color: Appearance.colors.onSurfaceVariant
+        color: Theme.colors.onSurfaceVariant
     }
 
     Row {

@@ -39,7 +39,7 @@ QtObject {
     }
 
     readonly property Connections modPageAutoClose: Connections {
-        target: backend
+        target: Backend
         function onViewHeaderChanged() {
             if (root.activeModPageId.length > 0) {
                 root.activeModPageId = ""
@@ -77,9 +77,9 @@ QtObject {
     Behavior on spinSpeed {
         NumberAnimation { duration: 900; easing.type: Easing.InOutSine }
     }
-    readonly property real spin: spinClock.value
+    readonly property real spin: SpinClock.value
     readonly property Binding spinDrive: Binding {
-        target: spinClock
+        target: SpinClock
         property: "speed"
         value: root.spinSpeed
     }
@@ -98,14 +98,14 @@ QtObject {
     property string lyricsWriters: ""
     property string lyricsMajor: ""
     // Smooth 60fps playback position interpolation while synced lyrics are visible
-    property real smoothPositionSecs: backend.positionSecs
-    readonly property bool karaokeClockActive: backend.playing && lyricsSynced && (showingLyrics || immersiveOpen)
+    property real smoothPositionSecs: Backend.positionSecs
+    readonly property bool karaokeClockActive: Backend.playing && lyricsSynced && (showingLyrics || immersiveOpen)
 
     readonly property Connections lyricsPosSync: Connections {
-        target: backend
+        target: Backend
         function onProgressChanged() {
-            if (!root.karaokeClockActive || Math.abs(root.smoothPositionSecs - backend.positionSecs) > 0.35) {
-                root.smoothPositionSecs = backend.positionSecs
+            if (!root.karaokeClockActive || Math.abs(root.smoothPositionSecs - Backend.positionSecs) > 0.35) {
+                root.smoothPositionSecs = Backend.positionSecs
             }
         }
         function onNowPlayingChanged() {
@@ -116,9 +116,12 @@ QtObject {
     readonly property FrameAnimation karaokeFrame: FrameAnimation {
         running: root.karaokeClockActive
         onTriggered: {
-            const nextPos = root.smoothPositionSecs + frameTime
-            const cap = backend.durationSecs > 0 ? Math.min(backend.durationSecs, backend.positionSecs + 0.35) : backend.positionSecs + 0.35
-            root.smoothPositionSecs = Math.min(cap, Math.max(backend.positionSecs - 0.15, nextPos))
+            const speed = AppSettings ? Math.max(0.5, Math.min(2.0, AppSettings.playbackSpeed)) : 1.0
+            const nextPos = root.smoothPositionSecs + frameTime * speed
+            const lead = 0.35 * speed
+            const lag = 0.15 * speed
+            const cap = Backend.durationSecs > 0 ? Math.min(Backend.durationSecs, Backend.positionSecs + lead) : Backend.positionSecs + lead
+            root.smoothPositionSecs = Math.min(cap, Math.max(Backend.positionSecs - lag, nextPos))
         }
     }
 
@@ -171,7 +174,7 @@ QtObject {
             return Math.max(0, Math.min(1, smoothPositionSecs / firstLyricTimeSecs))
         }
         const start = Number(lyricsLines[idx].time)
-        let end = backend.durationSecs > start ? backend.durationSecs : start + 4.0
+        let end = Backend.durationSecs > start ? Backend.durationSecs : start + 4.0
         for (let i = idx + 1; i < lyricsLines.length; ++i) {
             const raw = lyricsLines[i] ? lyricsLines[i].time : undefined
             if (raw !== undefined && raw !== null) {
@@ -197,18 +200,18 @@ QtObject {
     }
 
     function ensureLyrics(forceCheck: bool) {
-        if (!backend.hasTrack || backend.nowId === "") {
+        if (!Backend.hasTrack || Backend.nowId === "") {
             return
         }
         if (!forceCheck && !immersiveOpen && !showingLyrics) {
             return
         }
-        if (lyricsTrackId === backend.nowId) {
+        if (lyricsTrackId === Backend.nowId) {
             if (!forceCheck || lyricsLoading || (lyricsLines && lyricsLines.length > 0)) {
                 return
             }
         }
-        lyricsTrackId = backend.nowId
+        lyricsTrackId = Backend.nowId
         lyricsLoading = true
         lyricsSynced = false
         lyricsWordSynced = false
@@ -218,12 +221,12 @@ QtObject {
         lyricsWriters = ""
         lyricsMajor = ""
         ModManager.syncLyricsState(lyricsTrackId, false, [])
-        backend.feature({
+        Backend.feature({
             action: "lyrics",
-            id: backend.nowId,
-            sourceMode: appSettings.lyricsSourceMode,
-            preferWordSync: appSettings.lrclibPreferWordSync,
-            lrclibUrl: appSettings.lrclibBaseUrl
+            id: Backend.nowId,
+            sourceMode: AppSettings.lyricsSourceMode,
+            preferWordSync: AppSettings.lrclibPreferWordSync,
+            lrclibUrl: AppSettings.lrclibBaseUrl
         })
     }
 
@@ -236,7 +239,7 @@ QtObject {
     }
 
     readonly property Connections lyricsSettingsSync: Connections {
-        target: appSettings
+        target: AppSettings
         function onLyricsSettingsChanged() {
             if (root.showingLyrics || root.immersiveOpen) {
                 root.reloadLyrics()
@@ -247,7 +250,7 @@ QtObject {
     }
 
     readonly property Connections lyricsWatcher: Connections {
-        target: backend
+        target: Backend
         function onNowPlayingChanged() { root.ensureLyrics(false) }
         function onFeatureResult(result) {
             if (result.type === "toast" && result.message) {
@@ -328,10 +331,9 @@ QtObject {
     signal burstRequested(Item item, string kind)
     signal createPlaylistRequested()
     signal settingsRequested()
-    signal devToolsRequested()
 
     function burst(item: Item, kind: string) {
-        if (item !== null && !Appearance.performanceMode && appSettings.burstsEnabled) {
+        if (item !== null && !Appearance.performanceMode && AppSettings.burstsEnabled) {
             burstRequested(item, kind)
         }
     }
@@ -344,15 +346,15 @@ QtObject {
 
     function goToAlbum() {
         immersiveOpen = false
-        backend.openNowAlbum()
+        Backend.openNowAlbum()
     }
 
     function goToArtist(artistId: string, artistName: string) {
         immersiveOpen = false
         if (artistId && artistId.length > 0) {
-            backend.openArtist(artistId)
+            Backend.openArtist(artistId)
         } else {
-            backend.openNowArtist()
+            Backend.openNowArtist()
         }
     }
 }

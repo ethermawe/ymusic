@@ -479,7 +479,7 @@ Item {
                         width: parent.width
                         lineText: line.words
                         wordTimings: line.wordList
-                        wordKaraokeActive: line.isCurrent && UiState.lyricsWordSynced && appSettings.lyricsWordKaraoke && line.wordList.length > 0
+                        wordKaraokeActive: line.isCurrent && UiState.lyricsWordSynced && AppSettings.lyricsWordKaraoke && line.wordList.length > 0
                         isCurrent: line.isCurrent
                         synced: UiState.lyricsSynced
                         isPast: line.isPast
@@ -528,14 +528,14 @@ Item {
                 id: mouseArea
                 anchors.fill: parent
                 hoverEnabled: true
-                enabled: UiState.lyricsSynced && line.hasTime && backend.durationSecs > 0
+                enabled: UiState.lyricsSynced && line.hasTime && Backend.durationSecs > 0
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: {
                     line.highlighted = true;
                     flash.restart();
                     autoReturnTimer.stop();
                     list.manualBrowsing = false;
-                    backend.seek(Math.max(0, Math.min(1, line.timeSecs / backend.durationSecs)));
+                    Backend.seek(Math.max(0, Math.min(1, line.timeSecs / Backend.durationSecs)));
                 }
             }
         }

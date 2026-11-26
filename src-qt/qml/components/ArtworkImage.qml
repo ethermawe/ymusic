@@ -40,8 +40,8 @@ Item {
     property bool loading: false
     property color blankTopColor: Appearance.colors.surfaceContainerHigh
     property color blankBottomColor: Appearance.colors.surfaceContainer
-    readonly property bool ready: showArtwork && front.status === Image.Ready && appSettings.coversEnabled && source.toString().length > 0
-    readonly property bool showArtPlaceholder: showArtwork && !loading && (!appSettings.coversEnabled || source.toString().length === 0 || front.status === Image.Error)
+    readonly property bool ready: showArtwork && front.status === Image.Ready && AppSettings.coversEnabled && source.toString().length > 0
+    readonly property bool showArtPlaceholder: showArtwork && !loading && (!AppSettings.coversEnabled || source.toString().length === 0 || front.status === Image.Error)
     property int maximumPixelSize: 2048
     readonly property int pixelSize: {
         const ratio = Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
@@ -56,7 +56,7 @@ Item {
     property real dim: 0
     property bool squiggly: true
     property real squiggleAmplitudeBoost: 1
-    readonly property bool showsSquiggle: circular && squiggly && !appSettings.noShapes && Math.min(width, height) >= 40
+    readonly property bool showsSquiggle: circular && squiggly && !AppSettings.noShapes && Math.min(width, height) >= 40
     property color squiggleColor: Appearance.colors.primary
     property bool squiggleFollowsPlayback: false
     property bool squiggleTurning: hover.hovered
@@ -104,7 +104,7 @@ Item {
         property color borderColor
         property size uvScale: imageAspect > itemAspect ? Qt.size(itemAspect / imageAspect, 1) : Qt.size(1, imageAspect / itemAspect)
         property point uvOffset: Qt.point((1 - uvScale.width) / 2, (1 - uvScale.height) / 2)
-        property real waviness: appSettings.noShapes ? 0 : root.waviness
+        property real waviness: AppSettings.noShapes ? 0 : root.waviness
         property real wavelength: root.wavelength
         property real phase: root.wavePhase
         property real ringWaves: root.showsSquiggle ? root.squiggleWaves : 0
@@ -121,7 +121,7 @@ Item {
 
     Drift {
         id: waveDrift
-        active: Math.abs(root.waviness) > 0.01 && root.visible && !appSettings.noShapes
+        active: Math.abs(root.waviness) > 0.01 && root.visible && !AppSettings.noShapes
         speed: 2 * Math.PI / 2.4
     }
 
@@ -209,7 +209,7 @@ Item {
             visible: false
             asynchronous: true
             cache: root.cache
-            source: root.showArtwork && appSettings.coversEnabled ? root.artworkUrl(root.source) : ""
+            source: root.showArtwork && AppSettings.coversEnabled ? root.artworkUrl(root.source) : ""
             sourceSize: Qt.size(root.pixelSize, root.pixelSize)
             onStatusChanged: {
                 if (status === Image.Error) {

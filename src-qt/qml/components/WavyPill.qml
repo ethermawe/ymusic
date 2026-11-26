@@ -30,7 +30,7 @@ ShaderEffect {
 
     property size itemSize: Qt.size(width, height)
     property real cornerRadius: Math.min(width, height) / 2
-    property real amplitude: appSettings.noShapes ? 0 : (pressed ? 4 : (hovered ? 3.2 : 2.2))
+    property real amplitude: AppSettings.noShapes ? 0 : (pressed ? 4 : (hovered ? 3.2 : 2.2))
     property real wavelength: 15
     readonly property real phase: drift.value
 
@@ -41,7 +41,7 @@ ShaderEffect {
 
     Drift {
         id: drift
-        active: root.hovered && root.visible && !appSettings.noShapes
+        active: root.hovered && root.visible && !AppSettings.noShapes
         speed: 2 * Math.PI / 1.6
     }
 

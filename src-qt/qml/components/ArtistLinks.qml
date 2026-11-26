@@ -53,7 +53,7 @@ Text {
 
     onLinkActivated: (link) => {
         if (root.clickable && link) {
-            backend.openArtist(link);
+            Backend.openArtist(link);
             root.artistActivated();
         }
     }
@@ -69,7 +69,7 @@ Text {
         enabled: root.clickable && (!root.links || root.links.length === 0) && root.fallbackClickable
         onTapped: {
             if (root.handleDefaultFallback) {
-                backend.openNowArtist();
+                Backend.openNowArtist();
                 root.artistActivated();
             } else {
                 root.fallbackActivated();

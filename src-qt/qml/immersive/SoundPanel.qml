@@ -28,7 +28,7 @@ Item {
     property MaterialScheme scheme: PlayerStyle.darkScheme
     readonly property color accent: scheme.primary
     readonly property color secondaryText: Qt.rgba(1, 1, 1, 0.65)
-    readonly property bool tempoModified: Math.abs(backend.tempo - 1) > 0.01
+    readonly property bool tempoModified: Math.abs(Backend.tempo - 1) > 0.01
 
     implicitHeight: column.implicitHeight
 
@@ -95,7 +95,7 @@ Item {
                 StyledText {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: appSettings.visualizersEnabled ? "Активен" : "Выкл"
+                    text: AppSettings.visualizersEnabled ? "Активен" : "Выкл"
                     font.pixelSize: Appearance.fontSize.smaller
                     color: root.secondaryText
                 }
@@ -105,10 +105,10 @@ Item {
                 width: parent.width
                 height: 96
                 kind: SpectrumView.Equalizer
-                wave: appSettings.visualizerShape === "wave"
+                wave: AppSettings.visualizerShape === "wave"
                 continuous: true
-                sensitivity: appSettings.visualizerSensitivity
-                active: backend.playing && appSettings.visualizersEnabled
+                sensitivity: AppSettings.visualizerSensitivity
+                active: Backend.playing && AppSettings.visualizersEnabled
             }
         }
 
@@ -133,7 +133,7 @@ Item {
                     StyledText {
                         id: speedVal
                         anchors.centerIn: parent
-                        text: backend.tempo.toFixed(2) + "×"
+                        text: Backend.tempo.toFixed(2) + "×"
                         tabularNumbers: true
                         font.pixelSize: Appearance.fontSize.smaller
                         font.weight: Font.DemiBold
@@ -143,8 +143,8 @@ Item {
                     TapHandler {
                         enabled: root.tempoModified
                         onTapped: {
-                            backend.setTempo(1.0);
-                            appSettings.playbackSpeed = 1.0;
+                            Backend.setTempo(1.0);
+                            AppSettings.playbackSpeed = 1.0;
                         }
                     }
                 }
@@ -157,14 +157,14 @@ Item {
                 to: 2.0
                 stepSize: 0.05
                 snapMode: T.Slider.SnapAlways
-                value: backend.tempo
+                value: Backend.tempo
                 trackThickness: 10
                 activeColor: root.accent
                 inactiveColor: Qt.rgba(1, 1, 1, 0.16)
                 onMoved: {
                     const v = Number(value.toFixed(2));
-                    backend.setTempo(v);
-                    appSettings.playbackSpeed = v;
+                    Backend.setTempo(v);
+                    AppSettings.playbackSpeed = v;
                 }
             }
         }
@@ -178,33 +178,33 @@ Item {
 
             ToggleRow {
                 title: "Визуализатор"
-                value: appSettings.immersiveVisualizer
-                onToggledTo: (next) => appSettings.immersiveVisualizer = next
+                value: AppSettings.immersiveVisualizer
+                onToggledTo: (next) => AppSettings.immersiveVisualizer = next
             }
             ToggleRow {
                 title: "Кольцевой режим"
-                value: appSettings.circularVisualizer
-                onToggledTo: (next) => appSettings.circularVisualizer = next
+                value: AppSettings.circularVisualizer
+                onToggledTo: (next) => AppSettings.circularVisualizer = next
             }
             ToggleRow {
                 title: "Волна вместо столбцов"
-                value: appSettings.visualizerShape === "wave"
-                onToggledTo: (next) => appSettings.visualizerShape = next ? "wave" : "bars"
+                value: AppSettings.visualizerShape === "wave"
+                onToggledTo: (next) => AppSettings.visualizerShape = next ? "wave" : "bars"
             }
             ToggleRow {
                 title: "Живой реактивный фон"
-                value: appSettings.livingBackdrop
-                onToggledTo: (next) => appSettings.livingBackdrop = next
+                value: AppSettings.livingBackdrop
+                onToggledTo: (next) => AppSettings.livingBackdrop = next
             }
             ToggleRow {
                 title: "Lossless качество (FLAC)"
-                value: backend.audioQuality === "lossless"
-                onToggledTo: (next) => backend.feature({action: "set_audio_quality", quality: next ? "lossless" : "hq"})
+                value: Backend.audioQuality === "lossless"
+                onToggledTo: (next) => Backend.feature({action: "set_audio_quality", quality: next ? "lossless" : "hq"})
             }
             ToggleRow {
                 title: "Выравнивание громкости (R128)"
-                value: backend.normalizeVolume
-                onToggledTo: (next) => backend.feature({action: "set_normalize_volume", enabled: next})
+                value: Backend.normalizeVolume
+                onToggledTo: (next) => Backend.feature({action: "set_normalize_volume", enabled: next})
             }
         }
     }

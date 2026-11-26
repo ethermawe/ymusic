@@ -3,6 +3,10 @@
 #include "AppSettings.h"
 #include "app/Paths.h"
 #include "mods/ModApi.h"
+#include "mods/ModNetworkAccessManager.h"
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+#include "artwork/ArtworkCache.h"
+#endif
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -13,9 +17,19 @@
 #include <QFileInfo>
 #include <QJSEngine>
 #include <QLoggingCategory>
-#include <QProcess>
+#include <QQmlComponent>
+#include <QQmlContext>
 #include <QQmlEngine>
+#include <QQmlError>
 #include <QTemporaryDir>
+
+#if __has_include(<QtCore/private/qzipreader_p.h>)
+#include <QtCore/private/qzipreader_p.h>
+#elif __has_include(<QtGui/private/qzipreader_p.h>)
+#include <QtGui/private/qzipreader_p.h>
+#else
+#error "QZipReader private header not found"
+#endif
 
 #include <algorithm>
 #include <limits>
@@ -28,6 +42,8 @@ namespace {
 
 ModManager *s_instance = nullptr;
 constexpr int kMaxLogEntries = 200;
+constexpr int kMaxArchiveFiles = 2000;
+constexpr qint64 kMaxArchiveBytes = 50LL * 1024 * 1024;
 
 bool copyDirectoryRecursively(const QString &srcDirPath, const QString &dstDirPath)
 {
@@ -134,8 +150,159 @@ int ModManager::activeModCount() const
     return static_cast<int>(m_apis.size());
 }
 
+void ModManager::destroyAllSandboxes()
+{
+    for (auto it = m_sandboxes.begin(); it != m_sandboxes.end(); ++it) {
+        if (it.value().engine) {
+            it.value().engine->removeUrlInterceptor(it.value().urlInterceptor.get());
+            delete it.value().engine.data();
+        }
+    }
+    m_sandboxes.clear();
+}
+
+const ModManifest *ModManager::manifestForMod(const QString &modId) const
+{
+    for (const ModManifest &m : m_manifests) {
+        if (m.id == modId) {
+            return &m;
+        }
+    }
+    return nullptr;
+}
+
+QString ModManager::modDirectoryForMod(const QString &modId) const
+{
+    if (const ModManifest *m = manifestForMod(modId)) {
+        return m->directory;
+    }
+    return {};
+}
+
+QQmlEngine *ModManager::sandboxEngineForMod(const QString &modId)
+{
+    if (!modsEnabled() || modId.isEmpty() || !m_apis.contains(modId)) {
+        return nullptr;
+    }
+    auto existing = m_sandboxes.find(modId);
+    if (existing != m_sandboxes.end() && existing.value().engine) {
+        return existing.value().engine.data();
+    }
+
+    const ModManifest *manifest = manifestForMod(modId);
+    if (!manifest || !manifest->valid) {
+        return nullptr;
+    }
+
+    auto *eng = new QQmlEngine(this);
+    QPointer<ModManager> self(this);
+    auto onError = [self](const QString &id, const QString &msg) {
+        if (self) {
+            self->reportModError(id, msg);
+        }
+    };
+
+    auto interceptor = std::make_shared<ModSandboxUrlInterceptor>(manifest->id, manifest->directory, onError);
+    eng->addUrlInterceptor(interceptor.get());
+    eng->setNetworkAccessManagerFactory(new ModNetworkAccessManagerFactory(*manifest, onError));
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    eng->addImageProvider(QStringLiteral("art"), new ymusic::ArtworkImageProvider);
+#endif
+
+    // Best-effort JS hardening inside the mod engine (Qt object methods are C++ Q_INVOKABLE and may be non-writable).
+    eng->evaluate(QStringLiteral(
+        "(function(){"
+        "  try { Object.defineProperty(Qt, 'openUrlExternally', { value: function(){ return false; }, writable: false, configurable: false }); } catch(e) {}"
+        "  try { Object.defineProperty(Qt, 'createQmlObject', { value: function(){ throw new Error('Qt.createQmlObject is disabled in mod sandbox'); }, writable: false, configurable: false }); } catch(e) {}"
+        "})();"));
+
+    ModSandbox sb;
+    sb.engine = eng;
+    sb.urlInterceptor = std::move(interceptor);
+    m_sandboxes.insert(modId, std::move(sb));
+    return eng;
+}
+
+QObject *ModManager::createSandboxedObject(const QString &modId,
+                                           const QUrl &sourceUrl,
+                                           const QVariantMap &slotContext,
+                                           QString *errorOut)
+{
+    ModApi *api = apiForMod(modId);
+    QQmlEngine *modEngine = sandboxEngineForMod(modId);
+    const QString modDir = modDirectoryForMod(modId);
+    if (!api || !modEngine || modDir.isEmpty()) {
+        if (errorOut) *errorOut = QStringLiteral("Мод не активен: %1").arg(modId);
+        return nullptr;
+    }
+
+    if (sourceUrl.isLocalFile()) {
+        QString importErr;
+        if (!validateModQmlImports(sourceUrl.toLocalFile(), modDir, &importErr)) {
+            reportModError(modId, importErr);
+            if (errorOut) *errorOut = importErr;
+            return nullptr;
+        }
+    }
+
+    auto *modCtx = new QQmlContext(modEngine->rootContext(), modEngine);
+    modCtx->setContextProperty(QStringLiteral("modApi"), api);
+    modCtx->setContextProperty(QStringLiteral("slotContext"), slotContext);
+
+    QQmlComponent component(modEngine, sourceUrl, QQmlComponent::PreferSynchronous);
+    if (component.isError()) {
+        QStringList errs;
+        for (const QQmlError &e : component.errors()) {
+            errs.append(e.toString());
+        }
+        const QString msg = errs.join(QStringLiteral(" | "));
+        delete modCtx;
+        reportModError(modId, msg);
+        if (errorOut) *errorOut = msg;
+        return nullptr;
+    }
+
+    QObject *obj = component.beginCreate(modCtx);
+    if (!obj) {
+        QStringList errs;
+        for (const QQmlError &e : component.errors()) {
+            errs.append(e.toString());
+        }
+        const QString msg = errs.isEmpty() ? sourceUrl.toString() : errs.join(QStringLiteral(" | "));
+        delete modCtx;
+        reportModError(modId, msg);
+        if (errorOut) *errorOut = msg;
+        return nullptr;
+    }
+
+    if (obj->metaObject()->indexOfProperty("modApi") >= 0) {
+        obj->setProperty("modApi", QVariant::fromValue(static_cast<QObject *>(api)));
+    }
+    if (obj->metaObject()->indexOfProperty("slotContext") >= 0) {
+        obj->setProperty("slotContext", slotContext);
+    }
+
+    component.completeCreate();
+    if (component.isError()) {
+        QStringList errs;
+        for (const QQmlError &e : component.errors()) {
+            errs.append(e.toString());
+        }
+        const QString msg = errs.join(QStringLiteral(" | "));
+        delete obj;
+        delete modCtx;
+        reportModError(modId, msg);
+        if (errorOut) *errorOut = msg;
+        return nullptr;
+    }
+
+    modCtx->setParent(obj);
+    return obj;
+}
+
 void ModManager::destroyAllApis()
 {
+    destroyAllSandboxes();
     const auto apis = m_apis.values();
     m_apis.clear();
     for (const QPointer<ModApi> &api : apis) {
@@ -168,7 +335,11 @@ void ModManager::scanAndSync(bool initialStartup)
     if (modsDir.exists()) {
         const auto subdirs = modsDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks, QDir::Name);
         for (const QFileInfo &dirInfo : subdirs) {
-            m_manifests.append(parseManifest(dirInfo.absoluteFilePath()));
+            ModManifest parsed = parseManifest(dirInfo.absoluteFilePath());
+            for (const QString &w : parsed.warnings) {
+                appendLog(parsed.id, QStringLiteral("warn"), w);
+            }
+            m_manifests.append(std::move(parsed));
         }
     }
 
@@ -366,6 +537,8 @@ QVariantList ModManager::modsVariantList() const
         item.insert(QStringLiteral("directory"), m.directory);
         item.insert(QStringLiteral("valid"), m.valid);
         item.insert(QStringLiteral("error"), m.error);
+        item.insert(QStringLiteral("warnings"), m.warnings);
+        item.insert(QStringLiteral("apiVersion"), m.apiVersion);
         item.insert(QStringLiteral("enabled"), m.valid && enabledIds.contains(m.id));
         item.insert(QStringLiteral("permissions"), m.permissions);
         item.insert(QStringLiteral("hasOverrides"), !m.overridesMap.isEmpty());
@@ -701,11 +874,20 @@ QVariantMap ModManager::installModFromFolder(const QUrl &folderUrl)
         return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), parsed.error}};
     }
 
+    const bool hasOverrides = !parsed.overridesMap.isEmpty();
+    const QStringList overrideTargets(parsed.overridesMap.keys());
+
     const QString dstPath = ymusic::paths::modsDirectory() + u'/' + parsed.id;
     const QFileInfo dstInfo(dstPath);
     if (dstInfo.exists() && dstInfo.canonicalFilePath() == srcInfo.canonicalFilePath()) {
         scanAndSync(false);
-        return {{QStringLiteral("ok"), true}, {QStringLiteral("id"), parsed.id}, {QStringLiteral("name"), parsed.name}};
+        return {
+            {QStringLiteral("ok"), true},
+            {QStringLiteral("id"), parsed.id},
+            {QStringLiteral("name"), parsed.name},
+            {QStringLiteral("hasOverrides"), hasOverrides},
+            {QStringLiteral("overrideTargets"), overrideTargets},
+        };
     }
 
     if (dstInfo.exists()) {
@@ -717,7 +899,13 @@ QVariantMap ModManager::installModFromFolder(const QUrl &folderUrl)
 
     appendLog(parsed.id, QStringLiteral("info"), QStringLiteral("Установлен мод «%1» v%2").arg(parsed.name, parsed.version));
     scanAndSync(false);
-    return {{QStringLiteral("ok"), true}, {QStringLiteral("id"), parsed.id}, {QStringLiteral("name"), parsed.name}};
+    return {
+        {QStringLiteral("ok"), true},
+        {QStringLiteral("id"), parsed.id},
+        {QStringLiteral("name"), parsed.name},
+        {QStringLiteral("hasOverrides"), hasOverrides},
+        {QStringLiteral("overrideTargets"), overrideTargets},
+    };
 }
 
 QVariantMap ModManager::installModFromArchive(const QUrl &archiveUrl)
@@ -737,35 +925,76 @@ QVariantMap ModManager::installModFromArchive(const QUrl &archiveUrl)
         return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Не удалось создать временную папку для распаковки")}};
     }
 
-    auto tryExtract = [&](const QString &program, const QStringList &args) -> int {
-        QProcess proc;
-        proc.start(program, args);
-        if (!proc.waitForStarted(3000)) return -2;
-        if (!proc.waitForFinished(20000)) {
-            proc.kill();
-            return -1;
-        }
-        return (proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0) ? 0 : 1;
-    };
+    QZipReader zip(archiveInfo.absoluteFilePath(), QIODevice::ReadOnly);
+    if (!zip.isReadable() || zip.status() != QZipReader::NoError) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Не удалось открыть архив (проверьте формат ZIP/ymmod)")}};
+    }
 
-    int res = -2;
-#ifdef Q_OS_WIN
-    res = tryExtract(QStringLiteral("tar"), {QStringLiteral("-xf"), archiveInfo.absoluteFilePath(), QStringLiteral("-C"), tempDir.path()});
-#else
-    res = tryExtract(QStringLiteral("unzip"), {QStringLiteral("-qq"), QStringLiteral("-o"), archiveInfo.absoluteFilePath(), QStringLiteral("-d"), tempDir.path()});
-    if (res == -2) {
-        res = tryExtract(QStringLiteral("bsdtar"), {QStringLiteral("-xf"), archiveInfo.absoluteFilePath(), QStringLiteral("-C"), tempDir.path()});
+    const int entryCount = zip.count();
+    if (entryCount <= 0) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Архив пуст или повреждён")}};
     }
-    if (res == -2) {
-        res = tryExtract(QStringLiteral("python3"), {QStringLiteral("-m"), QStringLiteral("zipfile"), QStringLiteral("-e"), archiveInfo.absoluteFilePath(), tempDir.path()});
+    if (entryCount > kMaxArchiveFiles) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Архив превышает лимит файлов (максимум %1)").arg(kMaxArchiveFiles)}};
     }
-#endif
-    if (res != 0) {
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Не удалось распаковать архив (проверьте формат ZIP/ymmod)")}};
+
+    const QString tempCanonical = QFileInfo(tempDir.path()).canonicalFilePath();
+    qint64 declaredBytes = 0;
+    qint64 actualBytes = 0;
+
+    for (int i = 0; i < entryCount; ++i) {
+        const QZipReader::FileInfo info = zip.entryInfoAt(i);
+        if (!info.isValid()) {
+            continue;
+        }
+        if (info.isSymLink) {
+            return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Архив содержит симлинки, установка отклонена")}};
+        }
+
+        const QString rawPath = info.filePath;
+        const QString normalized = rawPath.trimmed().replace(u'\\', u'/');
+        if (normalized.isEmpty() || normalized.startsWith(u'/') || QDir::isAbsolutePath(normalized)
+            || (normalized.size() >= 2 && normalized.at(1) == u':')) {
+            return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Небезопасный путь внутри архива")}};
+        }
+        const QStringList segments = normalized.split(u'/', Qt::SkipEmptyParts);
+        if (segments.isEmpty() || segments.contains(QStringLiteral(".."))) {
+            return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Небезопасный путь внутри архива")}};
+        }
+
+        if (info.size < 0 || declaredBytes + info.size > kMaxArchiveBytes) {
+            return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Распакованный размер архива превышает лимит 50 МБ")}};
+        }
+        declaredBytes += info.size;
+
+        const QString destPath = QDir::cleanPath(tempCanonical + u'/' + segments.join(u'/'));
+        if (!destPath.startsWith(tempCanonical + u'/')) {
+            return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Небезопасный путь внутри архива")}};
+        }
+
+        if (info.isDir) {
+            if (!QDir().mkpath(destPath)) {
+                return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Не удалось создать каталог при распаковке архива")}};
+            }
+        } else if (info.isFile) {
+            const QByteArray data = zip.fileData(rawPath);
+            actualBytes += data.size();
+            if (actualBytes > kMaxArchiveBytes) {
+                return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Распакованный размер архива превышает лимит 50 МБ")}};
+            }
+            const QFileInfo destInfo(destPath);
+            if (!QDir().mkpath(destInfo.absolutePath())) {
+                return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Не удалось создать каталог при распаковке архива")}};
+            }
+            QFile outFile(destPath);
+            if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate) || outFile.write(data) != data.size()) {
+                return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Не удалось записать файл при распаковке архива")}};
+            }
+        }
     }
+    zip.close();
 
     // Verify no symlink / zip-slip escaped tempDir
-    const QString tempCanonical = QFileInfo(tempDir.path()).canonicalFilePath();
     QDirIterator checkIt(tempDir.path(), QDir::AllEntries | QDir::NoDotAndDotDot | QDir::System, QDirIterator::Subdirectories);
     while (checkIt.hasNext()) {
         checkIt.next();

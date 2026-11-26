@@ -6,7 +6,7 @@ import ymusic.ui
 Item {
     id: root
 
-    readonly property int activePage: UiState.activeModPageId.length > 0 ? -1 : backend.page
+    readonly property int activePage: UiState.activeModPageId.length > 0 ? -1 : Backend.page
     property bool compact: true
     property real expandedWidth: 0
     property bool resizing: false

@@ -20,12 +20,12 @@ Flickable {
     readonly property real innerWidth: Math.max(0, width - 2 * margin)
     readonly property bool narrow: innerWidth < 680
 
-    readonly property var personalCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("personal") : []
-    readonly property var newReleaseCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("new_releases") : []
-    readonly property var newPlaylistCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("new_playlists") : []
-    readonly property var userPlaylistCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("user_playlists") : []
-    readonly property var userAlbumCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("user_albums") : []
-    readonly property var uncategorizedCards: backend.cards.revision >= 0 ? backend.cards.cardsForSection("") : []
+    readonly property var personalCards: Backend.cards.revision >= 0 ? Backend.cards.cardsForSection("personal") : []
+    readonly property var newReleaseCards: Backend.cards.revision >= 0 ? Backend.cards.cardsForSection("new_releases") : []
+    readonly property var newPlaylistCards: Backend.cards.revision >= 0 ? Backend.cards.cardsForSection("new_playlists") : []
+    readonly property var userPlaylistCards: Backend.cards.revision >= 0 ? Backend.cards.cardsForSection("user_playlists") : []
+    readonly property var userAlbumCards: Backend.cards.revision >= 0 ? Backend.cards.cardsForSection("user_albums") : []
+    readonly property var uncategorizedCards: Backend.cards.revision >= 0 ? Backend.cards.cardsForSection("") : []
 
     component HomeSectionBlock: Column {
         id: secBlock
@@ -144,7 +144,7 @@ Flickable {
             Image {
                 id: spotlightSource
                 visible: false
-                source: appSettings.coversEnabled && backend.hasCover ? backend.nowCover : ""
+                source: AppSettings.coversEnabled && Backend.hasCover ? Backend.nowCover : ""
                 sourceSize: Qt.size(64, 64)
                 smooth: true
                 asynchronous: true
@@ -175,7 +175,7 @@ Flickable {
                     Layout.preferredWidth: root.narrow ? 124 : 152
                     Layout.preferredHeight: Layout.preferredWidth
                     Layout.alignment: root.narrow ? Qt.AlignLeft : Qt.AlignVCenter
-                    scale: spotlightArtHover.hovered && backend.hasTrack ? 1.04 : 1
+                    scale: spotlightArtHover.hovered && Backend.hasTrack ? 1.04 : 1
 
                     Behavior on scale {
                         enabled: !Appearance.performanceMode
@@ -189,7 +189,7 @@ Flickable {
                     }
 
                     Connections {
-                        target: backend
+                        target: Backend
                         function onTrackInstanceIdChanged() {
                             if (!Appearance.performanceMode && !Appearance.reduceMotion) {
                                 spotlightPopIn.restart()
@@ -210,7 +210,7 @@ Flickable {
 
                     ArtworkGlow {
                         anchors.fill: parent
-                        source: backend.hasCover ? backend.nowCover : ""
+                        source: Backend.hasCover ? Backend.nowCover : ""
                         intensity: 0.24
                         glowRadius: 24
                     }
@@ -218,18 +218,18 @@ Flickable {
                     ArtworkImage {
                         anchors.fill: parent
                         radius: Appearance.rounding.large
-                        source: backend.hasCover ? backend.nowCover : ""
+                        source: Backend.hasCover ? Backend.nowCover : ""
                         crossfade: true
                         placeholderSymbol: "music_note"
-                        fallbackKey: backend.nowTitle
+                        fallbackKey: Backend.nowTitle
                     }
 
                     HoverHandler {
                         id: spotlightArtHover
-                        cursorShape: backend.hasTrack ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        cursorShape: Backend.hasTrack ? Qt.PointingHandCursor : Qt.ArrowCursor
                     }
                     TapHandler {
-                        enabled: backend.hasTrack
+                        enabled: Backend.hasTrack
                         onTapped: UiState.openImmersive()
                     }
                 }
@@ -256,16 +256,16 @@ Flickable {
                             spacing: 6
                             MaterialSymbol {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: backend.playing ? "graphic_eq" : "music_note"
+                                text: Backend.playing ? "graphic_eq" : "music_note"
                                 iconSize: 14
                                 fill: 1
                                 color: Appearance.colors.onPrimaryContainer
-                                scale: backend.playing && !Appearance.reduceMotion && !Appearance.performanceMode
+                                scale: Backend.playing && !Appearance.reduceMotion && !Appearance.performanceMode
                                     ? 1 + 0.1 * Math.sin(UiState.spin * 6) : 1
                             }
                             StyledText {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: backend.playing ? "СЕЙЧАС ИГРАЕТ" : (backend.hasTrack ? "НА ПАУЗЕ" : "ВАШ ВКУС")
+                                text: Backend.playing ? "СЕЙЧАС ИГРАЕТ" : (Backend.hasTrack ? "НА ПАУЗЕ" : "ВАШ ВКУС")
                                 font.pixelSize: Appearance.fontSize.smallest
                                 font.weight: Font.Bold
                                 font.letterSpacing: 0.7
@@ -276,30 +276,30 @@ Flickable {
 
                     TitleText {
                         Layout.fillWidth: true
-                        text: backend.hasTrack ? backend.nowTitle : "Готовы слушать"
+                        text: Backend.hasTrack ? Backend.nowTitle : "Готовы слушать"
                         animateChange: true
                         changeDistanceY: 6
                         font.pixelSize: root.narrow ? 20 : 25
                         maximumLineCount: 2
                         wrapMode: Text.WordWrap
                         elide: Text.ElideRight
-                        font.underline: titleHover.hovered && backend.hasTrack && backend.nowHasAlbum
+                        font.underline: titleHover.hovered && Backend.hasTrack && Backend.nowHasAlbum
                         HoverHandler {
                             id: titleHover
-                            cursorShape: backend.hasTrack && backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            cursorShape: Backend.hasTrack && Backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
                         }
                         TapHandler {
-                            enabled: backend.hasTrack && backend.nowHasAlbum
-                            onTapped: backend.openNowAlbum()
+                            enabled: Backend.hasTrack && Backend.nowHasAlbum
+                            onTapped: Backend.openNowAlbum()
                         }
                     }
 
                     ArtistLinks {
                         Layout.fillWidth: true
-                        links: backend.hasTrack ? backend.nowArtistLinks : []
-                        fallbackText: backend.hasTrack ? backend.nowArtists : "Включите Мою волну или любой плейлист"
-                        clickable: backend.hasTrack
-                        fallbackClickable: backend.nowHasArtist
+                        links: Backend.hasTrack ? Backend.nowArtistLinks : []
+                        fallbackText: Backend.hasTrack ? Backend.nowArtists : "Включите Мою волну или любой плейлист"
+                        clickable: Backend.hasTrack
+                        fallbackClickable: Backend.nowHasArtist
                         font.pixelSize: Appearance.fontSize.normal
                         color: Appearance.colors.onSurfaceVariant
                         wrapMode: Text.WordWrap
@@ -313,40 +313,40 @@ Flickable {
                         PlayButton {
                             size: 46
                             iconSize: 24
-                            playing: backend.playing
-                            tooltip: backend.hasTrack ? (backend.playing ? "Пауза" : "Играть") : "Запустить Мою волну"
+                            playing: Backend.playing
+                            tooltip: Backend.hasTrack ? (Backend.playing ? "Пауза" : "Играть") : "Запустить Мою волну"
                             onClicked: {
-                                if (backend.hasTrack) backend.toggle();
-                                else backend.startWave();
+                                if (Backend.hasTrack) Backend.toggle();
+                                else Backend.startWave();
                             }
                         }
 
                         IconButton {
-                            visible: backend.hasTrack
-                            symbol: backend.nowLiked ? "favorite" : "favorite_border"
-                            toggled: backend.nowLiked
+                            visible: Backend.hasTrack
+                            symbol: Backend.nowLiked ? "favorite" : "favorite_border"
+                            toggled: Backend.nowLiked
                             burst: "hearts"
                             size: 40
                             iconSize: 22
-                            tooltip: backend.nowLiked ? "Убрать из Мне нравится" : "Мне нравится"
-                            onClicked: backend.toggleNowLike()
+                            tooltip: Backend.nowLiked ? "Убрать из Мне нравится" : "Мне нравится"
+                            onClicked: Backend.toggleNowLike()
                         }
 
                         TransportButton {
-                            visible: backend.hasTrack
+                            visible: Backend.hasTrack
                             symbol: "skip_next"
                             size: 40
                             iconSize: 24
                             effect: TransportButton.NudgeRight
                             hoverShape: "pill"
                             tooltip: "Следующий трек"
-                            onClicked: backend.next()
+                            onClicked: Backend.next()
                         }
 
                         Item { Layout.fillWidth: true }
 
                         TextButton {
-                            visible: backend.hasTrack
+                            visible: Backend.hasTrack
                             variant: TextButton.Tonal
                             symbol: "open_in_full"
                             text: "На весь экран"
@@ -371,7 +371,7 @@ Flickable {
                 subtitle: "Бесконечный поток по вашему вкусу"
                 symbol: "my_wave"
                 iconShape: "cookie9"
-                onClicked: backend.startWave()
+                onClicked: Backend.startWave()
             }
 
             HomeShortcut {
@@ -381,7 +381,7 @@ Flickable {
                 symbol: "favorite"
                 iconShape: "heart"
                 keepsShape: true
-                onClicked: backend.loadLikes()
+                onClicked: Backend.loadLikes()
             }
 
             HomeShortcut {
@@ -390,14 +390,14 @@ Flickable {
                 subtitle: "Самые популярные треки сейчас"
                 symbol: "trending_up"
                 iconShape: "sunny"
-                onClicked: backend.feature({action: "open_chart"})
+                onClicked: Backend.feature({action: "open_chart"})
             }
         }
 
         // Recently Played Shelf
         Column {
             width: parent.width
-            visible: backend.history.count > 0
+            visible: Backend.history.count > 0
             spacing: 12
 
             SectionHeader {
@@ -405,7 +405,7 @@ Flickable {
                 title: "Недавно прослушано"
                 symbol: "history"
                 iconShape: "clover4"
-                showsSeeAll: backend.history.count > 0
+                showsSeeAll: Backend.history.count > 0
                 seeAllText: "Очистить"
                 seeAllSymbol: "delete_sweep"
                 onSeeAll: clearHistory.open()
@@ -423,7 +423,7 @@ Flickable {
                     orientation: ListView.Horizontal
                     spacing: 12
                     clip: true
-                    model: backend.history
+                    model: Backend.history
 
                 delegate: Item {
                     id: historySlot
@@ -493,7 +493,7 @@ Flickable {
                         }
                         TapHandler {
                             id: tileTap
-                            onTapped: backend.feature({action: "play_history", id: historySlot.model.id})
+                            onTapped: Backend.feature({action: "play_history", id: historySlot.model.id})
                         }
                     }
                 }
@@ -529,7 +529,7 @@ Flickable {
             iconShape: "clover4"
             items: root.userPlaylistCards
             showsSeeAll: true
-            onSeeAllClicked: backend.loadPlaylists()
+            onSeeAllClicked: Backend.loadPlaylists()
         }
 
         HomeSectionBlock {
@@ -538,7 +538,7 @@ Flickable {
             iconShape: "sunny"
             items: root.userAlbumCards
             showsSeeAll: true
-            onSeeAllClicked: backend.loadAlbums()
+            onSeeAllClicked: Backend.loadAlbums()
         }
 
         HomeSectionBlock {
@@ -547,7 +547,7 @@ Flickable {
             iconShape: "sunny"
             items: root.uncategorizedCards
             showsSeeAll: true
-            onSeeAllClicked: backend.loadPlaylists()
+            onSeeAllClicked: Backend.loadPlaylists()
         }
 
         ModSlotHost {
@@ -561,7 +561,7 @@ Flickable {
         EmptyState {
             width: parent.width
             height: 180
-            visible: backend.cards.count === 0
+            visible: Backend.cards.count === 0
             symbol: "auto_awesome"
             title: "Подборки появятся здесь"
             description: "Музыка, плейлисты и альбомы из вашей библиотеки"
@@ -584,7 +584,7 @@ Flickable {
                 text: "Очистить"
                 variant: TextButton.Filled
                 onClicked: {
-                    backend.feature({action: "clear_history"});
+                    Backend.feature({action: "clear_history"});
                     clearHistory.accept();
                 }
             }

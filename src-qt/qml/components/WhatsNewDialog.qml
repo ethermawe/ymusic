@@ -6,7 +6,7 @@ import ymusic.ui
 StyledDialog {
     id: root
 
-    property string version: updater.currentVersion
+    property string version: Updater.currentVersion
 
     // Короткий список изменений по существу для каждой версии (4–6 пунктов).
     readonly property var notesByVersion: ({
@@ -30,8 +30,8 @@ StyledDialog {
     iconShape: "cookie9"
 
     onClosed: {
-        if (root.version.length > 0 && appSettings.lastSeenVersion !== root.version) {
-            appSettings.lastSeenVersion = root.version;
+        if (root.version.length > 0 && AppSettings.lastSeenVersion !== root.version) {
+            AppSettings.lastSeenVersion = root.version;
         }
     }
 

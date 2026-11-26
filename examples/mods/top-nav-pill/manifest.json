@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "author": "ymusic",
   "description": "Скрывает левый сайдбар и переносит навигацию в компактную парящую пилюлю в центре верхней панели.",
-  "apiVersion": 1,
+  "apiVersion": "1.0",
   "entry": {
     "settings": "ui/Settings.qml"
   },

@@ -54,18 +54,18 @@ Item {
             slotName: "queue.header"
             slotContext: ({
                 scheme: root.scheme,
-                count: backend.queue.count
+                count: Backend.queue.count
             })
         }
 
         IconButton {
-            visible: backend.queue.count > 0
+            visible: Backend.queue.count > 0
             symbol: "delete_sweep"
             size: 32
             iconSize: 18
             scheme: root.scheme
             tooltip: qsTr("Очистить очередь")
-            onClicked: backend.feature({ action: "queue", operation: "clear" })
+            onClicked: Backend.feature({ action: "queue", operation: "clear" })
         }
     }
 
@@ -77,7 +77,7 @@ Item {
         rightMargin: 12
         bottomMargin: 20
         clip: true
-        model: backend.queue
+        model: Backend.queue
         spacing: 2
         boundsBehavior: Flickable.StopAtBounds
         reuseItems: true
@@ -89,7 +89,7 @@ Item {
             spacing: 8
 
             StyledText {
-                Reveal.shown: backend.hasTrack
+                Reveal.shown: Backend.hasTrack
                 leftPadding: 6
                 text: qsTr("Сейчас играет")
                 font.pixelSize: Appearance.fontSize.smaller
@@ -98,21 +98,21 @@ Item {
             }
             QueueRow {
                 width: parent.width
-                Reveal.shown: backend.hasTrack
-                trackId: backend.nowId
-                titleText: backend.nowTitle
-                artistsText: backend.nowArtists
-                coverUrl: backend.hasCover ? backend.nowCover : ""
+                Reveal.shown: Backend.hasTrack
+                trackId: Backend.nowId
+                titleText: Backend.nowTitle
+                artistsText: Backend.nowArtists
+                coverUrl: Backend.hasCover ? Backend.nowCover : ""
                 current: true
-                isAi: backend.nowIsAi
+                isAi: Backend.nowIsAi
                 scheme: root.scheme
             }
             StyledText {
-                Reveal.shown: backend.queue.count > 0
+                Reveal.shown: Backend.queue.count > 0
                 leftPadding: 6
                 topPadding: 8
                 bottomPadding: 2
-                text: qsTr("Далее · ") + backend.queue.count
+                text: qsTr("Далее · ") + Backend.queue.count
                 font.pixelSize: Appearance.fontSize.smaller
                 font.weight: Font.Bold
                 color: root.scheme.onSurfaceVariant
@@ -131,7 +131,7 @@ Item {
             available: model.available === undefined ? true : Boolean(model.available)
             isAi: Boolean(model.isAi)
             scheme: root.scheme
-            onClicked: backend.trackAction(trackId, 3)
+            onClicked: Backend.trackAction(trackId, 3)
         }
     }
 
@@ -139,7 +139,7 @@ Item {
         anchors.centerIn: parent
         anchors.verticalCenterOffset: 24
         width: parent.width - 32
-        Reveal.shown: backend.queue.count === 0
+        Reveal.shown: Backend.queue.count === 0
         symbol: "queue_music"
         title: qsTr("Очередь пуста")
         description: qsTr("Запустите трек, альбом или Мою волну")

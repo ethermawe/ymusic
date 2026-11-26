@@ -8,7 +8,7 @@ WheelHandler {
     // Distance (px of content) per 1px of pixelDelta for discrete pixel steps, at 1.0x speed.
     property real pixelScale: 5.0
     property real lastEventMs: 0
-    readonly property real speedMultiplier: appSettings ? appSettings.scrollSpeed : 1.8
+    readonly property real speedMultiplier: AppSettings ? AppSettings.scrollSpeed : 1.8
     // One wheel event never moves more than this share of the viewport, and the queued
     // (not yet travelled) distance never exceeds maxQueuedViewports, so fast spinning
     // does not skip whole screens or keep gliding long after the wheel stops.

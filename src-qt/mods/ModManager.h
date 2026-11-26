@@ -15,6 +15,8 @@
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
+#include <memory>
+
 class AppSettings;
 class QJSEngine;
 class QQmlEngine;
@@ -81,6 +83,12 @@ public:
 
     void attachEngine(QQmlEngine *engine);
     ModUrlInterceptor *urlInterceptor() { return &m_interceptor; }
+    QQmlEngine *sandboxEngineForMod(const QString &modId);
+    QString modDirectoryForMod(const QString &modId) const;
+    QObject *createSandboxedObject(const QString &modId,
+                                   const QUrl &sourceUrl,
+                                   const QVariantMap &slotContext = {},
+                                   QString *errorOut = nullptr);
 
     bool safeMode() const { return m_safeMode; }
     bool modsEnabled() const;
@@ -158,10 +166,17 @@ signals:
     void createPlaylistRequested();
 
 private:
+    struct ModSandbox {
+        QPointer<QQmlEngine> engine;
+        std::shared_ptr<ModSandboxUrlInterceptor> urlInterceptor;
+    };
+
     void scanAndSync(bool initialStartup);
     void rebuildApis();
     void rebuildWatcher();
     void destroyAllApis();
+    void destroyAllSandboxes();
+    const ModManifest *manifestForMod(const QString &modId) const;
 
     AppSettings *m_settings = nullptr;
     YMusicBackend *m_backend = nullptr;
@@ -177,6 +192,7 @@ private:
     QHash<QString, QStringList> m_overrideConflicts;
     QHash<QString, QString> m_startupOverrides;
     QHash<QString, QPointer<ModApi>> m_apis;
+    QHash<QString, ModSandbox> m_sandboxes;
     QList<ModTrackMenuAction> m_trackMenuActions;
     QList<ModShortcutEntry> m_shortcuts;
     QList<ModLogEntry> m_logs;

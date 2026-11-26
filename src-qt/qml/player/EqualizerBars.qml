@@ -5,7 +5,7 @@ import ymusic.ui
 // Compatibility wrapper routing EqualizerBars callers to Swiftify's live FFT CompactMeter.
 SpectrumView {
     kind: SpectrumView.Compact
-    sensitivity: appSettings.visualizerSensitivity
+    sensitivity: AppSettings.visualizerSensitivity
     implicitWidth: 26
     implicitHeight: 22
 }

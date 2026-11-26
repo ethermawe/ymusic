@@ -111,6 +111,7 @@ ModApi::ModApi(ModManifest manifest,
 
 ModApi::~ModApi()
 {
+    clearTrackOverrides();
     if (m_manager) {
         m_manager->clearTrackMenuActionsForMod(m_manifest.id);
         m_manager->clearShortcutsForMod(m_manifest.id);
@@ -591,6 +592,137 @@ void ModApi::clearLyricSubtitles()
     }
 }
 
+namespace {
+
+bool isAllowedAudioUrl(const QString &raw)
+{
+    const QUrl url(raw.trimmed());
+    if (!url.isValid()) return false;
+    const QString scheme = url.scheme().toLower();
+    if (scheme == QLatin1StringView("https")) return !url.host().isEmpty();
+    if (scheme == QLatin1StringView("http")) {
+        const QString host = url.host().toLower();
+        return host == QLatin1StringView("localhost") || host == QLatin1StringView("127.0.0.1");
+    }
+    return false;
+}
+
+QVariantMap sanitizeTrackOverrideMap(const QVariantMap &raw, bool allowCatalog, bool allowAudio)
+{
+    QVariantMap out;
+    if (allowCatalog) {
+        for (const QString &key : { QStringLiteral("title"), QStringLiteral("artists"), QStringLiteral("album"), QStringLiteral("coverUrl") }) {
+            if (raw.contains(key)) {
+                const QString s = raw.value(key).toString().trimmed();
+                if (!s.isEmpty()) out.insert(key, s);
+            }
+        }
+        if (raw.contains(QStringLiteral("available"))) {
+            out.insert(QStringLiteral("available"), raw.value(QStringLiteral("available")).toBool());
+        }
+        if (raw.contains(QStringLiteral("durationMs"))) {
+            const qint64 ms = raw.value(QStringLiteral("durationMs")).toLongLong();
+            if (ms > 0) out.insert(QStringLiteral("durationMs"), ms);
+        }
+    }
+    if (allowAudio) {
+        if (raw.contains(QStringLiteral("audioUrl"))) {
+            const QString u = raw.value(QStringLiteral("audioUrl")).toString().trimmed();
+            if (isAllowedAudioUrl(u)) out.insert(QStringLiteral("audioUrl"), u);
+        }
+        if (raw.contains(QStringLiteral("audioTrackId"))) {
+            const QString id = raw.value(QStringLiteral("audioTrackId")).toString().trimmed();
+            if (!id.isEmpty()) out.insert(QStringLiteral("audioTrackId"), id);
+        }
+        if (raw.contains(QStringLiteral("localFile"))) {
+            const QString f = raw.value(QStringLiteral("localFile")).toString().trimmed();
+            if (!f.isEmpty()) out.insert(QStringLiteral("localFile"), f);
+        }
+        if (raw.contains(QStringLiteral("codec"))) {
+            const QString c = raw.value(QStringLiteral("codec")).toString().trimmed().toLower();
+            if (c == QLatin1StringView("mp3") || c == QLatin1StringView("flac")
+                || c == QLatin1StringView("mp4") || c == QLatin1StringView("aac")
+                || c == QLatin1StringView("ogg")) {
+                out.insert(QStringLiteral("codec"), c);
+            }
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+bool ModApi::setTrackOverrides(const QVariantMap &overrides)
+{
+    const bool allowCatalog = hasPermission(QStringLiteral("catalog:override"));
+    const bool allowAudio = hasPermission(QStringLiteral("audio:override"));
+    if (!allowCatalog && !allowAudio) {
+        warn(QStringLiteral("Разрешение 'catalog:override' или 'audio:override' не выдано для setTrackOverrides"));
+        return false;
+    }
+    QVariantMap cleaned;
+    for (auto it = overrides.constBegin(); it != overrides.constEnd(); ++it) {
+        const QString trackId = it.key().trimmed();
+        if (trackId.isEmpty()) continue;
+        const QVariantMap entry = sanitizeTrackOverrideMap(it.value().toMap(), allowCatalog, allowAudio);
+        if (!entry.isEmpty()) {
+            cleaned.insert(trackId, entry);
+        }
+    }
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    if (m_backend) {
+        QVariantMap cmd;
+        cmd.insert(QStringLiteral("action"), QStringLiteral("set_mod_track_overrides"));
+        cmd.insert(QStringLiteral("modId"), m_manifest.id);
+        cmd.insert(QStringLiteral("overrides"), cleaned);
+        m_backend->feature(cmd);
+    }
+#endif
+    return true;
+}
+
+bool ModApi::setAlbumInjections(const QString &albumId, const QVariantList &tracks)
+{
+    if (!requirePermission(QStringLiteral("catalog:override"), "setAlbumInjections") || albumId.trimmed().isEmpty()) {
+        return false;
+    }
+    const bool allowAudio = hasPermission(QStringLiteral("audio:override"));
+    QVariantList cleaned;
+    for (const QVariant &v : tracks) {
+        const QVariantMap raw = v.toMap();
+        const QString id = raw.value(QStringLiteral("id")).toString().trimmed();
+        const QString title = raw.value(QStringLiteral("title")).toString().trimmed();
+        if (id.isEmpty() || title.isEmpty()) continue;
+        QVariantMap entry = sanitizeTrackOverrideMap(raw, true, allowAudio);
+        entry.insert(QStringLiteral("id"), id);
+        entry.insert(QStringLiteral("title"), title);
+        cleaned.append(entry);
+    }
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    if (m_backend) {
+        QVariantMap cmd;
+        cmd.insert(QStringLiteral("action"), QStringLiteral("set_mod_album_injections"));
+        cmd.insert(QStringLiteral("modId"), m_manifest.id);
+        cmd.insert(QStringLiteral("albumId"), albumId.trimmed());
+        cmd.insert(QStringLiteral("tracks"), cleaned);
+        m_backend->feature(cmd);
+    }
+#endif
+    return true;
+}
+
+void ModApi::clearTrackOverrides()
+{
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    if (m_backend) {
+        QVariantMap cmd;
+        cmd.insert(QStringLiteral("action"), QStringLiteral("clear_mod_overrides"));
+        cmd.insert(QStringLiteral("modId"), m_manifest.id);
+        m_backend->feature(cmd);
+    }
+#endif
+}
+
 QVariantList ModApi::spectrumLevels() const
 {
     QVariantList out;
@@ -663,7 +795,11 @@ bool ModApi::storageSet(const QString &key, const QVariant &value)
         return false;
     }
     m_storage.insert(key, QJsonValue::fromVariant(value));
-    return saveStorage();
+    const bool ok = saveStorage();
+    if (ok) {
+        emit storageChanged(key);
+    }
+    return ok;
 }
 
 bool ModApi::storageRemove(const QString &key)
@@ -672,7 +808,11 @@ bool ModApi::storageRemove(const QString &key)
         return false;
     }
     m_storage.remove(key);
-    return saveStorage();
+    const bool ok = saveStorage();
+    if (ok) {
+        emit storageChanged(key);
+    }
+    return ok;
 }
 
 QVariantMap ModApi::storageAll() const
@@ -778,7 +918,7 @@ bool ModApi::copyText(const QString &text)
 
 bool ModApi::openExternalUrl(const QString &url)
 {
-    if (!requirePermission(QStringLiteral("ui:slots"), "openExternalUrl")) {
+    if (!requirePermission(QStringLiteral("external"), "openExternalUrl")) {
         return false;
     }
     const QUrl parsed(url.trimmed());

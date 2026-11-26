@@ -25,69 +25,69 @@ StyledMenu {
     id: root
 
     StyledMenuItem {
-        text: backend.playing ? qsTr("Пауза") : qsTr("Воспроизвести")
-        symbol: backend.playing ? "pause" : "play_arrow"
-        enabled: backend.hasTrack
-        onTriggered: backend.toggle()
+        text: Backend.playing ? qsTr("Пауза") : qsTr("Воспроизвести")
+        symbol: Backend.playing ? "pause" : "play_arrow"
+        enabled: Backend.hasTrack
+        onTriggered: Backend.toggle()
     }
     StyledMenuItem {
         text: qsTr("Следующий трек")
         symbol: "skip_next"
-        enabled: backend.hasTrack
-        onTriggered: backend.next()
+        enabled: Backend.hasTrack
+        onTriggered: Backend.next()
     }
     StyledMenuItem {
         text: qsTr("Предыдущий трек")
         symbol: "skip_previous"
-        enabled: backend.hasTrack
-        onTriggered: backend.prev()
+        enabled: Backend.hasTrack
+        onTriggered: Backend.prev()
     }
     StyledMenuSeparator {}
     StyledMenuItem {
         text: qsTr("Вперёд на 10 сек")
         symbol: "forward_10"
-        enabled: backend.hasTrack && backend.durationSecs > 0
-        onTriggered: backend.seek(Math.min(1, (backend.positionSecs + 10) / backend.durationSecs))
+        enabled: Backend.hasTrack && Backend.durationSecs > 0
+        onTriggered: Backend.seek(Math.min(1, (Backend.positionSecs + 10) / Backend.durationSecs))
     }
     StyledMenuItem {
         text: qsTr("Назад на 10 сек")
         symbol: "replay_10"
-        enabled: backend.hasTrack && backend.durationSecs > 0
-        onTriggered: backend.seek(Math.max(0, (backend.positionSecs - 10) / backend.durationSecs))
+        enabled: Backend.hasTrack && Backend.durationSecs > 0
+        onTriggered: Backend.seek(Math.max(0, (Backend.positionSecs - 10) / Backend.durationSecs))
     }
     StyledMenuSeparator {}
     StyledMenuItem {
         text: qsTr("Громче")
         symbol: "volume_up"
-        onTriggered: backend.setVolume(Math.min(1, backend.volume + 0.05))
+        onTriggered: Backend.setVolume(Math.min(1, Backend.volume + 0.05))
     }
     StyledMenuItem {
         text: qsTr("Тише")
         symbol: "volume_down"
-        onTriggered: backend.setVolume(Math.max(0, backend.volume - 0.05))
+        onTriggered: Backend.setVolume(Math.max(0, Backend.volume - 0.05))
     }
     StyledMenuItem {
-        text: backend.volume <= 0.01 ? qsTr("Включить звук") : qsTr("Без звука")
-        symbol: backend.volume <= 0.01 ? "volume_up" : "volume_off"
-        onTriggered: backend.toggleMute()
+        text: Backend.volume <= 0.01 ? qsTr("Включить звук") : qsTr("Без звука")
+        symbol: Backend.volume <= 0.01 ? "volume_up" : "volume_off"
+        onTriggered: Backend.toggleMute()
     }
     StyledMenuSeparator {}
     StyledMenuItem {
-        text: backend.shuffle ? qsTr("Выключить перемешивание") : qsTr("Перемешивать")
+        text: Backend.shuffle ? qsTr("Выключить перемешивание") : qsTr("Перемешивать")
         symbol: "shuffle"
-        onTriggered: backend.toggleShuffle()
+        onTriggered: Backend.toggleShuffle()
     }
     StyledMenuItem {
-        text: backend.repeatMode === 2 ? qsTr("Повтор: один трек") : (backend.repeatMode === 1 ? qsTr("Повтор: всё") : qsTr("Повтор выкл."))
-        symbol: backend.repeatMode === 2 ? "repeat_one" : "repeat"
-        onTriggered: backend.toggleRepeat()
+        text: Backend.repeatMode === 2 ? qsTr("Повтор: один трек") : (Backend.repeatMode === 1 ? qsTr("Повтор: всё") : qsTr("Повтор выкл."))
+        symbol: Backend.repeatMode === 2 ? "repeat_one" : "repeat"
+        onTriggered: Backend.toggleRepeat()
     }
     StyledMenuSeparator {}
     StyledMenuItem {
         text: qsTr("Скрытые треки")
         symbol: "visibility_off"
-        visible: backend.loggedIn
-        onTriggered: backend.feature({action: "open_dislikes"})
+        visible: Backend.loggedIn
+        onTriggered: Backend.feature({action: "open_dislikes"})
     }
     StyledMenuItem {
         text: qsTr("Настройки…")

@@ -24,17 +24,17 @@ import ymusic.ui
 Item {
     id: root
 
-    readonly property bool isArtist: backend.isArtistView
-    readonly property url artworkUrl: isArtist ? (backend.artistHasAvatar ? backend.artistAvatar : "") : backend.listCover
+    readonly property bool isArtist: Backend.isArtistView
+    readonly property url artworkUrl: isArtist ? (Backend.artistHasAvatar ? Backend.artistAvatar : "") : Backend.listCover
     readonly property bool circular: isArtist
     readonly property string kind: isArtist ? "Исполнитель"
-        : (backend.page === 2 ? "Мне нравится" : (backend.page === 7 ? "Загружено" : "Коллекция"))
+        : (Backend.page === 2 ? "Мне нравится" : (Backend.page === 7 ? "Загружено" : "Коллекция"))
     readonly property string kindSymbol: isArtist ? "artists"
-        : (backend.page === 2 ? "favorite" : (backend.page === 7 ? "download_done" : "queue_music"))
-    readonly property string title: isArtist ? backend.artistName : backend.listTitle
-    readonly property string description: isArtist ? backend.artistGenres : ""
-    readonly property string facts: isArtist ? backend.artistStats : backend.listSubtitle
-    readonly property bool downloading: Boolean(backend.batch && backend.batch.running)
+        : (Backend.page === 2 ? "favorite" : (Backend.page === 7 ? "download_done" : "queue_music"))
+    readonly property string title: isArtist ? Backend.artistName : Backend.listTitle
+    readonly property string description: isArtist ? Backend.artistGenres : ""
+    readonly property string facts: isArtist ? Backend.artistStats : Backend.listSubtitle
+    readonly property bool downloading: Boolean(Backend.batch && Backend.batch.running)
     readonly property real titleSize: stacked ? 26 : 34
 
     readonly property real sideArtworkSpace: width - 2 * Appearance.sizes.pageMargin - 24 - 220
@@ -90,10 +90,10 @@ Item {
             id: cover
             anchors.fill: parent
             opacity: artworkBox.awaitingFlight ? 0 : 1
-            loading: backend.listLoading
+            loading: Backend.listLoading
             source: root.artworkUrl
             fallbackKey: root.title
-            placeholderSymbol: root.isArtist ? "artists" : (backend.page === 2 ? "favorite" : "library_music")
+            placeholderSymbol: root.isArtist ? "artists" : (Backend.page === 2 ? "favorite" : "library_music")
             circular: root.circular
         }
     }
@@ -196,77 +196,77 @@ Item {
             spacing: 10
 
             PlayButton {
-                playing: backend.tracks.currentIndex >= 0 && backend.playing
+                playing: Backend.tracks.currentIndex >= 0 && Backend.playing
                 size: actionSlot.compactActions ? Math.min(40, actionSlot.actionSize) : 44
                 iconSize: actionSlot.compactActions ? 20 : 24
-                enabled: backend.tracks.count > 0
+                enabled: Backend.tracks.count > 0
                 tooltip: playing ? "Пауза" : "Слушать"
                 onClicked: {
-                    if (backend.tracks.currentIndex >= 0) backend.toggle();
-                    else backend.play(0);
+                    if (Backend.tracks.currentIndex >= 0) Backend.toggle();
+                    else Backend.play(0);
                 }
             }
 
             TextButton {
-                visible: !root.isArtist && backend.collectionDownloadable && backend.loggedIn
-                enabled: !root.downloading && backend.tracks.count > 0
+                visible: !root.isArtist && Backend.collectionDownloadable && Backend.loggedIn
+                enabled: !root.downloading && Backend.tracks.count > 0
                 wavy: !root.downloading
                 variant: TextButton.Tonal
                 symbol: root.downloading ? "downloading" : "download"
                 text: root.downloading
-                    ? ("Загрузка " + backend.batch.done + "/" + backend.batch.total)
+                    ? ("Загрузка " + Backend.batch.done + "/" + Backend.batch.total)
                     : "Скачать всё"
-                onClicked: backend.feature({action: "download_collection"})
+                onClicked: Backend.feature({action: "download_collection"})
             }
 
             TextButton {
-                visible: !root.isArtist && backend.page === 6 && backend.activePlaylistKey.length > 0 && backend.loggedIn
-                variant: backend.activePlaylistPinned ? TextButton.Tonal : TextButton.Outlined
+                visible: !root.isArtist && Backend.page === 6 && Backend.activePlaylistKey.length > 0 && Backend.loggedIn
+                variant: Backend.activePlaylistPinned ? TextButton.Tonal : TextButton.Outlined
                 symbol: "push_pin"
-                text: backend.activePlaylistPinned ? qsTr("Открепить") : qsTr("Закрепить")
-                onClicked: backend.feature({action: "toggle_pin_playlist"})
+                text: Backend.activePlaylistPinned ? qsTr("Открепить") : qsTr("Закрепить")
+                onClicked: Backend.feature({action: "toggle_pin_playlist"})
             }
 
             TextButton {
-                visible: root.isArtist && backend.canStartArtistWave && backend.loggedIn
+                visible: root.isArtist && Backend.canStartArtistWave && Backend.loggedIn
                 variant: TextButton.Filled
                 wavy: true
                 symbol: "my_wave"
                 text: "Моя волна по артисту"
-                onClicked: backend.startArtistWave()
+                onClicked: Backend.startArtistWave()
             }
 
             TextButton {
-                visible: !root.isArtist && (backend.page === 2 || backend.collectionKind === "album" || backend.collectionKind === "playlist" || backend.collectionKind === "own_playlist") && backend.loggedIn
+                visible: !root.isArtist && (Backend.page === 2 || Backend.collectionKind === "album" || Backend.collectionKind === "playlist" || Backend.collectionKind === "own_playlist") && Backend.loggedIn
                 variant: TextButton.Tonal
                 wavy: true
                 symbol: "my_wave"
                 text: "Моя волна"
-                onClicked: backend.feature({action: "start_collection_wave"})
+                onClicked: Backend.feature({action: "start_collection_wave"})
             }
 
             IconButton {
-                visible: root.isArtist && backend.loggedIn
+                visible: root.isArtist && Backend.loggedIn
                 symbol: "thumb_down"
                 size: 40
                 iconSize: 20
                 tooltip: "Не рекомендовать артиста"
-                onClicked: backend.feature({action: "dislike_artist"})
+                onClicked: Backend.feature({action: "dislike_artist"})
             }
 
             IconButton {
-                visible: backend.loggedIn && backend.collectionKind !== "" && backend.collectionKind !== "own_playlist"
-                symbol: backend.collectionLiked ? "favorite" : "favorite_border"
-                toggled: backend.collectionLiked
+                visible: Backend.loggedIn && Backend.collectionKind !== "" && Backend.collectionKind !== "own_playlist"
+                symbol: Backend.collectionLiked ? "favorite" : "favorite_border"
+                toggled: Backend.collectionLiked
                 burst: "hearts"
                 size: 40
                 iconSize: 22
-                tooltip: backend.collectionLiked ? "Убрать из Моей музыки" : "Добавить в Мою музыку"
-                onClicked: backend.feature({action: "toggle_like_collection"})
+                tooltip: Backend.collectionLiked ? "Убрать из Моей музыки" : "Добавить в Мою музыку"
+                onClicked: Backend.feature({action: "toggle_like_collection"})
             }
 
             TextButton {
-                visible: !root.isArtist && backend.page === 6 && backend.isOwnPlaylist && backend.loggedIn
+                visible: !root.isArtist && Backend.page === 6 && Backend.isOwnPlaylist && Backend.loggedIn
                 variant: TextButton.Outlined
                 symbol: "edit"
                 text: "Переименовать"
@@ -277,7 +277,7 @@ Item {
             }
 
             IconButton {
-                visible: !root.isArtist && backend.page === 6 && backend.isOwnPlaylist && backend.loggedIn
+                visible: !root.isArtist && Backend.page === 6 && Backend.isOwnPlaylist && Backend.loggedIn
                 symbol: "delete"
                 size: 40
                 iconSize: 21
@@ -294,8 +294,8 @@ Item {
                 slotContext: ({
                     title: root.title,
                     isArtist: root.isArtist,
-                    kind: backend.collectionKind,
-                    playlistKey: backend.activePlaylistKey
+                    kind: Backend.collectionKind,
+                    playlistKey: Backend.activePlaylistKey
                 })
             }
         }
@@ -316,7 +316,7 @@ Item {
             placeholder: "Новое название плейлиста"
             onAccepted: {
                 if (text.trim().length > 0) {
-                    backend.feature({action: "rename_playlist", title: text.trim()});
+                    Backend.feature({action: "rename_playlist", title: text.trim()});
                     renamePlaylistDialog.accept();
                 }
             }
@@ -333,7 +333,7 @@ Item {
                 variant: TextButton.Filled
                 enabled: renameField.text.trim().length > 0
                 onClicked: {
-                    backend.feature({action: "rename_playlist", title: renameField.text.trim()});
+                    Backend.feature({action: "rename_playlist", title: renameField.text.trim()});
                     renamePlaylistDialog.accept();
                 }
             }
@@ -356,7 +356,7 @@ Item {
                 text: "Удалить"
                 variant: TextButton.Filled
                 onClicked: {
-                    backend.feature({action: "delete_playlist"});
+                    Backend.feature({action: "delete_playlist"});
                     deletePlaylistDialog.accept();
                 }
             }

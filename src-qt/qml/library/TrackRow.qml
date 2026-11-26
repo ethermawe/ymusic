@@ -37,15 +37,15 @@ T.AbstractButton {
             const position = hasCursor
                 ? root.mapToItem(appWindow.contentItem, lx, ly)
                 : moreButton.mapToItem(appWindow.contentItem, moreButton.width, moreButton.height);
-            backend.requestTrackMenu(root.model.id, root.model.title, root.model.available, position.x, position.y);
+            Backend.requestTrackMenu(root.model.id, root.model.title, root.model.available, position.x, position.y);
         }
     }
 
     onClicked: {
         if (!root.model) return;
-        if (root.isCurrent) backend.toggle();
-        else if (root.queueView) backend.trackAction(root.model.id, 3);
-        else backend.play(root.index);
+        if (root.isCurrent) Backend.toggle();
+        else if (root.queueView) Backend.trackAction(root.model.id, 3);
+        else Backend.play(root.index);
     }
 
     background: Rectangle {
@@ -148,11 +148,11 @@ T.AbstractButton {
                     delayed: true
                 }
                 anchors.fill: parent
-                active: (root.isCurrent && appSettings.visualizersEnabled) || showing
+                active: (root.isCurrent && AppSettings.visualizersEnabled) || showing
                 sourceComponent: Rectangle {
                     id: shade
                     property bool arrived: false
-                    Reveal.shown: arrived && root.isCurrent && appSettings.visualizersEnabled
+                    Reveal.shown: arrived && root.isCurrent && AppSettings.visualizersEnabled
                     radius: 6
                     color: Qt.rgba(0, 0, 0, 0.34)
                     Component.onCompleted: Qt.callLater(() => {
@@ -182,7 +182,7 @@ T.AbstractButton {
                 width: parent.width
                 height: Math.max(trackTitleText.implicitHeight, 18)
 
-                readonly property bool showAiBadge: backend.showAiLabels && (root.model?.isAi ?? false)
+                readonly property bool showAiBadge: Backend.showAiLabels && (root.model?.isAi ?? false)
 
                 StyledText {
                     id: trackTitleText
@@ -205,8 +205,8 @@ T.AbstractButton {
                         enabled: root.model?.hasAlbum ?? false
                         onClicked: {
                             if (!root.model) return;
-                            if (root.queueView) backend.trackAction(root.model.id, 6);
-                            else backend.openTrackAlbum(root.index);
+                            if (root.queueView) Backend.trackAction(root.model.id, 6);
+                            else Backend.openTrackAlbum(root.index);
                         }
                     }
                 }
@@ -231,8 +231,8 @@ T.AbstractButton {
                 color: Appearance.colors.onSurfaceVariant
                 onFallbackActivated: {
                     if (!root.model) return;
-                    if (root.queueView) backend.trackAction(root.model.id, 5);
-                    else backend.openTrackArtist(root.index);
+                    if (root.queueView) Backend.trackAction(root.model.id, 5);
+                    else Backend.openTrackArtist(root.index);
                 }
             }
         }
@@ -323,8 +323,8 @@ T.AbstractButton {
                         UiState.burst(likeButton, "hearts");
                         if (!Appearance.performanceMode) likePop.restart();
                     }
-                    if (root.queueView) backend.trackAction(root.model.id, 4);
-                    else backend.toggleLike(root.index);
+                    if (root.queueView) Backend.trackAction(root.model.id, 4);
+                    else Backend.toggleLike(root.index);
                 }
 
                 MaterialShape {
@@ -365,17 +365,17 @@ T.AbstractButton {
                 IconButton {
                     symbol: "expand_more"; rotation: 180; size: 26; iconSize: 16
                     enabled: root.index > 0
-                    onClicked: if (root.model) backend.feature({action: "queue", operation: "up", index: root.index, id: root.model.id})
+                    onClicked: if (root.model) Backend.feature({action: "queue", operation: "up", index: root.index, id: root.model.id})
                 }
                 IconButton {
                     symbol: "expand_more"; size: 26; iconSize: 16
-                    enabled: root.index < backend.queue.count - 1
-                    onClicked: if (root.model) backend.feature({action: "queue", operation: "down", index: root.index, id: root.model.id})
+                    enabled: root.index < Backend.queue.count - 1
+                    onClicked: if (root.model) Backend.feature({action: "queue", operation: "down", index: root.index, id: root.model.id})
                 }
                 IconButton {
                     symbol: "close"; size: 26; iconSize: 16
                     enabled: !root.isCurrent
-                    onClicked: if (root.model) backend.feature({action: "queue", operation: "remove", index: root.index, id: root.model.id})
+                    onClicked: if (root.model) Backend.feature({action: "queue", operation: "remove", index: root.index, id: root.model.id})
                 }
             }
         }

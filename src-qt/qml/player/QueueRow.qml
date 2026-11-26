@@ -83,7 +83,7 @@ T.AbstractButton {
                 width: parent.width
                 height: Math.max(queueTitleLabel.implicitHeight, 16)
 
-                readonly property bool showAiBadge: backend.showAiLabels && root.isAi
+                readonly property bool showAiBadge: Backend.showAiLabels && root.isAi
 
                 StyledText {
                     id: queueTitleLabel

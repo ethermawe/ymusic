@@ -29,40 +29,17 @@ Item {
     implicitWidth: layoutMode === "row" ? rowHost.implicitWidth : 0
     implicitHeight: layoutMode === "column" ? colHost.implicitHeight : (layoutMode === "row" ? rowHost.implicitHeight : 0)
 
-    component ModEntryLoader: Loader {
-        id: modLoader
-        required property var entryData
-        property string loadedKey: ""
-
-        function loadEntry() {
-            if (!entryData || !entryData.sourceUrl) return;
-            const key = (entryData.entryId || entryData.modId) + "|" + String(entryData.sourceUrl) + "|" + ModManager.reloadRevision;
-            if (key === loadedKey) return;
-            loadedKey = key;
-            setSource(entryData.sourceUrl, {
-                modApi: entryData.api,
-                slotContext: root.slotContext
-            });
-        }
-
-        Component.onCompleted: loadEntry()
-        onEntryDataChanged: loadEntry()
-
-        onStatusChanged: {
-            if (status === Loader.Error && entryData) {
-                ModManager.reportModError(
-                    entryData.modId,
-                    "Ошибка загрузки слота '" + root.slotName + "': " + String(entryData.sourceUrl)
-                );
-            }
-        }
-    }
-
     Repeater {
         model: root.layoutMode === "fill" ? root.entries : []
-        delegate: ModEntryLoader {
+        delegate: ModSlotItem {
             required property var modelData
-            entryData: modelData
+            modId: modelData.modId || ""
+            slotName: root.slotName
+            sourceUrl: modelData.sourceUrl || ""
+            slotContext: root.slotContext || ({})
+            reloadRevision: ModManager.reloadRevision
+            fillContent: true
+            fitWidth: false
             anchors.fill: parent
         }
     }
@@ -75,12 +52,17 @@ Item {
 
         Repeater {
             model: root.layoutMode === "column" ? root.entries : []
-            delegate: ModEntryLoader {
+            delegate: ModSlotItem {
                 required property var modelData
-                readonly property Item loadedItem: item as Item
-                entryData: modelData
+                modId: modelData.modId || ""
+                slotName: root.slotName
+                sourceUrl: modelData.sourceUrl || ""
+                slotContext: root.slotContext || ({})
+                reloadRevision: ModManager.reloadRevision
+                fillContent: false
+                fitWidth: true
                 width: colHost.width
-                height: loadedItem ? Math.max(loadedItem.implicitHeight, loadedItem.height) : 0
+                height: implicitHeight
             }
         }
     }
@@ -93,13 +75,18 @@ Item {
 
         Repeater {
             model: root.layoutMode === "row" ? root.entries : []
-            delegate: ModEntryLoader {
+            delegate: ModSlotItem {
                 required property var modelData
-                readonly property Item loadedItem: item as Item
-                entryData: modelData
+                modId: modelData.modId || ""
+                slotName: root.slotName
+                sourceUrl: modelData.sourceUrl || ""
+                slotContext: root.slotContext || ({})
+                reloadRevision: ModManager.reloadRevision
+                fillContent: false
+                fitWidth: false
                 anchors.verticalCenter: parent.verticalCenter
-                width: loadedItem ? Math.max(loadedItem.implicitWidth, loadedItem.width) : 0
-                height: loadedItem ? Math.max(loadedItem.implicitHeight, loadedItem.height) : rowHost.height
+                width: implicitWidth
+                height: implicitHeight > 0 ? implicitHeight : rowHost.height
             }
         }
     }

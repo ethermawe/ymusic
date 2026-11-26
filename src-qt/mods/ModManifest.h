@@ -7,7 +7,9 @@
 
 namespace ymusic::mods {
 
-constexpr int kSupportedApiVersion = 1;
+constexpr int kSupportedApiMajor = 1;
+constexpr int kSupportedApiMinor = 0;
+constexpr int kSupportedApiVersion = kSupportedApiMajor;
 
 struct ModSlotItem {
     QString entryId; // unique across mods & multi-slot items (e.g. "my-mod" or "my-mod:stats")
@@ -30,7 +32,7 @@ struct ModManifest {
     QString author;
     QString description;
     QString minAppVersion;
-    int apiVersion = 0;
+    QString apiVersion;
 
     /// Canonical absolute directory containing manifest.json
     QString directory;
@@ -49,6 +51,7 @@ struct ModManifest {
 
     bool valid = false;
     QString error;
+    QStringList warnings;
 
     bool hasPermission(const QString &perm) const;
     bool allowsNetworkHost(const QString &host) const;

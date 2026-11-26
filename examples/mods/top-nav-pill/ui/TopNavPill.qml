@@ -1,7 +1,8 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
-import ymusic.ui
+import ymusic.sdk 1.0
 
 Item {
     id: root
@@ -9,17 +10,18 @@ Item {
     property var modApi: null
     property var slotContext: ({})
 
-    readonly property int activePage: UiState.activeModPageId.length > 0 ? -1 : (modApi ? modApi.currentPage : 0)
-    readonly property bool showLabels: modApi ? Boolean(modApi.storageGet("showLabels", false)) : false
+    readonly property int activePage: modApi ? modApi.currentPage : 0
+    property bool showLabels: modApi ? Boolean(modApi.storageGet("showLabels", false)) : false
     readonly property bool tight: width < (showLabels ? 640 : 440)
     readonly property var pinnedList: modApi ? modApi.pinnedPlaylists : []
 
-    SoftShadow {
-        anchors.fill: pill
-        radius: pill.radius
-        blur: 16
-        offset: Qt.vector2d(0, 4)
-        color: Qt.rgba(0, 0, 0, Appearance.colors.dark ? 0.30 : 0.12)
+    Connections {
+        target: root.modApi
+        function onStorageChanged(key) {
+            if (key === "showLabels" && root.modApi) {
+                root.showLabels = Boolean(root.modApi.storageGet("showLabels", false));
+            }
+        }
     }
 
     Rectangle {
@@ -28,14 +30,14 @@ Item {
         width: Math.min(root.width, pillRow.implicitWidth + 14)
         height: 44
         radius: height / 2
-        color: Appearance.colors.surfaceContainerHigh
+        color: Theme.colors.surfaceContainerHigh
         border.width: 1
-        border.color: Appearance.colors.layer0Border
+        border.color: Theme.colors.layer0Border
         clip: true
 
         Behavior on width {
-            enabled: !Appearance.performanceMode
-            ElementMoveFast {}
+            enabled: !Theme.performanceMode && !Theme.reduceMotion
+            NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
         }
 
         component PillDivider: Item {
@@ -48,56 +50,76 @@ Item {
                 width: 1
                 height: 18
                 radius: 0.5
-                color: Appearance.colors.outlineVariant
+                color: Theme.colors.outlineVariant
                 opacity: 0.55
             }
         }
 
-        component NavPillButton: RippleButton {
+        component NavPillButton: Item {
             id: navBtn
             property string symbol: ""
             property string label: ""
             property bool active: false
             property bool showText: root.showLabels && !root.tight
+            signal clicked()
+            signal secondaryClicked()
 
             anchors.verticalCenter: parent.verticalCenter
             height: 34
             implicitWidth: showText && label.length > 0 ? (btnRow.implicitWidth + 22) : 34
-            padding: 0
-            buttonRadius: height / 2
-            colBackground: active ? Appearance.colors.primaryContainer : "transparent"
-            colBackgroundHover: active ? Appearance.colors.primaryContainerHover : Appearance.colors.layer2Hover
-            tooltip: label
+            width: implicitWidth
 
             Behavior on implicitWidth {
-                enabled: !Appearance.performanceMode
-                ElementMoveFast {}
+                enabled: !Theme.performanceMode && !Theme.reduceMotion
+                NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
             }
 
-            contentItem: Item {
-                Row {
-                    id: btnRow
-                    anchors.centerIn: parent
-                    spacing: 6
+            Rectangle {
+                anchors.fill: parent
+                radius: height / 2
+                color: navBtn.active
+                    ? (btnMouse.containsMouse ? Theme.colors.primaryContainerHover : Theme.colors.primaryContainer)
+                    : (btnMouse.containsMouse ? Theme.colors.layer2Hover : "transparent")
+            }
 
-                    MaterialSymbol {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: navBtn.symbol
-                        iconSize: 19
-                        fill: navBtn.active ? 1 : 0
-                        color: navBtn.active ? Appearance.colors.onPrimaryContainer : Appearance.colors.onSurfaceVariant
-                    }
+            Row {
+                id: btnRow
+                anchors.centerIn: parent
+                spacing: 6
 
-                    StyledText {
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: navBtn.showText && navBtn.label.length > 0
-                        text: navBtn.label
-                        font.pixelSize: Appearance.fontSize.smaller
-                        font.weight: navBtn.active ? Font.DemiBold : Font.Normal
-                        color: navBtn.active ? Appearance.colors.onPrimaryContainer : Appearance.colors.onSurface
-                    }
+                MaterialSymbol {
+                    anchors.verticalCenter: parent.verticalCenter
+                    symbol: navBtn.symbol
+                    iconSize: 19
+                    filled: navBtn.active
+                    color: navBtn.active ? Theme.colors.onPrimaryContainer : Theme.colors.onSurfaceVariant
+                }
+
+                StyledText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: navBtn.showText && navBtn.label.length > 0
+                    text: navBtn.label
+                    font.pixelSize: Theme.fontSize.smaller
+                    font.weight: navBtn.active ? Font.DemiBold : Font.Normal
+                    color: navBtn.active ? Theme.colors.onPrimaryContainer : Theme.colors.onSurface
                 }
             }
+
+            MouseArea {
+                id: btnMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                cursorShape: Qt.PointingHandCursor
+                onClicked: (mouse) => {
+                    if (mouse.button === Qt.RightButton) navBtn.secondaryClicked();
+                    else navBtn.clicked();
+                }
+            }
+
+            ToolTip.visible: btnMouse.containsMouse && navBtn.label.length > 0
+            ToolTip.delay: 450
+            ToolTip.text: navBtn.label
         }
 
         Row {
@@ -106,31 +128,11 @@ Item {
             height: parent.height
             spacing: 4
 
-            // User avatar pill
-            RippleButton {
-                anchors.verticalCenter: parent.verticalCenter
-                width: 34
-                height: 34
-                padding: 2
-                buttonRadius: width / 2
-                colBackground: "transparent"
-                colBackgroundHover: Appearance.colors.layer2Hover
-                tooltip: (modApi && modApi.loggedIn) ? (modApi.userName || "Профиль") : "Войти / Настройки"
-                onClicked: if (modApi) modApi.openSettings()
-
-                contentItem: Item {
-                    ArtworkImage {
-                        anchors.centerIn: parent
-                        width: 28
-                        height: 28
-                        circular: true
-                        squiggly: false
-                        source: modApi ? modApi.userAvatar : ""
-                        placeholderSymbol: "person"
-                        borderWidth: 1
-                        borderColor: Appearance.colors.layer0Border
-                    }
-                }
+            NavPillButton {
+                symbol: "person"
+                label: (root.modApi && root.modApi.loggedIn) ? (root.modApi.userName || "Профиль") : "Войти / Настройки"
+                showText: false
+                onClicked: if (root.modApi) root.modApi.openSettings()
             }
 
             PillDivider {}
@@ -139,28 +141,28 @@ Item {
                 symbol: "waves"
                 label: "Волна"
                 active: root.activePage === 1
-                onClicked: { UiState.closeModPage(); if (modApi) modApi.openWave(); }
+                onClicked: if (root.modApi) root.modApi.openWave()
             }
 
             NavPillButton {
                 symbol: "home"
                 label: "Главная"
                 active: root.activePage === 0
-                onClicked: { UiState.closeModPage(); if (modApi) modApi.openHome(); }
+                onClicked: if (root.modApi) root.modApi.openHome()
             }
 
             NavPillButton {
                 symbol: "favorite"
                 label: "Мне нравится"
                 active: root.activePage === 2
-                onClicked: { UiState.closeModPage(); if (modApi) modApi.openLikes(); }
+                onClicked: if (root.modApi) root.modApi.openLikes()
             }
 
             NavPillButton {
                 symbol: "download_done"
                 label: "Загружено"
                 active: root.activePage === 7
-                onClicked: { UiState.closeModPage(); if (modApi) modApi.openDownloads(); }
+                onClicked: if (root.modApi) root.modApi.openDownloads()
             }
 
             NavPillButton {
@@ -168,7 +170,7 @@ Item {
                 symbol: "library_music"
                 label: "Плейлисты"
                 active: root.activePage === 3 || root.activePage === 6
-                onClicked: { UiState.closeModPage(); if (modApi) modApi.openPlaylists(); }
+                onClicked: if (root.modApi) root.modApi.openPlaylists()
                 onSecondaryClicked: pinnedMenu.popup(playlistsBtn, 0, playlistsBtn.height + 6)
             }
 
@@ -176,27 +178,14 @@ Item {
                 symbol: "album"
                 label: "Альбомы"
                 active: root.activePage === 4
-                onClicked: { UiState.closeModPage(); if (modApi) modApi.openAlbums(); }
+                onClicked: if (root.modApi) root.modApi.openAlbums()
             }
 
             NavPillButton {
                 symbol: "group"
                 label: "Артисты"
                 active: root.activePage === 5
-                onClicked: { UiState.closeModPage(); if (modApi) modApi.openArtists(); }
-            }
-
-            // Mod pages from other installed mods
-            Repeater {
-                model: ModManager.reloadRevision >= 0 ? ModManager.slotEntries("sidebar.page") : []
-                delegate: NavPillButton {
-                    required property var modelData
-                    readonly property string entryKey: modelData.entryId || modelData.modId
-                    symbol: modelData.symbol || "extension"
-                    label: modelData.title || modelData.modName || ""
-                    active: UiState.activeModPageId === entryKey
-                    onClicked: UiState.openModPage(entryKey)
-                }
+                onClicked: if (root.modApi) root.modApi.openArtists()
             }
 
             PillDivider {}
@@ -206,7 +195,7 @@ Item {
                 label: "Настройки"
                 showText: false
                 active: false
-                onClicked: if (modApi) modApi.openSettings()
+                onClicked: if (root.modApi) root.modApi.openSettings()
             }
         }
     }
@@ -217,7 +206,7 @@ Item {
         StyledMenuItem {
             text: "Создать плейлист…"
             symbol: "playlist_add"
-            onTriggered: if (modApi) modApi.openCreatePlaylist()
+            onTriggered: if (root.modApi) root.modApi.openCreatePlaylist()
         }
 
         StyledMenuSeparator {
@@ -233,9 +222,8 @@ Item {
                     text: modelData.title || "Плейлист"
                     symbol: "library_music"
                     onTriggered: {
-                        UiState.closeModPage();
-                        if (modApi) {
-                            modApi.openPlaylist(
+                        if (root.modApi) {
+                            root.modApi.openPlaylist(
                                 String(modelData.uid ?? ""),
                                 String(modelData.kind ?? ""),
                                 String(modelData.title ?? "Плейлист")

@@ -146,6 +146,12 @@ public:
     Q_INVOKABLE bool setLyricSubtitles(const QString &trackId, const QVariantList &subtitles);
     Q_INVOKABLE void clearLyricSubtitles();
 
+    // Track metadata / audio overrides and album injections
+    // (requires "catalog:override" for metadata/injections, "audio:override" for audio replacement)
+    Q_INVOKABLE bool setTrackOverrides(const QVariantMap &overrides);
+    Q_INVOKABLE bool setAlbumInjections(const QString &albumId, const QVariantList &tracks);
+    Q_INVOKABLE void clearTrackOverrides();
+
     // Spectrum data (requires "spectrum:read")
     Q_INVOKABLE QVariantList spectrumLevels() const;
     Q_INVOKABLE QVariantList spectrumEnergies() const;
@@ -202,6 +208,7 @@ signals:
     void trackMenuActionTriggered(const QString &actionId, const QString &trackId, const QString &trackTitle);
     void shortcutTriggered(const QString &actionId);
     void httpFinished(const QString &requestId, int statusCode, const QString &body, const QString &error);
+    void storageChanged(const QString &key);
 
 private:
     bool requirePermission(const QString &perm, const char *actionName);

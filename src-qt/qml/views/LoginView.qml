@@ -14,17 +14,17 @@ ScrollView {
     contentWidth: availableWidth
 
     function ensureDeviceCode() {
-        if (root.tokenMode || backend.loggedIn || backend.loginBusy) return;
+        if (root.tokenMode || Backend.loggedIn || Backend.loginBusy) return;
         root.codeCopied = false;
-        backend.loginDevice();
+        Backend.loginDevice();
     }
 
     function refreshDeviceCode() {
         root.codeCopied = false;
-        if (backend.loginBusy) backend.cancelLogin();
+        if (Backend.loginBusy) Backend.cancelLogin();
         Qt.callLater(() => {
-            if (!root.tokenMode && !backend.loggedIn) {
-                backend.loginDevice();
+            if (!root.tokenMode && !Backend.loggedIn) {
+                Backend.loginDevice();
             }
         });
     }
@@ -34,22 +34,22 @@ ScrollView {
         root.tokenMode = useToken;
         root.codeCopied = false;
         if (useToken) {
-            if (backend.loginBusy) backend.cancelLogin();
-            else backend.clearStatus();
+            if (Backend.loginBusy) Backend.cancelLogin();
+            else Backend.clearStatus();
         } else {
-            backend.clearStatus();
+            Backend.clearStatus();
             Qt.callLater(root.ensureDeviceCode);
         }
     }
 
     function submitClipboardToken() {
-        const clip = backend.clipboardText().trim();
+        const clip = Backend.clipboardText().trim();
         if (clip.length === 0) {
             UiState.showToast("Буфер обмена пуст — сначала скопируйте ссылку или токен.");
             return;
         }
         tokenInput.text = clip;
-        backend.loginToken(clip);
+        Backend.loginToken(clip);
     }
 
     Component.onCompleted: Qt.callLater(root.ensureDeviceCode)
@@ -146,8 +146,8 @@ ScrollView {
                             id: qrImage
                             anchors.fill: parent
                             anchors.margins: 10
-                            visible: backend.loginUrl.length > 0 && backend.loginCode.length > 0
-                            source: visible ? ("image://qr/" + encodeURIComponent(backend.loginUrl)) : ""
+                            visible: Backend.loginUrl.length > 0 && Backend.loginCode.length > 0
+                            source: visible ? ("image://qr/" + encodeURIComponent(Backend.loginUrl)) : ""
                             sourceSize: Qt.size(256, 256)
                             fillMode: Image.PreserveAspectFit
                             smooth: false
@@ -157,13 +157,13 @@ ScrollView {
 
                         LoadingSpinner {
                             anchors.centerIn: parent
-                            running: !qrImage.visible && backend.loginBusy
+                            running: !qrImage.visible && Backend.loginBusy
                             visible: running
                         }
 
                         MaterialSymbol {
                             anchors.centerIn: parent
-                            visible: !qrImage.visible && !backend.loginBusy
+                            visible: !qrImage.visible && !Backend.loginBusy
                             text: "qr_code_2"
                             iconSize: 48
                             color: "#888888"
@@ -174,7 +174,7 @@ ScrollView {
                         id: codeBox
                         Layout.fillWidth: true
                         Layout.preferredHeight: 62
-                        visible: backend.loginCode.length > 0
+                        visible: Backend.loginCode.length > 0
                         radius: Appearance.rounding.normal
                         color: codeHover.hovered
                             ? Appearance.colors.surfaceContainerHighest
@@ -190,7 +190,7 @@ ScrollView {
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: backend.loginCode
+                                text: Backend.loginCode
                                 color: Appearance.colors.primary
                                 font.family: Appearance.monoFontFamily
                                 font.pixelSize: 26
@@ -213,7 +213,7 @@ ScrollView {
 
                         TapHandler {
                             onTapped: {
-                                backend.copyText(backend.loginCode);
+                                Backend.copyText(Backend.loginCode);
                                 root.codeCopied = true;
                                 UiState.showToast("Код скопирован в буфер обмена");
                             }
@@ -222,7 +222,7 @@ ScrollView {
 
                     StyledText {
                         Layout.fillWidth: true
-                        text: backend.loginCode.length > 0
+                        text: Backend.loginCode.length > 0
                             ? "Отсканируйте QR телефоном или откройте Яндекс в браузере и введите код выше — вход завершится автоматически."
                             : "Запрашиваем одноразовый код входа у Яндекса…"
                         horizontalAlignment: Text.AlignHCenter
@@ -241,11 +241,11 @@ ScrollView {
                             variant: TextButton.Filled
                             symbol: "open_in_new"
                             text: "Открыть в браузере"
-                            enabled: backend.loginUrl.length > 0 && backend.loginCode.length > 0
+                            enabled: Backend.loginUrl.length > 0 && Backend.loginCode.length > 0
                             onClicked: {
-                                backend.copyText(backend.loginCode);
+                                Backend.copyText(Backend.loginCode);
                                 root.codeCopied = true;
-                                Qt.openUrlExternally(backend.loginUrl);
+                                Qt.openUrlExternally(Backend.loginUrl);
                                 UiState.showToast("Код скопирован — вставьте его (Ctrl+V) в браузере");
                             }
                         }
@@ -288,7 +288,7 @@ ScrollView {
                         implicitHeight: 46
                         placeholderText: "Токен или ссылка (#access_token=...)"
                         echoMode: root.showToken ? TextInput.Normal : TextInput.Password
-                        enabled: !backend.loginBusy
+                        enabled: !Backend.loginBusy
                         selectByMouse: true
                         color: Appearance.colors.onSurface
                         placeholderTextColor: Appearance.colors.onSurfaceVariant
@@ -300,7 +300,7 @@ ScrollView {
                             border.width: 1
                             border.color: tokenInput.activeFocus ? Appearance.colors.primary : Appearance.colors.outlineVariant
                         }
-                        onAccepted: if (text.trim().length > 0 && !backend.loginBusy) backend.loginToken(text.trim())
+                        onAccepted: if (text.trim().length > 0 && !Backend.loginBusy) Backend.loginToken(text.trim())
                     }
 
                     RowLayout {
@@ -318,24 +318,24 @@ ScrollView {
                             variant: TextButton.Tonal
                             symbol: "content_paste"
                             text: "Вставить и войти"
-                            enabled: !backend.loginBusy
+                            enabled: !Backend.loginBusy
                             onClicked: root.submitClipboardToken()
                         }
 
                         TextButton {
                             Layout.fillWidth: true
                             variant: TextButton.Filled
-                            text: backend.loginBusy ? "Проверяем…" : "Войти"
-                            enabled: !backend.loginBusy && tokenInput.text.trim().length > 0
-                            onClicked: backend.loginToken(tokenInput.text.trim())
+                            text: Backend.loginBusy ? "Проверяем…" : "Войти"
+                            enabled: !Backend.loginBusy && tokenInput.text.trim().length > 0
+                            onClicked: Backend.loginToken(tokenInput.text.trim())
                         }
                     }
                 }
 
                 StyledText {
                     Layout.fillWidth: true
-                    visible: backend.statusMessage.length > 0
-                    text: backend.statusMessage
+                    visible: Backend.statusMessage.length > 0
+                    text: Backend.statusMessage
                     color: Appearance.colors.error
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
@@ -348,8 +348,8 @@ ScrollView {
                     symbol: "download_done"
                     text: "Открыть загрузки (офлайн)"
                     onClicked: {
-                        if (backend.loginBusy) backend.cancelLogin();
-                        backend.loadDownloads();
+                        if (Backend.loginBusy) Backend.cancelLogin();
+                        Backend.loadDownloads();
                     }
                 }
             }
@@ -357,9 +357,9 @@ ScrollView {
     }
 
     Connections {
-        target: backend
+        target: Backend
         function onAuthChanged() {
-            if (backend.loggedIn) {
+            if (Backend.loggedIn) {
                 tokenInput.clear();
                 root.showToken = false;
                 root.codeCopied = false;

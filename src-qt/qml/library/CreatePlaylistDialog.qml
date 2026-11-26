@@ -26,7 +26,7 @@ StyledDialog {
         placeholder: "Название плейлиста"
         enabled: !root.busy
         onTextEdited: if (text.length > 100) text = text.slice(0, 100)
-        onAccepted: if (!root.busy && text.trim().length > 0 && backend.loggedIn) root.createPlaylist()
+        onAccepted: if (!root.busy && text.trim().length > 0 && Backend.loggedIn) root.createPlaylist()
     }
 
     Item {
@@ -61,7 +61,7 @@ StyledDialog {
     function createPlaylist() {
         root.busy = true;
         root.errorMessage = "";
-        backend.feature({action: "create_playlist", title: name.text.trim(), private: privatePlaylist.checked});
+        Backend.feature({action: "create_playlist", title: name.text.trim(), private: privatePlaylist.checked});
     }
 
     buttons: [
@@ -75,26 +75,26 @@ StyledDialog {
             text: root.busy ? "Создаём…" : "Создать"
             variant: TextButton.Filled
             wavy: enabled
-            enabled: !root.busy && name.text.trim().length > 0 && backend.loggedIn
+            enabled: !root.busy && name.text.trim().length > 0 && Backend.loggedIn
             onClicked: root.createPlaylist()
         }
     ]
 
     Connections {
-        target: backend
+        target: Backend
         function onFeatureResult(result) {
             if (result.type !== "create_playlist" || !root.busy) return;
             root.busy = false;
             if (result.ok) {
                 name.inputItem.clear();
                 root.accept();
-                backend.clearStatus();
+                Backend.clearStatus();
             } else {
                 root.errorMessage = result.message;
             }
         }
         function onAuthChanged() {
-            if (!backend.loggedIn) {
+            if (!Backend.loggedIn) {
                 root.busy = false;
                 root.close();
             }

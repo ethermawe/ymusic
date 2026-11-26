@@ -1,0 +1,32 @@
+{
+  "id": "fck-censor",
+  "name": "FckCensor",
+  "version": "0.1.0",
+  "author": "ymusic-port (orig: Hazzz895)",
+  "description": "Подмена зацензуренных и удалённых треков (метаданные, обложки и аудио) из базы FckCensorData и пользовательских правил.",
+  "minAppVersion": "0.3.0",
+  "apiVersion": "1.0",
+
+  "entry": {
+    "script": "main.qml"
+  },
+
+  "ui": {
+    "settings.tab": {
+      "file": "ui/SettingsTab.qml",
+      "title": "FckCensor",
+      "symbol": "graphic_eq",
+      "shape": "softBurst"
+    }
+  },
+
+  "permissions": [
+    "playback:read",
+    "catalog:override",
+    "audio:override",
+    "ui:slots",
+    "storage",
+    "external",
+    "network:raw.githubusercontent.com"
+  ]
+}

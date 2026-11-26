@@ -1,5 +1,5 @@
 import QtQuick
-import ymusic.ui
+import ymusic.sdk 1.0
 
 Item {
     id: root
@@ -24,7 +24,7 @@ Item {
             id: badgeText
             anchors.centerIn: parent
             text: "Hello Mod • " + (root.modApi ? root.modApi.storageGet("playedCount", 0) : 0) + " треков"
-            font.pixelSize: Appearance.fontSize.smaller
+            font.pixelSize: Theme.fontSize.smaller
             color: "white"
         }
     }

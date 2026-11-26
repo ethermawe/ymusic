@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-import ymusic.ui
+import ymusic.sdk 1.0
 
 Item {
     id: root
@@ -19,15 +19,13 @@ Item {
         StyledText {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            color: Appearance.colors.onSurfaceVariant
+            color: Theme.colors.onSurfaceVariant
             text: "Это демонстрационная страница, загруженная с диска через слот sidebar.page."
         }
 
-        Rectangle {
+        Card {
             Layout.fillWidth: true
             implicitHeight: infoCol.implicitHeight + 32
-            radius: Appearance.rounding.normal
-            color: Appearance.colors.surfaceContainer
 
             Column {
                 id: infoCol
@@ -42,7 +40,7 @@ Item {
                         : "Сейчас ничего не играет"
                 }
                 StyledText {
-                    color: Appearance.colors.onSurfaceVariant
+                    color: Theme.colors.onSurfaceVariant
                     text: "Треков переключено с этим модом: " + (root.modApi ? root.modApi.storageGet("playedCount", 0) : 0)
                 }
                 TextButton {

@@ -27,8 +27,8 @@ Item {
     property bool shown: true
     readonly property real bass: flows ? clock.energy.y : 0
 
-    readonly property bool flows: appSettings.livingBackdrop && !Appearance.reduceMotion
-    readonly property real sigma: appSettings.backdropBlur
+    readonly property bool flows: AppSettings.livingBackdrop && !Appearance.reduceMotion
+    readonly property real sigma: AppSettings.backdropBlur
     readonly property real renderScale: sigma > 2 ? Math.max(1 / 8, 2 / sigma) : 1
     readonly property size textureSize: Qt.size(Math.max(1, Math.ceil(width * renderScale)),
                                                 Math.max(1, Math.ceil(height * renderScale)))
@@ -41,8 +41,8 @@ Item {
     BackdropClock {
         id: clock
         running: root.flows && root.shown && root.visible
-        playing: backend.playing
-        reactivity: appSettings.backdropReactivity
+        playing: Backend.playing
+        reactivity: AppSettings.backdropReactivity
     }
 
     Rectangle {

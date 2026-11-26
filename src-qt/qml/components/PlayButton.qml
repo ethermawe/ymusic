@@ -25,7 +25,7 @@ ShapeButton {
     id: root
 
     property real size: 48
-    property bool playing: backend.playing
+    property bool playing: Backend.playing
     property color iconColor: Appearance.colors.onPrimary
     property real iconSize: Math.round((width > 0 ? Math.min(width, height) : size) * 0.25) * 2
 

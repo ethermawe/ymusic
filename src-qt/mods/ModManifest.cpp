@@ -20,6 +20,8 @@ bool isKnownPermission(const QString &perm)
         QStringLiteral("playback:read"),
         QStringLiteral("playback:control"),
         QStringLiteral("library:read"),
+        QStringLiteral("catalog:override"),
+        QStringLiteral("audio:override"),
         QStringLiteral("lyrics:read"),
         QStringLiteral("lyrics:transform"),
         QStringLiteral("spectrum:read"),
@@ -27,6 +29,7 @@ bool isKnownPermission(const QString &perm)
         QStringLiteral("ui:override"),
         QStringLiteral("storage"),
         QStringLiteral("clipboard"),
+        QStringLiteral("external"),
     };
     if (kSimple.contains(perm)) {
         return true;
@@ -156,13 +159,51 @@ ModManifest parseManifest(const QString &modDirectory)
     m.author = root.value(QStringLiteral("author")).toString().trimmed();
     m.description = root.value(QStringLiteral("description")).toString().trimmed();
     m.minAppVersion = root.value(QStringLiteral("minAppVersion")).toString().trimmed();
-    m.apiVersion = root.value(QStringLiteral("apiVersion")).toInt(1);
 
-    if (m.apiVersion != kSupportedApiVersion) {
-        m.error = QStringLiteral("Неподдерживаемая версия API мода: %1 (поддерживается %2)")
-            .arg(m.apiVersion)
-            .arg(kSupportedApiVersion);
-        return m;
+    if (!root.contains(QStringLiteral("apiVersion")) || root.value(QStringLiteral("apiVersion")).isNull()) {
+        m.apiVersion = QStringLiteral("1.0");
+        m.warnings.append(QStringLiteral("В manifest.json не указано поле apiVersion (рекомендуется \"1.0\")"));
+    } else {
+        const QJsonValue apiVal = root.value(QStringLiteral("apiVersion"));
+        if (apiVal.isDouble()) {
+            const int major = apiVal.toInt(-1);
+            if (major != kSupportedApiMajor) {
+                m.error = QStringLiteral("Несовместимая версия API мода: %1 (поддерживается %2.x)")
+                    .arg(major)
+                    .arg(kSupportedApiMajor);
+                return m;
+            }
+            m.apiVersion = QStringLiteral("%1.0").arg(major);
+        } else if (apiVal.isString()) {
+            const QString rawApi = apiVal.toString().trimmed();
+            if (rawApi.isEmpty()) {
+                m.apiVersion = QStringLiteral("1.0");
+                m.warnings.append(QStringLiteral("В manifest.json пустое поле apiVersion (рекомендуется \"1.0\")"));
+            } else {
+                qsizetype suffixIdx = -1;
+                const QVersionNumber parsedApi = QVersionNumber::fromString(rawApi, &suffixIdx);
+                if (parsedApi.isNull() || suffixIdx != rawApi.size()) {
+                    m.error = QStringLiteral("Некорректный формат apiVersion: '%1' (ожидается semver, например \"1.0\")").arg(rawApi);
+                    return m;
+                }
+                if (parsedApi.majorVersion() != kSupportedApiMajor) {
+                    m.error = QStringLiteral("Несовместимая версия API мода: %1 (поддерживается %2.x)")
+                        .arg(rawApi)
+                        .arg(kSupportedApiMajor);
+                    return m;
+                }
+                if (parsedApi.minorVersion() > kSupportedApiMinor) {
+                    m.warnings.append(QStringLiteral("Мод запрашивает apiVersion %1 (текущая: %2.%3)")
+                                          .arg(rawApi)
+                                          .arg(kSupportedApiMajor)
+                                          .arg(kSupportedApiMinor));
+                }
+                m.apiVersion = rawApi;
+            }
+        } else {
+            m.error = QStringLiteral("Некорректный тип apiVersion в manifest.json (ожидается строка semver, например \"1.0\")");
+            return m;
+        }
     }
 
     // Real minAppVersion check against running application version

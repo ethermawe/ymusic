@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "author": "ymusic",
   "description": "Стартовый пример мода: добавляет пункт поиска на YouTube в меню трека, свою страницу в сайдбаре и мини-индикатор в полном экране.",
-  "apiVersion": 1,
+  "apiVersion": "1.0",
   "entry": {
     "script": "main.qml",
     "settings": "ui/Settings.qml"
@@ -22,6 +22,7 @@
     "spectrum:read",
     "ui:slots",
     "storage",
-    "clipboard"
+    "clipboard",
+    "external"
   ]
 }

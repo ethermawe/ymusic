@@ -41,7 +41,7 @@ Dialog {
     function reload() {
         loading = true;
         errorMessage = "";
-        backend.loadPlaylistChoices(trackId);
+        Backend.loadPlaylistChoices(trackId);
     }
 
     component Action: Button {
@@ -191,7 +191,7 @@ Dialog {
                     readonly property bool chosen: root.selectedKind === modelData.kind
                     width: list.width
                     height: 68
-                    enabled: !root.submitting && backend.loggedIn
+                    enabled: !root.submitting && Backend.loggedIn
                     padding: 10
                     contentItem: RowLayout {
                         spacing: 12
@@ -299,18 +299,18 @@ Dialog {
                 Layout.fillWidth: true
                 text: root.submitting ? "Добавляем…" : "Добавить"
                 primary: true
-                enabled: !root.loading && !root.submitting && root.selectedKind.length > 0 && backend.loggedIn
+                enabled: !root.loading && !root.submitting && root.selectedKind.length > 0 && Backend.loggedIn
                 onClicked: {
                     root.submitting = true;
                     root.errorMessage = "";
-                    backend.addToPlaylist(root.trackId, root.selectedKind);
+                    Backend.addToPlaylist(root.trackId, root.selectedKind);
                 }
             }
         }
     }
 
     Connections {
-        target: backend
+        target: Backend
         function onPlaylistPickerResult(id, stage, choices, message) {
             if (id !== root.trackId || !root.visible) return;
             root.loading = false;
@@ -325,7 +325,7 @@ Dialog {
             } else root.errorMessage = message;
         }
         function onAuthChanged() {
-            if (!backend.loggedIn) { root.submitting = false; root.loading = false; root.close(); }
+            if (!Backend.loggedIn) { root.submitting = false; root.loading = false; root.close(); }
         }
         function onFeatureResult(result) {
             if (result.type === "create_playlist" && result.ok && root.visible) root.reload();
