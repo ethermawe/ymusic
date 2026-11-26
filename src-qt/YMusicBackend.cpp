@@ -40,9 +40,12 @@ void YMusicBackend::cCallback(int32_t eventType, const char *jsonData, void *use
     auto *backend = static_cast<YMusicBackend*>(userData);
     if (!backend || !jsonData) return;
 
+    QPointer<YMusicBackend> self(backend);
     QString json = QString::fromUtf8(jsonData);
-    QMetaObject::invokeMethod(backend, [backend, eventType, json]() {
-        backend->handleEvent(eventType, json);
+    QMetaObject::invokeMethod(backend, [self, eventType, json]() {
+        if (self) {
+            self->handleEvent(eventType, json);
+        }
     }, Qt::QueuedConnection);
 }
 
