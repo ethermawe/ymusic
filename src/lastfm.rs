@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::Client;
@@ -192,7 +193,7 @@ impl Lastfm {
         let session = config::load_lastfm_session();
         let pending = load_pending_scrobbles();
         {
-            let mut st = self.inner.lock().unwrap();
+            let mut st = self.inner.lock();
             st.config = LastfmConfig {
                 enabled: settings.lastfm_enabled,
                 now_playing: settings.lastfm_now_playing,
@@ -228,7 +229,7 @@ impl Lastfm {
         });
 
         {
-            let mut st = self.inner.lock().unwrap();
+            let mut st = self.inner.lock();
             st.config.enabled = next.enabled;
             st.config.now_playing = next.now_playing;
             st.config.love_on_like = next.love_on_like;
@@ -252,7 +253,7 @@ impl Lastfm {
             s.lastfm_custom_api_secret = None;
         });
         {
-            let mut st = self.inner.lock().unwrap();
+            let mut st = self.inner.lock();
             st.config.custom_api_key.clear();
             st.config.custom_api_secret.clear();
             st.status_text = build_default_status(&st);
@@ -263,7 +264,7 @@ impl Lastfm {
 
     pub fn start_auth(&self) {
         let (rt, http, creds, auth_gen_id) = {
-            let mut st = self.inner.lock().unwrap();
+            let mut st = self.inner.lock();
             let Some(rt) = st.rt.clone() else { return };
             let Some(creds) = resolve_credentials(&st.config) else {
                 st.authorizing = false;
@@ -286,7 +287,7 @@ impl Lastfm {
             let token = match fetch_auth_token(&http, &creds).await {
                 Ok(t) => t,
                 Err(e) => {
-                    let mut st = this.inner.lock().unwrap();
+                    let mut st = this.inner.lock();
                     if st.auth_gen == auth_gen_id {
                         st.authorizing = false;
                         st.is_error = true;
@@ -303,7 +304,7 @@ impl Lastfm {
                 creds.api_key, token
             );
             {
-                let mut st = this.inner.lock().unwrap();
+                let mut st = this.inner.lock();
                 if st.auth_gen != auth_gen_id {
                     return;
                 }
@@ -315,7 +316,7 @@ impl Lastfm {
             for _ in 0..AUTH_POLL_ATTEMPTS {
                 tokio::time::sleep(Duration::from_millis(2500)).await;
                 {
-                    let st = this.inner.lock().unwrap();
+                    let st = this.inner.lock();
                     if st.auth_gen != auth_gen_id || !st.authorizing {
                         return;
                     }
@@ -329,7 +330,7 @@ impl Lastfm {
                             s.lastfm_enabled = true;
                         });
                         {
-                            let mut st = this.inner.lock().unwrap();
+                            let mut st = this.inner.lock();
                             if st.auth_gen != auth_gen_id {
                                 return;
                             }
@@ -346,7 +347,7 @@ impl Lastfm {
                     }
                     Ok(SessionPoll::Pending) => continue,
                     Err(e) => {
-                        let mut st = this.inner.lock().unwrap();
+                        let mut st = this.inner.lock();
                         if st.auth_gen == auth_gen_id {
                             st.authorizing = false;
                             st.is_error = true;
@@ -359,7 +360,7 @@ impl Lastfm {
                 }
             }
 
-            let mut st = this.inner.lock().unwrap();
+            let mut st = this.inner.lock();
             if st.auth_gen == auth_gen_id && st.authorizing {
                 st.authorizing = false;
                 st.is_error = true;
@@ -372,7 +373,7 @@ impl Lastfm {
 
     pub fn cancel_auth(&self) {
         {
-            let mut st = self.inner.lock().unwrap();
+            let mut st = self.inner.lock();
             st.auth_gen = st.auth_gen.wrapping_add(1);
             st.authorizing = false;
             st.is_error = false;
@@ -387,7 +388,7 @@ impl Lastfm {
             s.lastfm_username = None;
         });
         {
-            let mut st = self.inner.lock().unwrap();
+            let mut st = self.inner.lock();
             st.auth_gen = st.auth_gen.wrapping_add(1);
             st.authorizing = false;
             st.session_key = None;
@@ -399,17 +400,17 @@ impl Lastfm {
     }
 
     pub fn set_track(&self, track: &Track) {
-        let mut st = self.inner.lock().unwrap();
+        let mut st = self.inner.lock();
         st.active = Some(ActiveTrackState::new(track));
     }
 
     pub fn set_stopped(&self) {
-        let mut st = self.inner.lock().unwrap();
+        let mut st = self.inner.lock();
         st.active = None;
     }
 
     pub fn mark_track_ai(&self, track_id: &str) {
-        let mut st = self.inner.lock().unwrap();
+        let mut st = self.inner.lock();
         if let Some(active) = st.active.as_mut()
             && active.id == track_id
         {
@@ -419,7 +420,7 @@ impl Lastfm {
 
     pub fn on_started(&self) {
         let (rt, http, creds, sk, np) = {
-            let mut guard = self.inner.lock().unwrap();
+            let mut guard = self.inner.lock();
             let st = &mut *guard;
             let Some(active) = st.active.as_mut() else { return };
             active.started_ts = unix_now();
@@ -458,7 +459,7 @@ impl Lastfm {
 
     pub fn on_position(&self, secs: f64, paused: bool) {
         let pending_item = {
-            let mut guard = self.inner.lock().unwrap();
+            let mut guard = self.inner.lock();
             let st = &mut *guard;
             let skip_ai = st.config.skip_ai;
             let enabled = st.config.enabled;
@@ -514,7 +515,7 @@ impl Lastfm {
 
         if let Some(scrobble) = pending_item {
             {
-                let mut st = self.inner.lock().unwrap();
+                let mut st = self.inner.lock();
                 push_pending(&mut st.pending, scrobble);
                 save_pending_scrobbles(&st.pending);
             }
@@ -525,7 +526,7 @@ impl Lastfm {
 
     pub fn love_track(&self, track: &Track, loved: bool) {
         let (rt, http, creds, sk, artist, title) = {
-            let st = self.inner.lock().unwrap();
+            let st = self.inner.lock();
             if !st.config.enabled || !st.config.love_on_like || (st.config.skip_ai && track.is_ai) {
                 return;
             }
@@ -558,7 +559,7 @@ impl Lastfm {
 
     fn flush_pending(&self) {
         let (rt, http, creds, sk, batch) = {
-            let mut st = self.inner.lock().unwrap();
+            let mut st = self.inner.lock();
             if st.flushing || !st.config.enabled || st.pending.is_empty() {
                 return;
             }
@@ -576,7 +577,7 @@ impl Lastfm {
             let mut trigger_next = false;
             match res {
                 Ok(()) => {
-                    let mut st = this.inner.lock().unwrap();
+                    let mut st = this.inner.lock();
                     st.flushing = false;
                     let drain_n = batch.len().min(st.pending.len());
                     st.pending.drain(..drain_n);
@@ -586,12 +587,12 @@ impl Lastfm {
                     trigger_next = !st.pending.is_empty();
                 }
                 Err(ApiErr::InvalidSession) => {
-                    this.inner.lock().unwrap().flushing = false;
+                    this.inner.lock().flushing = false;
                     this.handle_invalid_session();
                     return;
                 }
                 Err(ApiErr::Network(msg)) => {
-                    let mut st = this.inner.lock().unwrap();
+                    let mut st = this.inner.lock();
                     st.flushing = false;
                     eprintln!("[lastfm] scrobble deferred ({msg})");
                 }
@@ -609,7 +610,7 @@ impl Lastfm {
             s.lastfm_username = None;
         });
         {
-            let mut st = self.inner.lock().unwrap();
+            let mut st = self.inner.lock();
             st.session_key = None;
             st.username = None;
             st.is_error = true;
@@ -620,7 +621,7 @@ impl Lastfm {
 
     pub fn emit_status(&self, auth_url: Option<String>) {
         let (sink, payload) = {
-            let st = self.inner.lock().unwrap();
+            let st = self.inner.lock();
             let Some(sink) = st.sink.clone() else { return };
             let has_builtin = builtin_credentials().is_some();
             let configured = resolve_credentials(&st.config).is_some();

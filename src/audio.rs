@@ -1,7 +1,8 @@
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc::{self, RecvTimeoutError}, Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc::{self, RecvTimeoutError}, Arc};
+use parking_lot::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -169,8 +170,10 @@ fn fft_in_place(buf: &mut [(f32, f32); FFT_SIZE]) {
 struct SpectrumTap<S> {
     inner: S,
     ring: Arc<Mutex<SpectrumRing>>,
+    pos_us: Arc<AtomicU64>,
     channels: usize,
     sample_rate: u32,
+    frames_played: u64,
     ch_idx: usize,
     mono_acc: f32,
     batch: [f32; 64],
@@ -178,14 +181,17 @@ struct SpectrumTap<S> {
 }
 
 impl<S: Source<Item = f32>> SpectrumTap<S> {
-    fn new(inner: S, ring: Arc<Mutex<SpectrumRing>>) -> Self {
+    fn new(inner: S, ring: Arc<Mutex<SpectrumRing>>, pos_us: Arc<AtomicU64>) -> Self {
         let channels = (inner.channels().get() as usize).max(1);
-        let sample_rate = inner.sample_rate().get();
+        let sample_rate = inner.sample_rate().get().max(1);
+        pos_us.store(0, Ordering::Relaxed);
         Self {
             inner,
             ring,
+            pos_us,
             channels,
             sample_rate,
+            frames_played: 0,
             ch_idx: 0,
             mono_acc: 0.0,
             batch: [0.0; 64],
@@ -195,11 +201,13 @@ impl<S: Source<Item = f32>> SpectrumTap<S> {
 
     fn flush_batch(&mut self) {
         if self.batch_len > 0 {
-            if let Ok(mut guard) = self.ring.try_lock() {
+            if let Some(mut guard) = self.ring.try_lock() {
                 guard.push_batch(&self.batch[..self.batch_len], self.sample_rate);
             }
             self.batch_len = 0;
         }
+        let us = (u128::from(self.frames_played) * 1_000_000 / u128::from(self.sample_rate)) as u64;
+        self.pos_us.store(us, Ordering::Relaxed);
     }
 }
 
@@ -211,6 +219,7 @@ impl<S: Source<Item = f32>> Iterator for SpectrumTap<S> {
         self.mono_acc += sample;
         self.ch_idx += 1;
         if self.ch_idx >= self.channels {
+            self.frames_played += 1;
             self.batch[self.batch_len] = self.mono_acc / self.channels as f32;
             self.batch_len += 1;
             if self.batch_len >= self.batch.len() {
@@ -244,10 +253,15 @@ impl<S: Source<Item = f32>> Source for SpectrumTap<S> {
         self.ch_idx = 0;
         self.mono_acc = 0.0;
         self.batch_len = 0;
-        if let Ok(mut guard) = self.ring.try_lock() {
+        if let Some(mut guard) = self.ring.try_lock() {
             guard.reset();
         }
-        self.inner.try_seek(pos)
+        let res = self.inner.try_seek(pos);
+        if res.is_ok() {
+            self.frames_played = (pos.as_secs_f64() * f64::from(self.sample_rate)).round() as u64;
+            self.pos_us.store(pos.as_micros() as u64, Ordering::Relaxed);
+        }
+        res
     }
 }
 
@@ -277,10 +291,7 @@ impl Audio {
             out.fill(0.0);
             return out.len().min(SPECTRUM_BANDS);
         }
-        match self.spectrum.lock() {
-            Ok(ring) => ring.compute_bands(out),
-            Err(poisoned) => poisoned.into_inner().compute_bands(out),
-        }
+        self.spectrum.lock().compute_bands(out)
     }
 
     pub fn set_speed(&self, speed: f32) {
@@ -369,8 +380,10 @@ fn run(
     let mut sleep_fade: f32 = 1.0;
     let mut track_gain: f32 = 1.0;
     let mut current_volume: f32 = 1.0;
+    let mut current_speed: f32 = 1.0;
     let mut fade_in_remaining: u8 = 0;
     let mut last_pos_emit = Instant::now();
+    let media_pos_us = Arc::new(AtomicU64::new(0));
 
     let effective_target = |v: f32, fade: f32, gain: f32| (v * fade * gain).clamp(0.0, 1.5);
 
@@ -396,9 +409,7 @@ fn run(
                 }
                 release(&mut stream);
                 player.clear();
-                if let Ok(mut guard) = spectrum.lock() {
-                    guard.reset();
-                }
+                spectrum.lock().reset();
                 spectrum_active.store(false, Ordering::Relaxed);
                 fade_in_remaining = 0;
                 generation = new_generation;
@@ -429,7 +440,7 @@ fn run(
                                 }
                             }
                         };
-                        decoded.map(|s| player.append(SpectrumTap::new(s, spectrum.clone())))
+                        decoded.map(|s| player.append(SpectrumTap::new(s, spectrum.clone(), media_pos_us.clone())))
                     }
                     SourceData::Stream { reader, hint } => {
                         stream = Some(reader.clone());
@@ -454,7 +465,7 @@ fn run(
                                 b2.build()
                             }
                         };
-                        decoded.map(|s| player.append(SpectrumTap::new(s, spectrum.clone())))
+                        decoded.map(|s| player.append(SpectrumTap::new(s, spectrum.clone(), media_pos_us.clone())))
                     }
                 };
                 match res {
@@ -515,11 +526,17 @@ fn run(
                 }
             }
             Ok(Cmd::Seek(secs)) if active => {
-                let _ = player.try_seek(Duration::from_secs_f64(secs.max(0.0)));
+                // rodio's Speed::try_seek multiplies by speed, so divide by current_speed
+                // to land on the exact media timestamp.
+                let target_media = secs.max(0.0);
+                let scaled = target_media / f64::from(current_speed.max(0.1));
+                let _ = player.try_seek(Duration::from_secs_f64(scaled));
             }
             Ok(Cmd::SeekRelative(delta)) if active => {
-                let cur = player.get_pos().as_secs_f64();
-                let _ = player.try_seek(Duration::from_secs_f64((cur + delta).max(0.0)));
+                let cur = media_pos_us.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+                let target_media = (cur + delta).max(0.0);
+                let scaled = target_media / f64::from(current_speed.max(0.1));
+                let _ = player.try_seek(Duration::from_secs_f64(scaled));
             }
             Ok(Cmd::Volume(v)) => {
                 target_volume = v;
@@ -529,7 +546,8 @@ fn run(
                 }
             }
             Ok(Cmd::Speed(speed)) => {
-                player.set_speed(speed);
+                current_speed = speed.clamp(0.5, 2.0);
+                player.set_speed(current_speed);
             }
             Ok(Cmd::SleepFade(factor)) => {
                 sleep_fade = factor;
@@ -551,10 +569,9 @@ fn run(
                 }
                 release(&mut stream);
                 player.clear();
-                if let Ok(mut guard) = spectrum.lock() {
-                    guard.reset();
-                }
+                spectrum.lock().reset();
                 active = false;
+                media_pos_us.store(0, Ordering::Relaxed);
                 spectrum_active.store(false, Ordering::Relaxed);
                 fade_in_remaining = 0;
                 current_volume = effective_target(target_volume, sleep_fade, track_gain);
@@ -578,6 +595,7 @@ fn run(
         if active {
             if player.empty() {
                 active = false;
+                media_pos_us.store(0, Ordering::Relaxed);
                 spectrum_active.store(false, Ordering::Relaxed);
                 fade_in_remaining = 0;
                 current_volume = effective_target(target_volume, sleep_fade, track_gain);
@@ -588,7 +606,7 @@ fn run(
                 last_pos_emit = Instant::now();
                 on_event(Event::Position {
                     generation,
-                    secs: player.get_pos().as_secs_f64(),
+                    secs: media_pos_us.load(Ordering::Relaxed) as f64 / 1_000_000.0,
                     paused: player.is_paused(),
                 });
             }

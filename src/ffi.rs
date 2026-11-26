@@ -1,6 +1,7 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use parking_lot::RwLock;
 
 use crate::core::{EventSink, YMusicCore};
 
@@ -19,7 +20,7 @@ unsafe impl Sync for FfiSink {}
 
 impl EventSink for FfiSink {
     fn on_event(&self, event_type: i32, json_data: &str) {
-        let closed = self.closed.read().unwrap_or_else(|e| e.into_inner());
+        let closed = self.closed.read();
         if *closed {
             return;
         }
@@ -46,7 +47,7 @@ pub unsafe extern "C" fn ymusic_core_free(handle: *mut CoreHandle) {
     if !handle.is_null() {
         let h = unsafe { Box::from_raw(handle) };
         // Дожидаемся завершения уже идущих колбэков и запрещаем новые.
-        *h.sink.closed.write().unwrap_or_else(|e| e.into_inner()) = true;
+        *h.sink.closed.write() = true;
         h.core.shutdown();
     }
 }
@@ -160,7 +161,7 @@ pub unsafe extern "C" fn ymusic_core_start_wave(handle: *mut CoreHandle) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_start_artist_wave(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        let artist = h.core.state.lock().unwrap().viewed_artist_id.clone();
+        let artist = h.core.state.lock().viewed_artist_id.clone();
         if let Some((id, name)) = artist {
             h.core.clone().start_wave(format!("artist:{id}"), format!("Волна: {name}"));
         }
@@ -186,7 +187,7 @@ pub unsafe extern "C" fn ymusic_core_open_card(handle: *mut CoreHandle, index: u
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_open_track_artist(handle: *mut CoreHandle, index: usize) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        let id = h.core.state.lock().unwrap().list.get(index).and_then(|t| t.artist_id.clone());
+        let id = h.core.state.lock().list.get(index).and_then(|t| t.artist_id.clone());
         if let Some(id) = id {
             h.core.clone().open_artist(id);
         }
@@ -196,7 +197,7 @@ pub unsafe extern "C" fn ymusic_core_open_track_artist(handle: *mut CoreHandle, 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_open_track_album(handle: *mut CoreHandle, index: usize) {
     if let Some(h) = unsafe { handle.as_ref() } {
-        let id = h.core.state.lock().unwrap().list.get(index).and_then(|t| t.album_id.clone());
+        let id = h.core.state.lock().list.get(index).and_then(|t| t.album_id.clone());
         if let Some(id) = id {
             h.core.clone().open_album(id);
         }
@@ -207,7 +208,7 @@ pub unsafe extern "C" fn ymusic_core_open_track_album(handle: *mut CoreHandle, i
 pub unsafe extern "C" fn ymusic_core_open_now_artist(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
         let id = {
-            let st = h.core.state.lock().unwrap();
+            let st = h.core.state.lock();
             st.current.and_then(|i| st.queue.get(i)).and_then(|t| t.artist_id.clone())
         };
         if let Some(id) = id {
@@ -230,7 +231,7 @@ pub unsafe extern "C" fn ymusic_core_open_artist(handle: *mut CoreHandle, artist
 pub unsafe extern "C" fn ymusic_core_open_now_album(handle: *mut CoreHandle) {
     if let Some(h) = unsafe { handle.as_ref() } {
         let id = {
-            let st = h.core.state.lock().unwrap();
+            let st = h.core.state.lock();
             st.current.and_then(|i| st.queue.get(i)).and_then(|t| t.album_id.clone())
         };
         if let Some(id) = id {
@@ -246,7 +247,7 @@ pub unsafe extern "C" fn ymusic_core_play(handle: *mut CoreHandle, index: usize)
         let core = h.core.clone();
         rt.spawn(async move {
             {
-                let mut st = core.state.lock().unwrap();
+                let mut st = core.state.lock();
                 let same_as_queue = st.list.len() == st.queue.len()
                     && st.list.iter().zip(&st.queue).all(|(x, y)| x.id == y.id);
                 if !same_as_queue {
@@ -276,7 +277,7 @@ pub unsafe extern "C" fn ymusic_core_track_action(handle: *mut CoreHandle, id: *
         let core = h.core.clone();
         h.core.rt_handle.spawn(async move {
             if action == 3 {
-                let index = core.state.lock().unwrap().queue.iter().position(|t| t.id == track.id);
+                let index = core.state.lock().queue.iter().position(|t| t.id == track.id);
                 if let Some(index) = index { core.play_index(index, true); }
             }
             else if action == 4 { core.toggle_like_track(track); }

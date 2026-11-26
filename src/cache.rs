@@ -2,7 +2,8 @@ use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
+use parking_lot::{Condvar, Mutex};
 
 use anyhow::{Context, Result};
 use reqwest::Client;
@@ -522,12 +523,12 @@ pub struct StreamReader {
 
 impl StreamReader {
     pub fn byte_len(&self) -> Option<u64> {
-        self.shared.state.lock().unwrap().total_len
+        self.shared.state.lock().total_len
     }
 
     /// Прерывает ожидание данных. Фоновая загрузка продолжается и сохранит трек в кэш.
     pub fn cancel(&self) {
-        self.shared.state.lock().unwrap().cancelled = true;
+        self.shared.state.lock().cancelled = true;
         self.shared.cvar.notify_all();
     }
 }
@@ -537,7 +538,7 @@ impl Read for StreamReader {
         if out.is_empty() {
             return Ok(0);
         }
-        let mut st = self.shared.state.lock().unwrap();
+        let mut st = self.shared.state.lock();
         loop {
             let pos = self.pos as usize;
             if pos < st.buf.len() {
@@ -553,14 +554,14 @@ impl Read for StreamReader {
             if st.done || st.cancelled {
                 return Ok(0);
             }
-            st = self.shared.cvar.wait(st).unwrap();
+            self.shared.cvar.wait(&mut st);
         }
     }
 }
 
 impl Seek for StreamReader {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        let mut st = self.shared.state.lock().unwrap();
+        let mut st = self.shared.state.lock();
         let target: i64 = match pos {
             SeekFrom::Start(offset) => offset as i64,
             SeekFrom::Current(delta) => self.pos as i64 + delta,
@@ -575,7 +576,7 @@ impl Seek for StreamReader {
                     if let Some(err) = &st.error {
                         return Err(io::Error::other(err.clone()));
                     }
-                    st = self.shared.cvar.wait(st).unwrap();
+                    self.shared.cvar.wait(&mut st);
                 };
                 end as i64 + delta
             }
@@ -589,7 +590,7 @@ impl Seek for StreamReader {
         let target = target as u64;
         // Дожидаемся, пока буфер докачается хотя бы до целевой позиции (или поток завершится)
         while (st.buf.len() as u64) < target && !st.done && !st.cancelled && st.error.is_none() {
-            st = self.shared.cvar.wait(st).unwrap();
+            self.shared.cvar.wait(&mut st);
         }
         self.pos = target;
         Ok(self.pos)
@@ -649,7 +650,7 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
                 SEQ.fetch_add(1, Ordering::Relaxed)
             ));
             let mut f = File::create(&tmp).ok()?;
-            let st = shared_bg.state.lock().unwrap();
+            let st = shared_bg.state.lock();
             if !st.buf.is_empty() {
                 f.write_all(&st.buf).ok()?;
             }
@@ -661,7 +662,7 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
             loop {
                 let resume_from: Option<(u64, String)> = match resp.chunk().await {
                     Ok(Some(chunk)) => {
-                        let mut st = shared_bg.state.lock().unwrap();
+                        let mut st = shared_bg.state.lock();
                         if st.cancelled {
                             if let Some((tmp, _, f)) = disk_cache_file.take() {
                                 drop(f);
@@ -678,7 +679,7 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
                     }
                     Ok(None) => {
                         let (downloaded, expected, cancelled) = {
-                            let st = shared_bg.state.lock().unwrap();
+                            let st = shared_bg.state.lock();
                             (st.buf.len() as u64, st.total_len, st.cancelled)
                         };
                         if cancelled {
@@ -695,7 +696,7 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
                             ))
                         } else {
                             {
-                                let mut st = shared_bg.state.lock().unwrap();
+                                let mut st = shared_bg.state.lock();
                                 st.done = true;
                                 st.total_len = Some(downloaded);
                             }
@@ -714,7 +715,7 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
                     }
                     Err(e) => {
                         let (downloaded, cancelled) = {
-                            let st = shared_bg.state.lock().unwrap();
+                            let st = shared_bg.state.lock();
                             (st.buf.len() as u64, st.cancelled)
                         };
                         if cancelled {
@@ -733,7 +734,7 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
                     while retries_left > 0 {
                         retries_left -= 1;
                         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                        if shared_bg.state.lock().unwrap().cancelled {
+                        if shared_bg.state.lock().cancelled {
                             break;
                         }
                         if let Ok(r) = http_bg
@@ -752,7 +753,7 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
                         resp = new_resp;
                         continue;
                     }
-                    let mut st = shared_bg.state.lock().unwrap();
+                    let mut st = shared_bg.state.lock();
                     st.error = Some(reason);
                     st.done = true;
                     shared_bg.cvar.notify_all();

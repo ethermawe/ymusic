@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+use parking_lot::Mutex;
 use std::time::Duration;
 
 use reqwest::Client;
@@ -133,27 +134,20 @@ pub fn is_track_ai_fast(track: &Track) -> bool {
     let tid = normalize_track_id(&track.id).parse::<u64>().ok();
     let artist_ids = track_artist_ids(track);
 
-    if let Ok(guard) = cache().lock() {
-        if let Some(id) = tid
-            && let Some(Some(td)) = guard.tracks.get(&id)
-            && td.is_ai()
-        {
+    let guard = cache().lock();
+    if let Some(id) = tid
+        && let Some(Some(td)) = guard.tracks.get(&id)
+        && td.is_ai()
+    {
+        return true;
+    }
+    for &aid in &artist_ids {
+        if let Some(Some(is_ai)) = guard.artists.get(&aid) {
+            if *is_ai {
+                return true;
+            }
+        } else if is_builtin_ai_artist(aid) {
             return true;
-        }
-        for &aid in &artist_ids {
-            if let Some(Some(is_ai)) = guard.artists.get(&aid) {
-                if *is_ai {
-                    return true;
-                }
-            } else if is_builtin_ai_artist(aid) {
-                return true;
-            }
-        }
-    } else {
-        for &aid in &artist_ids {
-            if is_builtin_ai_artist(aid) {
-                return true;
-            }
         }
     }
     false
@@ -167,18 +161,14 @@ pub fn should_take_action_fast(track: &Track, strict_tracks: bool) -> bool {
     let Some(tid) = normalize_track_id(&track.id).parse::<u64>().ok() else {
         return false;
     };
-    if let Ok(guard) = cache().lock()
-        && let Some(Some(td)) = guard.tracks.get(&tid)
-    {
+    if let Some(Some(td)) = cache().lock().tracks.get(&tid) {
         return td.is_ai();
     }
     false
 }
 
 async fn fetch_artist(http: &Client, artist_id: u32) -> Option<bool> {
-    if let Ok(guard) = cache().lock()
-        && let Some(&cached) = guard.artists.get(&artist_id)
-    {
+    if let Some(&cached) = cache().lock().artists.get(&artist_id) {
         return cached;
     }
 
@@ -190,14 +180,14 @@ async fn fetch_artist(http: &Client, artist_id: u32) -> Option<bool> {
         .await
         .ok()?;
     if !res.status().is_success() {
-        if let Ok(mut guard) = cache().lock() {
+        { let mut guard = cache().lock();
             guard.artists.insert(artist_id, None);
         }
         return None;
     }
     let data: ArtistData = res.json().await.ok()?;
     let is_ai = data.is_ai() || is_builtin_ai_artist(artist_id);
-    if let Ok(mut guard) = cache().lock() {
+    { let mut guard = cache().lock();
         guard.artists.insert(artist_id, Some(is_ai));
         for yt in &data.yandex_ai_track_list {
             if (1..=3).contains(&yt.status) {
@@ -213,9 +203,7 @@ async fn fetch_artist(http: &Client, artist_id: u32) -> Option<bool> {
 }
 
 async fn fetch_track(http: &Client, track_id: u64) -> Option<TrackData> {
-    if let Ok(guard) = cache().lock()
-        && let Some(cached) = guard.tracks.get(&track_id)
-    {
+    if let Some(cached) = cache().lock().tracks.get(&track_id).cloned() {
         return cached.clone();
     }
 
@@ -227,13 +215,13 @@ async fn fetch_track(http: &Client, track_id: u64) -> Option<TrackData> {
         .await
         .ok()?;
     if !res.status().is_success() {
-        if let Ok(mut guard) = cache().lock() {
+        { let mut guard = cache().lock();
             guard.tracks.insert(track_id, None);
         }
         return None;
     }
     let data: TrackData = res.json().await.ok()?;
-    if let Ok(mut guard) = cache().lock() {
+    { let mut guard = cache().lock();
         guard.tracks.insert(track_id, Some(data.clone()));
     }
     Some(data)
@@ -264,10 +252,7 @@ pub async fn check_track_online(
         }
     } else {
         tid.and_then(|id| {
-            cache()
-                .lock()
-                .ok()
-                .and_then(|g| g.tracks.get(&id).cloned().flatten())
+            cache().lock().tracks.get(&id).cloned().flatten()
         })
     };
 
@@ -297,10 +282,7 @@ pub async fn check_tracks_batch(http: &Client, tracks: &[Track]) -> HashSet<Stri
         }
         for aid in track_artist_ids(t) {
             if seen_artists.insert(aid) {
-                let known = cache()
-                    .lock()
-                    .ok()
-                    .is_some_and(|g| g.artists.contains_key(&aid));
+                let known = cache().lock().artists.contains_key(&aid);
                 if !known && !is_builtin_ai_artist(aid) {
                     unknown_artists.push(aid);
                 }

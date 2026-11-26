@@ -547,8 +547,8 @@ pub fn save_settings(settings: &UserSettings) -> io::Result<()> {
 /// Атомарное чтение-изменение-запись: параллельные сохранения не затирают друг друга.
 #[allow(dead_code)]
 pub fn update_settings(f: impl FnOnce(&mut UserSettings)) {
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    let _guard = LOCK.lock();
     let mut settings = load_settings();
     f(&mut settings);
     let _ = save_settings(&settings);

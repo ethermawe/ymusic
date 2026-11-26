@@ -1,5 +1,5 @@
 use std::fs;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use crate::api::Track;
 
 const LIMIT: usize = 100;
@@ -22,7 +22,7 @@ fn record_in(tracks: &mut Vec<Track>, track: Track) {
 }
 
 pub fn record(track: Track) -> std::io::Result<Vec<Track>> {
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = LOCK.lock();
     let mut tracks = load();
     record_in(&mut tracks, track);
     save(&tracks)?;
@@ -30,7 +30,7 @@ pub fn record(track: Track) -> std::io::Result<Vec<Track>> {
 }
 
 pub fn merge_remote(remote: Vec<Track>) -> std::io::Result<Vec<Track>> {
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = LOCK.lock();
     let local = load();
     if remote.is_empty() {
         return Ok(local);
@@ -59,7 +59,7 @@ fn save(tracks: &[Track]) -> std::io::Result<()> {
 }
 
 pub fn clear() -> std::io::Result<()> {
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = LOCK.lock();
     save(&[])
 }
 
