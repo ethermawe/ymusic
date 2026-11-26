@@ -75,11 +75,11 @@ Item {
 
     // Selected item highlight (when not actively picking)
     Rectangle {
-        visible: !root.picking && root.highlightedInfo && (root.highlightedInfo.width || 0) > 0
+        visible: !root.picking && root.highlightedInfo && (root.highlightedInfo.sceneWidth || root.highlightedInfo.width || 0) > 0
         x: root.highlightedInfo.sceneX || 0
         y: root.highlightedInfo.sceneY || 0
-        width: root.highlightedInfo.width || 0
-        height: root.highlightedInfo.height || 0
+        width: root.highlightedInfo.sceneWidth || root.highlightedInfo.width || 0
+        height: root.highlightedInfo.sceneHeight || root.highlightedInfo.height || 0
         color: Qt.alpha(Appearance.colors.primary, 0.12)
         border.width: 1.5
         border.color: Appearance.colors.primary
@@ -89,18 +89,18 @@ Item {
     // Active hover highlight during Element Picker mode
     Rectangle {
         id: hoverBox
-        visible: root.picking && root.hoveredInfo && (root.hoveredInfo.width || 0) > 0
+        visible: root.picking && root.hoveredInfo && (root.hoveredInfo.sceneWidth || root.hoveredInfo.width || 0) > 0
         x: root.hoveredInfo.sceneX || 0
         y: root.hoveredInfo.sceneY || 0
-        width: root.hoveredInfo.width || 0
-        height: root.hoveredInfo.height || 0
+        width: root.hoveredInfo.sceneWidth || root.hoveredInfo.width || 0
+        height: root.hoveredInfo.sceneHeight || root.hoveredInfo.height || 0
         color: Qt.alpha(Appearance.colors.primary, 0.16)
         border.width: 1.5
         border.color: Appearance.colors.primary
         radius: 4
 
         Rectangle {
-            x: 0
+            x: Math.max(-hoverBox.x + 6, Math.min(0, root.width - hoverBox.x - width - 6))
             y: hoverBox.y > 28 ? -26 : hoverBox.height + 6
             width: hoverLabel.implicitWidth + 14
             height: 22

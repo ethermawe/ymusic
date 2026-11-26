@@ -58,6 +58,46 @@ int countItemsRec(const QQuickItem *item) {
     return total;
 }
 
+bool isPassThroughType(const QString &type) {
+    return type == QLatin1StringView("MouseArea")
+        || type == QLatin1StringView("CornerCaps")
+        || type == QLatin1StringView("Stickers")
+        || type == QLatin1StringView("Ripple")
+        || type == QLatin1StringView("SoftShadow")
+        || type == QLatin1StringView("SoftShadowItem")
+        || type == QLatin1StringView("FastWheel")
+        || type == QLatin1StringView("FocusScope")
+        || type == QLatin1StringView("Loader")
+        || type == QLatin1StringView("DevToolsOverlay");
+}
+
+bool isVisualCandidate(const QQuickItem *item, const QString &type) {
+    if (isPassThroughType(type)) return false;
+    if (item->width() <= 0.0 || item->height() <= 0.0) return false;
+    // Skip transparent rectangles with no border (often used as layout/clip wrappers).
+    if (type == QLatin1StringView("Rectangle")) {
+        const QColor c = item->property("color").value<QColor>();
+        if (c.isValid() && c.alpha() == 0) {
+            const QObject *border = item->property("border").value<QObject *>();
+            const qreal bw = border ? border->property("width").toReal() : 0.0;
+            if (bw <= 0.0) return false;
+        }
+    }
+    // Skip plain empty QQuickItem containers (like `bursts` overlay, Row/Column/Layouts).
+    const QByteArray raw = item->metaObject()->className();
+    if (raw == "QQuickItem" || raw == "QQuickRow" || raw == "QQuickColumn"
+        || raw == "QQuickFlow" || raw == "QQuickGrid" || raw == "QQuickRowLayout"
+        || raw == "QQuickColumnLayout" || raw == "QQuickGridLayout"
+        || raw == "QQuickLoader" || raw == "QQuickOverlay") {
+        return false;
+    }
+    if (item->flags() & QQuickItem::ItemHasContents) {
+        return true;
+    }
+    // Named custom QML components (e.g. RippleButton, IconButton, TrackRow, CardItem).
+    return raw.contains("_QMLTYPE_") || raw.contains("_QML_");
+}
+
 QQuickItem *pickDeepest(QQuickItem *item,
                         const QPointF &scenePt,
                         QQuickItem *ignoreSubtree) {
@@ -84,8 +124,11 @@ QQuickItem *pickDeepest(QQuickItem *item,
         }
     }
 
-    if (inside && item->width() > 0.0 && item->height() > 0.0) {
-        return item;
+    if (inside) {
+        const QString type = cleanTypeName(item);
+        if (isVisualCandidate(item, type)) {
+            return item;
+        }
     }
     return nullptr;
 }
@@ -96,13 +139,15 @@ void collectModSlotsRec(QQuickItem *item, QQuickItem *root, QVariantList &out) {
     if (type == QLatin1StringView("ModSlotHost")) {
         const QString slotName = item->property("slotName").toString();
         if (!slotName.isEmpty()) {
-            const QPointF pt = root ? root->mapFromItem(item, QPointF(0, 0)) : item->mapToScene(QPointF(0, 0));
+            const QRectF rect = root
+                ? root->mapRectFromItem(item, QRectF(0, 0, item->width(), item->height()))
+                : item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
             QVariantMap entry;
             entry.insert(QStringLiteral("slotName"), slotName);
-            entry.insert(QStringLiteral("x"), pt.x());
-            entry.insert(QStringLiteral("y"), pt.y());
-            entry.insert(QStringLiteral("width"), item->width());
-            entry.insert(QStringLiteral("height"), item->height());
+            entry.insert(QStringLiteral("x"), rect.x());
+            entry.insert(QStringLiteral("y"), rect.y());
+            entry.insert(QStringLiteral("width"), rect.width());
+            entry.insert(QStringLiteral("height"), rect.height());
             out.append(entry);
         }
     }
@@ -265,9 +310,9 @@ QVariantMap DevToolsBridge::inspectItem(QQuickItem *item, QQuickItem *coordRoot)
     QVariantMap info;
     if (!item) return info;
 
-    const QPointF scenePos = coordRoot
-        ? coordRoot->mapFromItem(item, QPointF(0, 0))
-        : item->mapToScene(QPointF(0, 0));
+    const QRectF sceneRect = coordRoot
+        ? coordRoot->mapRectFromItem(item, QRectF(0, 0, item->width(), item->height()))
+        : item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
 
     info.insert(QStringLiteral("type"), cleanTypeName(item));
     info.insert(QStringLiteral("rawClass"), QString::fromLatin1(item->metaObject()->className()));
@@ -276,8 +321,10 @@ QVariantMap DevToolsBridge::inspectItem(QQuickItem *item, QQuickItem *coordRoot)
     info.insert(QStringLiteral("y"), item->y());
     info.insert(QStringLiteral("width"), item->width());
     info.insert(QStringLiteral("height"), item->height());
-    info.insert(QStringLiteral("sceneX"), scenePos.x());
-    info.insert(QStringLiteral("sceneY"), scenePos.y());
+    info.insert(QStringLiteral("sceneX"), sceneRect.x());
+    info.insert(QStringLiteral("sceneY"), sceneRect.y());
+    info.insert(QStringLiteral("sceneWidth"), sceneRect.width());
+    info.insert(QStringLiteral("sceneHeight"), sceneRect.height());
     info.insert(QStringLiteral("visible"), item->isVisible());
     info.insert(QStringLiteral("opacity"), item->opacity());
     info.insert(QStringLiteral("z"), item->z());
