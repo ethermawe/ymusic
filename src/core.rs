@@ -324,6 +324,7 @@ pub struct YMusicCore {
     pub discord: Discord,
     pub lastfm: Lastfm,
     pub sink: Arc<dyn EventSink>,
+    pub hooks: Arc<crate::hooks::HookPipeline>,
 }
 
 pub fn fmt_time(secs: f64) -> String {
@@ -822,6 +823,7 @@ mod queue_tests {
             mpris,
             discord: Discord::spawn(),
             lastfm: Lastfm::disabled(),
+            hooks: Arc::new(crate::hooks::HookPipeline::default()),
             sink: Arc::new(CaptureSink(events.clone())),
         });
 
@@ -855,6 +857,7 @@ mod queue_tests {
             mpris: mpris2,
             discord: Discord::spawn(),
             lastfm: Lastfm::disabled(),
+            hooks: Arc::new(crate::hooks::HookPipeline::default()),
             sink: Arc::new(CaptureSink(events2.clone())),
         });
         // Wrap in async-safe drop wait via rt2 already entered above — drop handles cleanly outside block_on
@@ -935,6 +938,7 @@ mod queue_tests {
             mpris,
             discord: Discord::spawn(),
             lastfm: Lastfm::disabled(),
+            hooks: Arc::new(crate::hooks::HookPipeline::default()),
             sink: Arc::new(CaptureSink(events.clone())),
         });
 
@@ -973,6 +977,7 @@ mod queue_tests {
             mpris,
             discord: Discord::spawn(),
             lastfm: Lastfm::disabled(),
+            hooks: Arc::new(crate::hooks::HookPipeline::default()),
             sink: Arc::new(CaptureSink(events.clone())),
         });
 
@@ -1020,6 +1025,7 @@ mod queue_tests {
             mpris,
             discord: Discord::spawn(),
             lastfm: Lastfm::disabled(),
+            hooks: Arc::new(crate::hooks::HookPipeline::default()),
             sink: Arc::new(CaptureSink(events)),
         });
 
@@ -1065,6 +1071,7 @@ mod queue_tests {
             mpris,
             discord: Discord::spawn(),
             lastfm: Lastfm::disabled(),
+            hooks: Arc::new(crate::hooks::HookPipeline::default()),
             sink: Arc::new(CaptureSink(events.clone())),
         });
 
@@ -1976,6 +1983,7 @@ impl YMusicCore {
                 }),
                 discord: Discord::spawn_with_sink(sink.clone()),
                 lastfm: Lastfm::spawn_with_sink(rt_handle.clone(), api::http_client(), sink.clone()),
+                hooks: Arc::new(crate::hooks::HookPipeline::default()),
                 sink,
             }
         });
@@ -2109,6 +2117,26 @@ impl YMusicCore {
     pub fn set_playing(&self, playing: bool, buffering: bool) {
         self.state.lock().playing = playing;
         self.send_playback_state(buffering);
+    }
+
+    pub async fn run_hook(
+        &self,
+        point: crate::hooks::HookPoint,
+        payload: serde_json::Value,
+    ) -> crate::hooks::HookOutcome {
+        self.hooks
+            .run(
+                point,
+                payload,
+                |req| self.send_event(EVENT_FEATURE, &req),
+                |msg| {
+                    self.send_event(
+                        EVENT_FEATURE,
+                        &serde_json::json!({ "type": "mod_warning", "message": msg }),
+                    );
+                },
+            )
+            .await
     }
 
     pub fn error(&self, msg: impl Into<String>) {

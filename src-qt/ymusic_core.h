@@ -86,6 +86,9 @@ void ymusic_core_dislike_now(CoreHandle *handle);
 void ymusic_core_save_session(CoreHandle *handle);
 uint32_t ymusic_core_spectrum_levels(CoreHandle *handle, float *out, uint32_t capacity);
 
+void ymusic_hook_subscribe(CoreHandle *handle, const char *point, bool enabled);
+void ymusic_hook_response(CoreHandle *handle, uint64_t id, const char *json);
+
 #ifdef __cplusplus
 }
 #endif

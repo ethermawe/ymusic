@@ -672,6 +672,39 @@ pub unsafe extern "C" fn ymusic_core_spectrum_levels(handle: *mut CoreHandle, ou
     })
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_hook_subscribe(
+    handle: *mut CoreHandle,
+    point: *const c_char,
+    enabled: bool,
+) {
+    ffi_guard!("ymusic_hook_subscribe", (), {
+        if let Some(h) = unsafe { handle.as_ref() }
+            && !point.is_null()
+            && let Ok(name) = unsafe { CStr::from_ptr(point) }.to_str()
+            && let Some(hp) = crate::hooks::HookPoint::parse(name)
+        {
+            h.core.hooks.subscribe(hp, enabled);
+        }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ymusic_hook_response(
+    handle: *mut CoreHandle,
+    id: u64,
+    json: *const c_char,
+) {
+    ffi_guard!("ymusic_hook_response", (), {
+        if let Some(h) = unsafe { handle.as_ref() }
+            && !json.is_null()
+            && let Ok(raw) = unsafe { CStr::from_ptr(json) }.to_str()
+        {
+            h.core.hooks.respond(id, raw.to_string());
+        }
+    })
+}
+
 #[cfg(test)]
 mod ffi_tests {
     use super::*;

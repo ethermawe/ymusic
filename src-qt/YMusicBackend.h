@@ -287,10 +287,14 @@ public:
     Q_INVOKABLE void startSleepTimer(int seconds, const QString &fadeMode = QStringLiteral("finalSeconds"));
     Q_INVOKABLE void cancelSleepTimer();
     Q_INVOKABLE void saveSession();
+    Q_INVOKABLE void hookSubscribe(const QString &point, bool enabled);
+    Q_INVOKABLE void hookResponse(quint64 id, const QString &json);
 
 signals:
     void featuresChanged();
     void featureResult(const QVariantMap &result);
+    void hookRequestReceived(quint64 id, const QString &point, const QVariant &payload);
+    void modWarningReceived(const QString &message);
     void playlistPickerResult(const QString &id, const QString &stage, const QVariantList &playlists, const QString &message);
     void trackMenuRequested(const QString &id, const QString &title, bool available, qreal x, qreal y);
     void authChanged();

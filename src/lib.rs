@@ -9,6 +9,7 @@ pub mod mpris;
 pub mod core;
 pub mod ffi;
 pub mod history;
+pub mod hooks;
 pub mod slopless;
 pub mod wave;
 
