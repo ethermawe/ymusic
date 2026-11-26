@@ -503,6 +503,10 @@ pub struct UserSettings {
     pub download_quality: String,
     #[serde(default = "default_normalize_volume")]
     pub normalize_volume: bool,
+    #[serde(default = "default_true")]
+    pub gapless_enabled: bool,
+    #[serde(default)]
+    pub crossfade_secs: f32,
     #[serde(default = "default_ai_music_behavior")]
     pub ai_music_behavior: String,
     #[serde(default)]
@@ -569,6 +573,8 @@ impl Default for UserSettings {
             audio_quality: default_audio_quality(),
             download_quality: default_download_quality(),
             normalize_volume: default_normalize_volume(),
+            gapless_enabled: true,
+            crossfade_secs: 0.0,
             ai_music_behavior: default_ai_music_behavior(),
             ai_strict_tracks: false,
             show_ai_labels: default_show_ai_labels(),

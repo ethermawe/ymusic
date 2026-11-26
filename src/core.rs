@@ -5039,7 +5039,7 @@ impl YMusicCore {
     pub fn on_audio(self: Arc<Self>, event: Event) {
         let current = self.generation();
         match event {
-            Event::Started(g) if g == current => {
+            Event::Started(g) | Event::GaplessTransition(g) if g == current => {
                 self.mpris.set_status(MprisStatus::Playing, 0.0);
                 self.discord.set_status(MprisStatus::Playing, 0.0);
                 self.lastfm.on_started();

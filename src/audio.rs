@@ -14,6 +14,7 @@ use crate::cache::StreamReader;
 /// чтобы запоздавшие события старого трека не влияли на новый.
 pub enum Event {
     Started(u64),
+    GaplessTransition(u64),
     Position { generation: u64, secs: f64, paused: bool },
     Ended(u64),
     Error(u64, String),
@@ -26,6 +27,8 @@ pub enum SourceData {
 
 enum Cmd {
     Load(u64, SourceData, f32),
+    QueueGapless(u64, SourceData, f32),
+    CrossfadeLoad(u64, SourceData, f32, Duration),
     #[allow(dead_code)]
     Play,
     Pause,
@@ -37,6 +40,35 @@ enum Cmd {
     SleepFade(f32),
     TrackGain(f32),
     Stop,
+}
+
+/// Equal-power crossfade gain curve for normalized progress `t` in `0.0..=1.0`.
+/// Returns `(outgoing_gain, incoming_gain)`.
+pub fn crossfade_gain_curve(t: f32) -> (f32, f32) {
+    let clamped = t.clamp(0.0, 1.0);
+    let angle = clamped * std::f32::consts::FRAC_PI_2;
+    (angle.cos(), angle.sin())
+}
+
+/// Decides whether crossfade should be applied between two tracks.
+/// Never crossfades within the same album when gapless playback is enabled.
+pub fn should_crossfade(
+    crossfade_secs: f32,
+    gapless_enabled: bool,
+    current_album_id: Option<&str>,
+    next_album_id: Option<&str>,
+) -> bool {
+    if crossfade_secs <= 0.05 {
+        return false;
+    }
+    if gapless_enabled
+        && let (Some(a), Some(b)) = (current_album_id, next_album_id)
+        && !a.is_empty()
+        && a == b
+    {
+        return false;
+    }
+    true
 }
 
 const FFT_SIZE: usize = 2048;
@@ -310,6 +342,15 @@ impl Audio {
         let _ = self.tx.send(Cmd::Load(generation, data, track_gain.clamp(0.1, 2.0)));
     }
 
+    pub fn queue_gapless(&self, generation: u64, data: SourceData, track_gain: f32) {
+        let _ = self.tx.send(Cmd::QueueGapless(generation, data, track_gain.clamp(0.1, 2.0)));
+    }
+
+    pub fn crossfade_load(&self, generation: u64, data: SourceData, track_gain: f32, duration: Duration) {
+        let clamped = duration.min(Duration::from_secs(12));
+        let _ = self.tx.send(Cmd::CrossfadeLoad(generation, data, track_gain.clamp(0.1, 2.0), clamped));
+    }
+
     #[allow(dead_code)]
     pub fn play(&self) {
         let _ = self.tx.send(Cmd::Play);
@@ -358,6 +399,80 @@ fn fade_out(player: &Player, from_vol: f32, duration: Duration) {
     }
 }
 
+struct CrossfadeState {
+    started_at: Instant,
+    duration: Duration,
+    from_vol: f32,
+    to_vol: f32,
+}
+
+fn decode_source(
+    data: SourceData,
+    stream_slot: &mut Option<StreamReader>,
+    cached_backup: &mut Option<(File, u64, Option<String>)>,
+) -> Result<Box<dyn Source<Item = f32> + Send>, String> {
+    match data {
+        SourceData::Cached { file, len, hint } => {
+            *cached_backup = file.try_clone().ok().map(|f| (f, len, hint.clone()));
+            let ext = hint_ext(hint.as_deref());
+            let file_clone = file.try_clone().ok();
+            let primary = Decoder::builder()
+                .with_data(BufReader::new(file))
+                .with_byte_len(len)
+                .with_seekable(true)
+                .with_hint(ext)
+                .build();
+            let decoded = match primary {
+                Ok(s) => Ok(s),
+                Err(e) => {
+                    if let Some(mut f2) = file_clone {
+                        use std::io::Seek;
+                        let _ = f2.seek(std::io::SeekFrom::Start(0));
+                        Decoder::builder()
+                            .with_data(BufReader::new(f2))
+                            .with_byte_len(len)
+                            .with_seekable(true)
+                            .build()
+                    } else {
+                        Err(e)
+                    }
+                }
+            };
+            decoded
+                .map(|s| Box::new(s) as Box<dyn Source<Item = f32> + Send>)
+                .map_err(|e| e.to_string())
+        }
+        SourceData::Stream { reader, hint } => {
+            *cached_backup = None;
+            *stream_slot = Some(reader.clone());
+            let ext = hint_ext(hint.as_deref());
+            let mut b = Decoder::builder()
+                .with_data(reader.clone())
+                .with_seekable(true)
+                .with_hint(ext);
+            if let Some(len) = reader.byte_len() {
+                b = b.with_byte_len(len);
+            }
+            let primary = b.build();
+            let decoded = match primary {
+                Ok(s) => Ok(s),
+                Err(_) => {
+                    let mut b2 = Decoder::builder()
+                        .with_data(reader.clone())
+                        .with_seekable(true);
+                    if let Some(len) = reader.byte_len() {
+                        b2 = b2.with_byte_len(len);
+                    }
+                    b2.build()
+                }
+            };
+            decoded
+                .map(|s| Box::new(s) as Box<dyn Source<Item = f32> + Send>)
+                .map_err(|e| e.to_string())
+        }
+    }
+}
+
 fn run(
     rx: mpsc::Receiver<Cmd>,
     spectrum: Arc<Mutex<SpectrumRing>>,
@@ -372,10 +487,15 @@ fn run(
         }
     };
     sink.log_on_drop(false);
-    let player = Player::connect_new(sink.mixer());
+    let mut player = Player::connect_new(sink.mixer());
+    let mut outgoing_player = Player::connect_new(sink.mixer());
+    let mut crossfade: Option<CrossfadeState> = None;
     let mut active = false;
     let mut generation = 0u64;
+    let mut pending_gapless_gen: Option<(u64, f32)> = None;
     let mut stream: Option<StreamReader> = None;
+    let mut outgoing_stream: Option<StreamReader> = None;
+    let mut current_cached: Option<(File, u64, Option<String>)> = None;
     let mut target_volume: f32 = 1.0;
     let mut sleep_fade: f32 = 1.0;
     let mut track_gain: f32 = 1.0;
@@ -394,8 +514,45 @@ fn run(
         }
     };
 
+    let seek_with_fallback = |player: &Player,
+                              target_media: f64,
+                              current_speed: f32,
+                              current_cached: &Option<(File, u64, Option<String>)>,
+                              spectrum: &Arc<Mutex<SpectrumRing>>,
+                              media_pos_us: &Arc<AtomicU64>| {
+        let target_media = target_media.max(0.0);
+        let scaled = target_media / f64::from(current_speed.max(0.1));
+        if let Err(err) = player.try_seek(Duration::from_secs_f64(scaled)) {
+            eprintln!("[ymusic::audio] try_seek({target_media:.2}s) failed ({err}), attempting reopen fallback");
+            if let Some((file, len, hint)) = current_cached
+                && let Ok(mut cloned) = file.try_clone()
+            {
+                use std::io::Seek;
+                let _ = cloned.seek(std::io::SeekFrom::Start(0));
+                let mut dummy_stream = None;
+                let mut dummy_backup = None;
+                if let Ok(src) = decode_source(
+                    SourceData::Cached { file: cloned, len: *len, hint: hint.clone() },
+                    &mut dummy_stream,
+                    &mut dummy_backup,
+                ) {
+                    let was_paused = player.is_paused();
+                    player.clear();
+                    let skipped = src.skip_duration(Duration::from_secs_f64(target_media));
+                    media_pos_us.store((target_media * 1_000_000.0) as u64, Ordering::Relaxed);
+                    player.append(SpectrumTap::new(skipped, spectrum.clone(), media_pos_us.clone()));
+                    if was_paused {
+                        player.pause();
+                    } else {
+                        player.play();
+                    }
+                }
+            }
+        }
+    };
+
     loop {
-        let tick = if fade_in_remaining > 0 && active && !player.is_paused() {
+        let tick = if crossfade.is_some() || (fade_in_remaining > 0 && active && !player.is_paused()) {
             FADE_IN_TICK
         } else if active && !player.is_paused() {
             Duration::from_millis(50)
@@ -404,6 +561,11 @@ fn run(
         };
         match rx.recv_timeout(tick) {
             Ok(Cmd::Load(new_generation, data, new_gain)) => {
+                if crossfade.take().is_some() {
+                    release(&mut outgoing_stream);
+                    outgoing_player.clear();
+                }
+                pending_gapless_gen = None;
                 if active && !player.is_paused() {
                     fade_out(&player, current_volume, FADE_OUT_SWITCH);
                 }
@@ -414,60 +576,9 @@ fn run(
                 fade_in_remaining = 0;
                 generation = new_generation;
                 track_gain = new_gain;
-                let res = match data {
-                    SourceData::Cached { file, len, hint } => {
-                        let ext = hint_ext(hint.as_deref());
-                        let file_clone = file.try_clone().ok();
-                        let primary = Decoder::builder()
-                            .with_data(BufReader::new(file))
-                            .with_byte_len(len)
-                            .with_seekable(true)
-                            .with_hint(ext)
-                            .build();
-                        let decoded = match primary {
-                            Ok(s) => Ok(s),
-                            Err(e) => {
-                                if let Some( mut f2) = file_clone {
-                                    use std::io::Seek;
-                                    let _ = f2.seek(std::io::SeekFrom::Start(0));
-                                    Decoder::builder()
-                                        .with_data(BufReader::new(f2))
-                                        .with_byte_len(len)
-                                        .with_seekable(true)
-                                        .build()
-                                } else {
-                                    Err(e)
-                                }
-                            }
-                        };
-                        decoded.map(|s| player.append(SpectrumTap::new(s, spectrum.clone(), media_pos_us.clone())))
-                    }
-                    SourceData::Stream { reader, hint } => {
-                        stream = Some(reader.clone());
-                        let ext = hint_ext(hint.as_deref());
-                        let mut b = Decoder::builder()
-                            .with_data(reader.clone())
-                            .with_seekable(true)
-                            .with_hint(ext);
-                        if let Some(len) = reader.byte_len() {
-                            b = b.with_byte_len(len);
-                        }
-                        let primary = b.build();
-                        let decoded = match primary {
-                            Ok(s) => Ok(s),
-                            Err(_) => {
-                                let mut b2 = Decoder::builder()
-                                    .with_data(reader.clone())
-                                    .with_seekable(true);
-                                if let Some(len) = reader.byte_len() {
-                                    b2 = b2.with_byte_len(len);
-                                }
-                                b2.build()
-                            }
-                        };
-                        decoded.map(|s| player.append(SpectrumTap::new(s, spectrum.clone(), media_pos_us.clone())))
-                    }
-                };
+                let res = decode_source(data, &mut stream, &mut current_cached).map(|s| {
+                    player.append(SpectrumTap::new(s, spectrum.clone(), media_pos_us.clone()));
+                });
                 match res {
                     Ok(()) => {
                         current_volume = 0.0;
@@ -489,6 +600,67 @@ fn run(
                             generation,
                             format!("Не удалось декодировать трек: {e}"),
                         ));
+                    }
+                }
+            }
+            Ok(Cmd::QueueGapless(next_gen, data, next_gain)) if active => {
+                let mut next_stream = None;
+                let mut next_cached = None;
+                if let Ok(src) = decode_source(data, &mut next_stream, &mut next_cached) {
+                    player.append(SpectrumTap::new(src, spectrum.clone(), media_pos_us.clone()));
+                    pending_gapless_gen = Some((next_gen, next_gain));
+                }
+            }
+            Ok(Cmd::CrossfadeLoad(new_generation, data, new_gain, cf_duration)) => {
+                if !active || player.is_paused() || cf_duration.is_zero() {
+                    // Fallback to regular switch when not actively playing
+                    release(&mut stream);
+                    player.clear();
+                    generation = new_generation;
+                    track_gain = new_gain;
+                    if let Ok(src) = decode_source(data, &mut stream, &mut current_cached) {
+                        player.append(SpectrumTap::new(src, spectrum.clone(), media_pos_us.clone()));
+                        current_volume = effective_target(target_volume, sleep_fade, track_gain);
+                        player.set_volume(current_volume);
+                        player.play();
+                        active = true;
+                        spectrum_active.store(true, Ordering::Relaxed);
+                        on_event(Event::Started(generation));
+                    }
+                } else {
+                    release(&mut outgoing_stream);
+                    outgoing_player.clear();
+                    std::mem::swap(&mut player, &mut outgoing_player);
+                    std::mem::swap(&mut stream, &mut outgoing_stream);
+                    let from_vol = current_volume;
+                    generation = new_generation;
+                    track_gain = new_gain;
+                    pending_gapless_gen = None;
+                    fade_in_remaining = 0;
+                    media_pos_us.store(0, Ordering::Relaxed);
+                    match decode_source(data, &mut stream, &mut current_cached) {
+                        Ok(src) => {
+                            player.set_speed(current_speed);
+                            player.set_volume(0.0);
+                            player.append(SpectrumTap::new(src, spectrum.clone(), media_pos_us.clone()));
+                            player.play();
+                            let to_vol = effective_target(target_volume, sleep_fade, track_gain);
+                            crossfade = Some(CrossfadeState {
+                                started_at: Instant::now(),
+                                duration: cf_duration,
+                                from_vol,
+                                to_vol,
+                            });
+                            active = true;
+                            spectrum_active.store(true, Ordering::Relaxed);
+                            on_event(Event::Started(generation));
+                        }
+                        Err(e) => {
+                            outgoing_player.clear();
+                            release(&mut outgoing_stream);
+                            active = false;
+                            on_event(Event::Error(generation, format!("Не удалось декодировать трек: {e}")));
+                        }
                     }
                 }
             }
@@ -526,17 +698,11 @@ fn run(
                 }
             }
             Ok(Cmd::Seek(secs)) if active => {
-                // rodio's Speed::try_seek multiplies by speed, so divide by current_speed
-                // to land on the exact media timestamp.
-                let target_media = secs.max(0.0);
-                let scaled = target_media / f64::from(current_speed.max(0.1));
-                let _ = player.try_seek(Duration::from_secs_f64(scaled));
+                seek_with_fallback(&player, secs, current_speed, &current_cached, &spectrum, &media_pos_us);
             }
             Ok(Cmd::SeekRelative(delta)) if active => {
                 let cur = media_pos_us.load(Ordering::Relaxed) as f64 / 1_000_000.0;
-                let target_media = (cur + delta).max(0.0);
-                let scaled = target_media / f64::from(current_speed.max(0.1));
-                let _ = player.try_seek(Duration::from_secs_f64(scaled));
+                seek_with_fallback(&player, cur + delta, current_speed, &current_cached, &spectrum, &media_pos_us);
             }
             Ok(Cmd::Volume(v)) => {
                 target_volume = v;
@@ -585,7 +751,18 @@ fn run(
             }
         }
 
-        if fade_in_remaining > 0 && active && !player.is_paused() {
+        if let Some(ref cf) = crossfade {
+            let t = (cf.started_at.elapsed().as_secs_f32() / cf.duration.as_secs_f32().max(0.05)).clamp(0.0, 1.0);
+            let (out_g, in_g) = crossfade_gain_curve(t);
+            outgoing_player.set_volume(cf.from_vol * out_g);
+            current_volume = cf.to_vol * in_g;
+            player.set_volume(current_volume);
+            if t >= 1.0 || outgoing_player.empty() {
+                outgoing_player.clear();
+                release(&mut outgoing_stream);
+                crossfade = None;
+            }
+        } else if fade_in_remaining > 0 && active && !player.is_paused() {
             fade_in_remaining -= 1;
             let progress = 1.0 - (f32::from(fade_in_remaining) / f32::from(FADE_IN_STEPS));
             current_volume = effective_target(target_volume, sleep_fade, track_gain) * progress;
@@ -593,6 +770,16 @@ fn run(
         }
 
         if active {
+            if let Some((next_gen, next_gain)) = pending_gapless_gen
+                && player.len() == 1
+            {
+                pending_gapless_gen = None;
+                generation = next_gen;
+                track_gain = next_gain;
+                current_volume = effective_target(target_volume, sleep_fade, track_gain);
+                player.set_volume(current_volume);
+                on_event(Event::GaplessTransition(generation));
+            }
             if player.empty() {
                 active = false;
                 media_pos_us.store(0, Ordering::Relaxed);
@@ -646,5 +833,114 @@ mod spectrum_tests {
         let high_peak = bands[30..42].iter().copied().fold(0.0f32, f32::max);
         assert!(bass_peak > 0.45 && bass_peak < 0.92, "bass_peak={bass_peak}");
         assert!(high_peak > 0.25, "high_peak={high_peak}");
+    }
+
+    struct SyntheticTone {
+        sample_rate: u32,
+        channels: u16,
+        total_frames: u64,
+        frame_idx: u64,
+        ch_idx: u16,
+        amplitude: f32,
+    }
+
+    impl SyntheticTone {
+        fn new(sample_rate: u32, duration_ms: u64, amplitude: f32) -> Self {
+            let total_frames = (u64::from(sample_rate) * duration_ms) / 1000;
+            Self {
+                sample_rate,
+                channels: 2,
+                total_frames,
+                frame_idx: 0,
+                ch_idx: 0,
+                amplitude,
+            }
+        }
+    }
+
+    impl Iterator for SyntheticTone {
+        type Item = f32;
+        fn next(&mut self) -> Option<f32> {
+            if self.frame_idx >= self.total_frames {
+                return None;
+            }
+            let val = self.amplitude;
+            self.ch_idx += 1;
+            if self.ch_idx >= self.channels {
+                self.ch_idx = 0;
+                self.frame_idx += 1;
+            }
+            Some(val)
+        }
+    }
+
+    impl Source for SyntheticTone {
+        fn current_span_len(&self) -> Option<usize> {
+            None
+        }
+        fn channels(&self) -> rodio::ChannelCount {
+            std::num::NonZero::new(self.channels).unwrap()
+        }
+        fn sample_rate(&self) -> rodio::SampleRate {
+            std::num::NonZero::new(self.sample_rate).unwrap()
+        }
+        fn total_duration(&self) -> Option<Duration> {
+            Some(Duration::from_secs_f64(self.total_frames as f64 / f64::from(self.sample_rate)))
+        }
+        fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+            let target = (pos.as_secs_f64() * f64::from(self.sample_rate)).round() as u64;
+            self.frame_idx = target.min(self.total_frames);
+            self.ch_idx = 0;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn spectrum_tap_tracks_position_and_seeks_accurately() {
+        let ring = Arc::new(Mutex::new(SpectrumRing::default()));
+        let pos_us = Arc::new(AtomicU64::new(0));
+        let src = SyntheticTone::new(48_000, 1000, 0.25);
+        let mut tap = SpectrumTap::new(src, ring, pos_us.clone());
+
+        // Consume 0.25s (12_000 stereo frames = 24_000 samples)
+        for _ in 0..24_000 {
+            assert!(tap.next().is_some());
+        }
+        let secs = pos_us.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+        assert!((secs - 0.25).abs() < 0.01, "secs={secs}");
+
+        // Seek to 0.75s and verify position updates
+        tap.try_seek(Duration::from_millis(750)).unwrap();
+        let after_seek = pos_us.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+        assert!((after_seek - 0.75).abs() < 0.005, "after_seek={after_seek}");
+    }
+
+    #[test]
+    fn crossfade_curve_is_equal_power_and_respects_album_gapless() {
+        let (o0, i0) = crossfade_gain_curve(0.0);
+        assert!((o0 - 1.0).abs() < 1e-5 && i0.abs() < 1e-5);
+        let (om, im) = crossfade_gain_curve(0.5);
+        // Equal power: out^2 + in^2 == 1.0
+        assert!((om * om + im * im - 1.0).abs() < 1e-5);
+        let (o1, i1) = crossfade_gain_curve(1.0);
+        assert!(o1.abs() < 1e-5 && (i1 - 1.0).abs() < 1e-5);
+
+        // Disabled when crossfade_secs == 0
+        assert!(!should_crossfade(0.0, true, Some("a1"), Some("a2")));
+        // Disabled within same album when gapless is enabled
+        assert!(!should_crossfade(4.0, true, Some("alb-1"), Some("alb-1")));
+        // Enabled across different albums
+        assert!(should_crossfade(4.0, true, Some("alb-1"), Some("alb-2")));
+        // Enabled within same album if gapless is explicitly disabled
+        assert!(should_crossfade(4.0, false, Some("alb-1"), Some("alb-1")));
+    }
+
+    #[test]
+    fn gapless_synthetic_sources_have_zero_silence_samples() {
+        let s1 = SyntheticTone::new(48_000, 10, 0.5);
+        let s2 = SyntheticTone::new(48_000, 10, 0.8);
+        let samples: Vec<f32> = s1.chain(s2).collect();
+        assert_eq!(samples.len(), 2 * (480 * 2));
+        assert!(samples.iter().all(|&v| v > 0.4));
     }
 }
