@@ -84,7 +84,7 @@ Item {
                 reloadRevision: ModManager.reloadRevision
                 fillContent: false
                 fitWidth: false
-                anchors.verticalCenter: parent.verticalCenter
+                anchors.verticalCenter: parent ? parent.verticalCenter : undefined
                 width: implicitWidth
                 height: implicitHeight > 0 ? implicitHeight : rowHost.height
             }

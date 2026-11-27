@@ -230,6 +230,15 @@ void ModSlotView::loadNow()
         return;
     }
 
+    // Re-apply after completeCreate() so QML default initializers (e.g. `property var slotContext: ({})`)
+    // do not overwrite the injected context/API values.
+    if (obj->metaObject()->indexOfProperty("modApi") >= 0) {
+        obj->setProperty("modApi", QVariant::fromValue(static_cast<QObject *>(api)));
+    }
+    if (obj->metaObject()->indexOfProperty("slotContext") >= 0) {
+        obj->setProperty("slotContext", m_slotContext);
+    }
+
     m_modContext = modCtx;
     m_loadedObject = obj;
     m_loadedKey = key;

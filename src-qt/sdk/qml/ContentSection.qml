@@ -1,47 +1,65 @@
 import QtQuick
-import QtQuick.Layouts
 import ymusic.sdk
 
-Card {
+Column {
     id: root
 
     property string title: ""
     property string symbol: ""
-    default property alias content: body.data
+    default property alias content: rows.data
 
     width: parent ? parent.width : 0
-    implicitHeight: container.implicitHeight + 28
+    spacing: 8
 
-    Column {
-        id: container
-        anchors.fill: parent
-        anchors.margins: 14
+    Row {
         spacing: 10
+        leftPadding: 2
+        visible: root.title.length > 0
 
-        RowLayout {
-            width: parent.width
-            spacing: 8
-            visible: root.title.length > 0
+        HoverHandler {
+            id: headerHover
+        }
 
-            MaterialSymbol {
-                visible: root.symbol.length > 0
-                symbol: root.symbol
-                iconSize: 20
-                color: Theme.colors.primary
+        Rectangle {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.symbol.length > 0
+            width: 34
+            height: 34
+            radius: headerHover.hovered ? 11 : 17
+            color: Theme.colors.primaryContainer
+
+            Behavior on radius {
+                enabled: !Theme.performanceMode && !Theme.reduceMotion
+                NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
             }
 
-            StyledText {
-                Layout.fillWidth: true
-                text: root.title
-                font.pixelSize: Theme.fontSize.large
-                font.weight: Font.DemiBold
+            MaterialSymbol {
+                anchors.centerIn: parent
+                symbol: root.symbol
+                iconSize: 18
+                color: Theme.colors.onPrimaryContainer
             }
         }
 
+        TitleText {
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.title
+            font.pixelSize: Theme.fontSize.larger || (Theme.fontSize.large + 2)
+        }
+    }
+
+    Rectangle {
+        width: parent.width
+        implicitHeight: rows.implicitHeight + 16
+        radius: Theme.rounding.normal
+        color: Theme.colors.layer1
+
         Column {
-            id: body
-            width: parent.width
-            spacing: 10
+            id: rows
+            x: 8
+            y: 8
+            width: parent.width - 16
+            spacing: 2
         }
     }
 }

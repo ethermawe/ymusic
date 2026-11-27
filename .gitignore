@@ -8,3 +8,4 @@ build-makepkg/
 .vscode/
 *.pkg.tar.zst
 *.pkg.tar.xz
+examples/mods/dist/

@@ -248,7 +248,10 @@ QUrl ModUrlInterceptor::intercept(const QUrl &url, DataType type)
 
 // --- ModSandboxUrlInterceptor ------------------------------------------------
 
-ModSandboxUrlInterceptor::ModSandboxUrlInterceptor(QString modId, QString modDirectory, ErrorCallback onError)
+ModSandboxUrlInterceptor::ModSandboxUrlInterceptor(QString modId,
+                                                   QString modDirectory,
+                                                   QStringList qtImportPaths,
+                                                   ErrorCallback onError)
     : m_modId(std::move(modId))
     , m_onError(std::move(onError))
 {
@@ -260,13 +263,26 @@ ModSandboxUrlInterceptor::ModSandboxUrlInterceptor(QString modId, QString modDir
         m_modDirectory.chop(1);
     }
 
-    const QFileInfo qtQmlInfo(QLibraryInfo::path(QLibraryInfo::QmlImportsPath));
-    m_qtQmlImportPath = qtQmlInfo.canonicalFilePath().isEmpty()
-        ? QDir::cleanPath(qtQmlInfo.absoluteFilePath())
-        : qtQmlInfo.canonicalFilePath();
-    while (m_qtQmlImportPath.endsWith(u'/') && m_qtQmlImportPath.size() > 1) {
-        m_qtQmlImportPath.chop(1);
+    auto addImportRoot = [&](const QString &raw) {
+        if (raw.isEmpty() || raw.startsWith(QLatin1StringView("qrc:")) || raw.startsWith(QLatin1StringView(":/"))) {
+            return;
+        }
+        const QFileInfo info(raw);
+        QString p = info.canonicalFilePath().isEmpty()
+            ? QDir::cleanPath(info.absoluteFilePath())
+            : info.canonicalFilePath();
+        while (p.endsWith(u'/') && p.size() > 1) {
+            p.chop(1);
+        }
+        if (!p.isEmpty() && !m_qtQmlImportPaths.contains(p)) {
+            m_qtQmlImportPaths.append(p);
+        }
+    };
+
+    for (const QString &p : qtImportPaths) {
+        addImportRoot(p);
     }
+    addImportRoot(QLibraryInfo::path(QLibraryInfo::QmlImportsPath));
 }
 
 bool ModSandboxUrlInterceptor::isAllowedImportModule(const QString &moduleUri)
@@ -294,27 +310,36 @@ bool ModSandboxUrlInterceptor::isAllowedQtModulePath(const QString &relativeModu
     if (cleaned.startsWith(QLatin1StringView("..")) || cleaned.startsWith(u'/')) {
         return false;
     }
-    static const QStringList kAllowedPrefixes {
-        QStringLiteral("QtQuick/qmldir"),
-        QStringLiteral("QtQuick/Controls/"),
-        QStringLiteral("QtQuick/Templates/"),
-        QStringLiteral("QtQuick/Layouts/"),
-        QStringLiteral("QtQuick/Window/"),
-        QStringLiteral("QtQuick/Shapes/"),
-        QStringLiteral("QtQuick/Effects/"),
-        QStringLiteral("QtQuick/tooling/"),
-        QStringLiteral("QtQml/qmldir"),
-        QStringLiteral("QtQml/Base/"),
-        QStringLiteral("QtQml/Models/"),
-        QStringLiteral("QtQml/WorkerScript/"),
+    static const QStringList kAllowedBases {
+        QStringLiteral("QtQuick/Controls"),
+        QStringLiteral("QtQuick/Templates"),
+        QStringLiteral("QtQuick/Layouts"),
+        QStringLiteral("QtQuick/Window"),
+        QStringLiteral("QtQuick/Shapes"),
+        QStringLiteral("QtQuick/Effects"),
+        QStringLiteral("QtQuick/tooling"),
+        QStringLiteral("QtQuick/NativeStyle"),
+        QStringLiteral("QtQml/Base"),
+        QStringLiteral("QtQml/Models"),
+        QStringLiteral("QtQml/WorkerScript"),
     };
-    if (cleaned == QLatin1StringView("QtQuick") || cleaned == QLatin1StringView("QtQml")) {
+    if (cleaned == QLatin1StringView("QtQuick")
+        || cleaned == QLatin1StringView("QtQuick/qmldir")
+        || cleaned == QLatin1StringView("QtQml")
+        || cleaned == QLatin1StringView("QtQml/qmldir")) {
         return true;
     }
-    for (const QString &prefix : kAllowedPrefixes) {
-        if (cleaned == prefix || cleaned.startsWith(prefix)) {
+    for (const QString &base : kAllowedBases) {
+        if (cleaned == base || cleaned.startsWith(base + u'/')) {
             return true;
         }
+    }
+    // Allow direct plugin/qmldir files inside QtQuick/ or QtQml/ (e.g. libqtquick2plugin.so)
+    if (cleaned.startsWith(QLatin1StringView("QtQuick/")) && !cleaned.mid(8).contains(u'/')) {
+        return true;
+    }
+    if (cleaned.startsWith(QLatin1StringView("QtQml/")) && !cleaned.mid(6).contains(u'/')) {
+        return true;
     }
     return false;
 }
@@ -405,10 +430,12 @@ QUrl ModSandboxUrlInterceptor::intercept(const QUrl &url, DataType type)
             && (resolved == m_modDirectory || resolved.startsWith(m_modDirectory + u'/'))) {
             return url;
         }
-        if (!m_qtQmlImportPath.isEmpty() && resolved.startsWith(m_qtQmlImportPath + u'/')) {
-            const QString rel = resolved.mid(m_qtQmlImportPath.size() + 1);
-            if (isAllowedQtModulePath(rel)) {
-                return url;
+        for (const QString &importRoot : m_qtQmlImportPaths) {
+            if (resolved.startsWith(importRoot + u'/')) {
+                const QString rel = resolved.mid(importRoot.size() + 1);
+                if (isAllowedQtModulePath(rel)) {
+                    return url;
+                }
             }
         }
         return deny(QStringLiteral("доступ к файлу вне папки мода"));

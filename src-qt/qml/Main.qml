@@ -97,6 +97,20 @@ ApplicationWindow {
         }
         function onSettingsRequested() { window.openSettings(); }
         function onCreatePlaylistRequested() { createPlaylist.open(); }
+        function onLyricsToggleRequested() { UiState.toggleLyricsPanel(); }
+        function onQueueToggleRequested() { UiState.toggleQueuePanel(); }
+    }
+
+    Binding {
+        target: ModManager
+        property: "showingLyrics"
+        value: UiState.showingLyrics
+    }
+
+    Binding {
+        target: ModManager
+        property: "showingQueue"
+        value: UiState.showingQueue
     }
 
     function openSettings() {
@@ -537,6 +551,16 @@ ApplicationWindow {
                         FastWheel { target: cardsGrid }
                         ScrollBar.vertical: StyledScrollBar { topPadding: 3 + Appearance.sizes.topBarHeight }
 
+                        property real lastContentY: 0
+                        onVisibleChanged: lastContentY = contentY
+                        onContentYChanged: {
+                            const dy = contentY - lastContentY;
+                            lastContentY = contentY;
+                            if (visible && contentHeight > height + 40 && Math.abs(dy) < 400) {
+                                UiState.reportScroll(dy, contentY <= originY + 8);
+                            }
+                        }
+
                         header: Column {
                             width: cardsGrid.width
                             spacing: 10
@@ -643,6 +667,16 @@ ApplicationWindow {
 
                         FastWheel { target: listView }
                         ScrollBar.vertical: StyledScrollBar { topPadding: 3 + Appearance.sizes.topBarHeight }
+
+                        property real lastContentY: 0
+                        onVisibleChanged: lastContentY = contentY
+                        onContentYChanged: {
+                            const dy = contentY - lastContentY;
+                            lastContentY = contentY;
+                            if (visible && contentHeight > height + 40 && Math.abs(dy) < 400) {
+                                UiState.reportScroll(dy, contentY <= originY + 8);
+                            }
+                        }
 
                         header: CollectionHero {
                             width: listView.width
@@ -901,12 +935,33 @@ ApplicationWindow {
             // Floating Pill Player Bar
             FloatingPlayerBar {
                 id: playerBar
+                readonly property bool scrollHidden: UiState.playerBarHiddenByScroll
+                    && !playerBarHover.hovered
+                    && !playerBar.progressExpanded
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: window.compactWindow ? 10 : 14
                 width: Math.max(0, Math.min(760, sheet.width - (window.compactWindow ? 24 : 36)))
-                Reveal.shown: Backend.loggedIn || Backend.page === 7 || Backend.hasTrack
+                Reveal.shown: (Backend.loggedIn || Backend.page === 7 || Backend.hasTrack) && !ModManager.playerBarHidden
                 onImmersiveRequested: UiState.openImmersive()
+
+                transform: Translate {
+                    y: playerBar.scrollHidden ? (playerBar.height + playerBar.anchors.bottomMargin + 24) : 0
+                    Behavior on y {
+                        enabled: !Appearance.performanceMode
+                        NumberAnimation {
+                            duration: Appearance.motion(playerBar.scrollHidden ? 260 : 360)
+                            easing.type: Easing.BezierSpline
+                            easing.bezierCurve: playerBar.scrollHidden
+                                ? Appearance.curves.emphasizedAccel
+                                : Appearance.curves.expressiveDefaultSpatial
+                        }
+                    }
+                }
+
+                HoverHandler {
+                    id: playerBarHover
+                }
             }
         }
 
@@ -1077,6 +1132,18 @@ ApplicationWindow {
                     AppSettings.rightPanelWidth = 320;
                 }
             }
+        }
+
+        ModSlotHost {
+            anchors.fill: parent
+            z: 80
+            slotName: "window.overlay"
+            slotContext: ({
+                windowWidth: window.layoutWidth,
+                windowHeight: window.layoutHeight,
+                compactWindow: window.compactWindow,
+                immersiveOpen: UiState.immersiveOpen
+            })
         }
     }
 
@@ -1253,6 +1320,45 @@ ApplicationWindow {
     TrackMenu {
         id: trackMenu
         parent: Overlay.overlay
+    }
+
+    // Sandboxed floating desktop windows for mods with "ui:window" permission
+    Instantiator {
+        model: ModManager.floatingWindowEntries
+        delegate: Window {
+            id: modFloatWin
+            required property var modelData
+            readonly property string modId: modelData.modId || ""
+            readonly property bool openFlag: {
+                const _rev = ModManager.floatingWindowsRevision;
+                return ModManager.isFloatingWindowOpen(modId);
+            }
+
+            visible: openFlag
+            flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+            color: "transparent"
+            title: modelData.title || modId
+            width: Math.max(80, Math.min(640, floatSlot.implicitWidth > 0 ? floatSlot.implicitWidth : 440))
+            height: Math.max(24, Math.min(480, floatSlot.implicitHeight > 0 ? floatSlot.implicitHeight : 230))
+            x: Screen.virtualX + Math.round((Screen.width - width) / 2)
+            y: Screen.virtualY
+
+            ModSlotItem {
+                id: floatSlot
+                anchors.fill: parent
+                modId: modFloatWin.modId
+                slotName: "window.floating"
+                sourceUrl: modFloatWin.modelData.sourceUrl || ""
+                reloadRevision: ModManager.reloadRevision
+                fillContent: true
+                fitWidth: false
+                slotContext: ({
+                    floating: true,
+                    screenWidth: Screen.width,
+                    screenHeight: Screen.height
+                })
+            }
+        }
     }
 
     // Global keyboard shortcuts

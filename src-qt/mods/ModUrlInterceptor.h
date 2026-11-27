@@ -34,7 +34,10 @@ class ModSandboxUrlInterceptor final : public QQmlAbstractUrlInterceptor {
 public:
     using ErrorCallback = std::function<void(const QString &modId, const QString &message)>;
 
-    ModSandboxUrlInterceptor(QString modId, QString modDirectory, ErrorCallback onError = {});
+    ModSandboxUrlInterceptor(QString modId,
+                             QString modDirectory,
+                             QStringList qtImportPaths = {},
+                             ErrorCallback onError = {});
     ~ModSandboxUrlInterceptor() override = default;
 
     QUrl intercept(const QUrl &url, DataType type) override;
@@ -47,7 +50,7 @@ private:
 
     QString m_modId;
     QString m_modDirectory; // canonical path without trailing slash
-    QString m_qtQmlImportPath;
+    QStringList m_qtQmlImportPaths;
     ErrorCallback m_onError;
 };
 

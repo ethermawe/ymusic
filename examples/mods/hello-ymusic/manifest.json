@@ -1,13 +1,14 @@
 {
   "id": "hello-ymusic",
   "name": "Hello YMusic (Пример)",
-  "version": "1.0.0",
-  "author": "ymusic",
-  "description": "Стартовый пример мода: добавляет пункт поиска на YouTube в меню трека, свою страницу в сайдбаре и мини-индикатор в полном экране.",
+  "version": "1.1.0",
+  "minAppVersion": "0.3.1",
   "apiVersion": "1.0",
+  "author": "ymusic",
+  "description": "Пример мода: JS-логика (main.js + хуки + ym.ui.expose), страница в сайдбаре на ymusic.sdk 1.0, вкладка настроек, пункт меню трека и бейдж.",
+  "main": "main.js",
   "entry": {
-    "script": "main.qml",
-    "settings": "ui/Settings.qml"
+    "script": "main.qml"
   },
   "ui": {
     "sidebar.page": {
@@ -15,11 +16,26 @@
       "title": "Hello Mod",
       "symbol": "auto_awesome"
     },
+    "settings.tab": {
+      "file": "ui/Settings.qml",
+      "title": "Hello Mod",
+      "symbol": "auto_awesome",
+      "shape": "cookie9"
+    },
     "immersive.overlay": "ui/ImmersiveBadge.qml"
   },
+  "shortcuts": [
+    {
+      "id": "copy_current",
+      "sequence": "Ctrl+Shift+H",
+      "description": "Скопировать текущий трек (Hello Mod)"
+    }
+  ],
   "permissions": [
     "playback:read",
+    "playback:control",
     "spectrum:read",
+    "hooks:track_after_play",
     "ui:slots",
     "storage",
     "clipboard",

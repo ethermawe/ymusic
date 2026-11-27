@@ -13,6 +13,7 @@ T.AbstractButton {
     property bool isPlaying: model?.isPlaying ?? false
     property bool queueView: false
     property bool showsNumber: true
+    readonly property string rowTrackId: root.model ? String(root.model.id || "") : ""
     readonly property bool expanded: hovered || isCurrent
 
     implicitHeight: 58
@@ -188,7 +189,9 @@ T.AbstractButton {
                     id: trackTitleText
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Math.min(implicitWidth, Math.max(0, parent.width - (aiBadge.visible ? aiBadge.width + 6 : 0)))
+                    readonly property real badgesWidth: (aiBadge.visible ? aiBadge.width + 6 : 0)
+                        + (modTrackBadges.visible ? modTrackBadges.width + 6 : 0)
+                    width: Math.min(implicitWidth, Math.max(0, parent.width - badgesWidth))
                     text: root.model?.title ?? ""
                     elide: Text.ElideRight
                     font.pixelSize: Appearance.fontSize.small
@@ -217,6 +220,68 @@ T.AbstractButton {
                     anchors.left: trackTitleText.right
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Row {
+                    id: modTrackBadges
+                    readonly property var modBadges: {
+                        const _rev = ModManager.trackBadgesRevision;
+                        const tid = root.rowTrackId;
+                        return tid.length > 0 ? ModManager.trackBadgesFor(tid) : [];
+                    }
+                    spacing: 4
+                    height: 18
+                    visible: modBadges.length > 0
+                    anchors.left: aiBadge.visible ? aiBadge.right : trackTitleText.right
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Repeater {
+                        model: modTrackBadges.modBadges
+                        delegate: Rectangle {
+                            id: badgePill
+                            required property var modelData
+                            readonly property string tone: String(modelData?.tone || "")
+                            readonly property string tipText: String(modelData?.tooltip || "")
+                            readonly property color bg: tone === "primary" ? Appearance.colors.primaryContainer
+                                : tone === "secondary" ? Appearance.colors.secondaryContainer
+                                : tone === "tertiary" ? Appearance.colors.tertiaryContainer
+                                : tone === "error" ? Appearance.colors.errorContainer
+                                : Appearance.colors.surfaceContainerHigh
+                            readonly property color fg: tone === "primary" ? Appearance.colors.onPrimaryContainer
+                                : tone === "secondary" ? Appearance.colors.onSecondaryContainer
+                                : tone === "tertiary" ? Appearance.colors.onTertiaryContainer
+                                : tone === "error" ? Appearance.colors.onErrorContainer
+                                : Appearance.colors.onSurfaceVariant
+
+                            height: 18
+                            radius: 9
+                            implicitWidth: badgeLbl.implicitWidth + 10
+                            color: bg
+                            border.width: 1
+                            border.color: Qt.alpha(fg, 0.18)
+
+                            StyledText {
+                                id: badgeLbl
+                                anchors.centerIn: parent
+                                text: String(badgePill.modelData?.text || "")
+                                font.pixelSize: 10
+                                font.weight: Font.Bold
+                                font.letterSpacing: 0.4
+                                color: badgePill.fg
+                            }
+
+                            HoverHandler {
+                                id: badgeHover
+                                enabled: badgePill.tipText.length > 0
+                            }
+
+                            StyledToolTip {
+                                visible: badgeHover.hovered && badgePill.tipText.length > 0
+                                text: badgePill.tipText
+                            }
+                        }
+                    }
                 }
             }
 

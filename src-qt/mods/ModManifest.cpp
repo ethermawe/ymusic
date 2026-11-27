@@ -20,6 +20,7 @@ bool isKnownPermission(const QString &perm)
         QStringLiteral("playback:read"),
         QStringLiteral("playback:control"),
         QStringLiteral("library:read"),
+        QStringLiteral("library:write"),
         QStringLiteral("catalog:override"),
         QStringLiteral("audio:override"),
         QStringLiteral("lyrics:read"),
@@ -28,6 +29,8 @@ bool isKnownPermission(const QString &perm)
         QStringLiteral("ui:slots"),
         QStringLiteral("ui:override"),
         QStringLiteral("ui:pages"),
+        QStringLiteral("ui:layout"),
+        QStringLiteral("ui:window"),
         QStringLiteral("player"),
         QStringLiteral("library"),
         QStringLiteral("storage"),
@@ -422,6 +425,11 @@ ModManifest parseManifest(const QString &modDirectory)
 
     if (!m.overridesMap.isEmpty() && !m.hasPermission(QStringLiteral("ui:override"))) {
         m.error = QStringLiteral("Для overrides требуется разрешение 'ui:override'");
+        return m;
+    }
+
+    if (m.slotsMap.contains(QStringLiteral("window.floating")) && !m.hasPermission(QStringLiteral("ui:window"))) {
+        m.error = QStringLiteral("Для слота 'window.floating' требуется разрешение 'ui:window'");
         return m;
     }
 

@@ -8,6 +8,7 @@
 #include <QList>
 #include <QObject>
 #include <QPointer>
+#include <QSet>
 #include <QStringList>
 #include <QTimer>
 #include <QUrl>
@@ -53,6 +54,13 @@ struct ModLogEntry {
     QString message;
 };
 
+struct ModTrackBadge {
+    QString modId;
+    QString text;
+    QString tone;
+    QString tooltip;
+};
+
 class ModManager : public QObject {
     Q_OBJECT
     QML_ELEMENT
@@ -70,6 +78,12 @@ class ModManager : public QObject {
     Q_PROPERTY(QVariantList trackMenuActions READ trackMenuActionsVariantList NOTIFY trackMenuActionsChanged FINAL)
     Q_PROPERTY(QVariantList shortcuts READ shortcutsVariantList NOTIFY shortcutsChanged FINAL)
     Q_PROPERTY(int lyricSubtitlesRevision READ lyricSubtitlesRevision NOTIFY lyricSubtitlesChanged FINAL)
+    Q_PROPERTY(bool playerBarHidden READ playerBarHidden NOTIFY layoutStateChanged FINAL)
+    Q_PROPERTY(bool showingLyrics READ showingLyrics WRITE setShowingLyrics NOTIFY panelStateChanged FINAL)
+    Q_PROPERTY(bool showingQueue READ showingQueue WRITE setShowingQueue NOTIFY panelStateChanged FINAL)
+    Q_PROPERTY(QVariantList floatingWindowEntries READ floatingWindowEntries NOTIFY modsChanged FINAL)
+    Q_PROPERTY(int floatingWindowsRevision READ floatingWindowsRevision NOTIFY floatingWindowsChanged FINAL)
+    Q_PROPERTY(int trackBadgesRevision READ trackBadgesRevision NOTIFY trackBadgesChanged FINAL)
 
 public:
     explicit ModManager(AppSettings *settings,
@@ -100,6 +114,17 @@ public:
     bool pendingRestartPrompt() const { return m_pendingRestartPrompt; }
     bool restartRequested() const { return m_restartRequested; }
     int lyricSubtitlesRevision() const { return m_lyricSubtitlesRevision; }
+    bool playerBarHidden() const { return !m_playerBarHiddenBy.isEmpty(); }
+    bool showingLyrics() const { return m_showingLyrics; }
+    void setShowingLyrics(bool showing);
+    bool showingQueue() const { return m_showingQueue; }
+    void setShowingQueue(bool showing);
+    QVariantList floatingWindowEntries() const;
+    int floatingWindowsRevision() const { return m_floatingWindowsRevision; }
+    int trackBadgesRevision() const { return m_trackBadgesRevision; }
+    Q_INVOKABLE bool isFloatingWindowOpen(const QString &modId) const;
+    Q_INVOKABLE void setFloatingWindowOpen(const QString &modId, bool open);
+    Q_INVOKABLE QVariantList trackBadgesFor(const QString &trackId) const;
 
     QVariantList modsVariantList() const;
     QVariantList logsVariantList() const;
@@ -165,6 +190,14 @@ public:
     void setLyricSubtitles(const QString &modId, const QString &trackId, const QStringList &subtitles);
     void clearLyricSubtitlesForMod(const QString &modId);
 
+    void setTrackBadges(const QString &modId, const QHash<QString, ModTrackBadge> &badges);
+    void clearTrackBadgesForMod(const QString &modId);
+
+    void setModPlayerBarHidden(const QString &modId, bool hidden);
+    void clearModLayoutOverrides(const QString &modId);
+    void requestToggleLyrics();
+    void requestToggleQueue();
+
 signals:
     void modsChanged();
     void reloadRevisionChanged();
@@ -172,6 +205,12 @@ signals:
     void trackMenuActionsChanged();
     void shortcutsChanged();
     void lyricSubtitlesChanged();
+    void layoutStateChanged();
+    void panelStateChanged();
+    void floatingWindowsChanged();
+    void trackBadgesChanged();
+    void lyricsToggleRequested();
+    void queueToggleRequested();
     void toastRequested(const QString &message);
     void immersiveRequested(bool open);
     void settingsRequested();
@@ -184,6 +223,8 @@ private:
     };
 
     void scanAndSync(bool initialStartup);
+    QVariantMap installModFromFolderInternal(const QString &folderPath, bool rescan);
+    QVariantMap installModFromArchiveInternal(const QString &archivePath, bool rescan);
     void rebuildApis();
     void rebuildWatcher();
     void destroyAllApis();
@@ -222,6 +263,14 @@ private:
     // modId -> (trackId -> subtitle lines)
     QHash<QString, QPair<QString, QStringList>> m_lyricSubtitles;
     int m_lyricSubtitlesRevision = 0;
+
+    QSet<QString> m_playerBarHiddenBy;
+    QSet<QString> m_openFloatingWindows;
+    int m_floatingWindowsRevision = 0;
+    QHash<QString, QHash<QString, ModTrackBadge>> m_trackBadges;
+    int m_trackBadgesRevision = 0;
+    bool m_showingLyrics = false;
+    bool m_showingQueue = false;
 
     ModUrlInterceptor m_interceptor;
     QFileSystemWatcher m_watcher;

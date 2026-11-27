@@ -9,10 +9,12 @@
 #endif
 
 #include <QClipboard>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
+#include <QJSValue>
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QNetworkAccessManager>
@@ -28,6 +30,32 @@ namespace ymusic::mods {
 namespace {
 constexpr qint64 kMaxHttpBytes = 4 * 1024 * 1024;
 constexpr int kHttpTimeoutMs = 15000;
+
+QVariant unwrapJsVariant(const QVariant &value)
+{
+    QVariant v = value;
+    if (v.metaType().id() == qMetaTypeId<QJSValue>()) {
+        v = v.value<QJSValue>().toVariant();
+    }
+    if (v.typeId() == QMetaType::QVariantMap) {
+        const QVariantMap in = v.toMap();
+        QVariantMap out;
+        for (auto it = in.constBegin(); it != in.constEnd(); ++it) {
+            out.insert(it.key(), unwrapJsVariant(it.value()));
+        }
+        return out;
+    }
+    if (v.typeId() == QMetaType::QVariantList) {
+        const QVariantList in = v.toList();
+        QVariantList out;
+        out.reserve(in.size());
+        for (const QVariant &item : in) {
+            out.append(unwrapJsVariant(item));
+        }
+        return out;
+    }
+    return v;
+}
 
 #ifndef YMUSIC_MOD_TEST_NO_BACKEND
 QVariantList snapshotTrackModel(TrackModel *model)
@@ -69,14 +97,23 @@ ModApi::ModApi(ModManifest manifest,
     , m_backend(backend)
     , m_spectrum(spectrum)
 {
+    m_storageFlushTimer.setSingleShot(true);
+    m_storageFlushTimer.setInterval(250);
+    connect(&m_storageFlushTimer, &QTimer::timeout, this, &ModApi::flushStorage);
+
     if (hasPermission(QStringLiteral("storage"))) {
         loadStorage();
     }
 
     if (m_manager && hasPermission(QStringLiteral("ui:slots"))) {
+        connect(m_manager, &ModManager::panelStateChanged, this, &ModApi::uiPanelChanged);
         for (const ModShortcutDef &sc : m_manifest.shortcuts) {
             m_manager->registerShortcut(m_manifest.id, sc.id, sc.sequence, sc.description);
         }
+    }
+
+    if (m_manager && hasPermission(QStringLiteral("ui:window"))) {
+        connect(m_manager, &ModManager::floatingWindowsChanged, this, &ModApi::floatingWindowChanged);
     }
 
 #ifndef YMUSIC_MOD_TEST_NO_BACKEND
@@ -85,6 +122,7 @@ ModApi::ModApi(ModManifest manifest,
         connect(m_backend, &YMusicBackend::playbackStateChanged, this, &ModApi::playbackChanged);
         connect(m_backend, &YMusicBackend::volumeChanged, this, &ModApi::playbackChanged);
         connect(m_backend, &YMusicBackend::tempoChanged, this, &ModApi::playbackChanged);
+        connect(m_backend, &YMusicBackend::sleepTimerChanged, this, &ModApi::playbackChanged);
         connect(m_backend, &YMusicBackend::progressChanged, this, &ModApi::positionChanged);
     }
 
@@ -111,11 +149,15 @@ ModApi::ModApi(ModManifest manifest,
 
 ModApi::~ModApi()
 {
+    m_storageFlushTimer.stop();
+    flushStorage();
     clearTrackOverrides();
+    clearTrackBadges();
     if (m_manager) {
         m_manager->clearTrackMenuActionsForMod(m_manifest.id);
         m_manager->clearShortcutsForMod(m_manifest.id);
         m_manager->clearLyricSubtitlesForMod(m_manifest.id);
+        m_manager->clearModLayoutOverrides(m_manifest.id);
     }
 }
 
@@ -233,6 +275,15 @@ qreal ModApi::volume() const
 #endif
 }
 
+bool ModApi::muted() const
+{
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    return m_backend && hasPermission(QStringLiteral("playback:read")) && m_backend->volume() <= 0.01;
+#else
+    return false;
+#endif
+}
+
 bool ModApi::shuffle() const
 {
 #ifndef YMUSIC_MOD_TEST_NO_BACKEND
@@ -257,6 +308,28 @@ qreal ModApi::tempo() const
     return (m_backend && hasPermission(QStringLiteral("playback:read"))) ? m_backend->tempo() : 1.0;
 #else
     return 1.0;
+#endif
+}
+
+bool ModApi::sleepTimerActive() const
+{
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    return m_backend && hasPermission(QStringLiteral("playback:read")) && m_backend->sleepTimerRunning();
+#else
+    return false;
+#endif
+}
+
+int ModApi::sleepTimerRemainingSecs() const
+{
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    if (!m_backend || !hasPermission(QStringLiteral("playback:read")) || !m_backend->sleepTimerRunning()) {
+        return 0;
+    }
+    const qint64 secs = QDateTime::currentDateTimeUtc().secsTo(m_backend->sleepTimerDeadline());
+    return static_cast<int>(std::max<qint64>(0, secs));
+#else
+    return 0;
 #endif
 }
 
@@ -285,6 +358,21 @@ qreal ModApi::progress() const
 #else
     return 0.0;
 #endif
+}
+
+bool ModApi::showingLyrics() const
+{
+    return m_manager && hasPermission(QStringLiteral("ui:slots")) && m_manager->showingLyrics();
+}
+
+bool ModApi::showingQueue() const
+{
+    return m_manager && hasPermission(QStringLiteral("ui:slots")) && m_manager->showingQueue();
+}
+
+bool ModApi::floatingWindowOpen() const
+{
+    return m_manager && hasPermission(QStringLiteral("ui:window")) && m_manager->isFloatingWindowOpen(m_manifest.id);
 }
 
 int ModApi::currentPage() const
@@ -409,11 +497,78 @@ bool ModApi::setVolume(qreal value)
     return true;
 }
 
+bool ModApi::toggleMute()
+{
+    if (!requirePermission(QStringLiteral("playback:control"), "toggleMute") || !m_backend) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->toggleMute();
+#endif
+    return true;
+}
+
+bool ModApi::setTempo(qreal speed)
+{
+    if (!requirePermission(QStringLiteral("playback:control"), "setTempo") || !m_backend) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->setTempo(std::clamp(speed, 0.5, 2.0));
+#else
+    Q_UNUSED(speed);
+#endif
+    return true;
+}
+
 bool ModApi::toggleLike()
 {
     if (!requirePermission(QStringLiteral("playback:control"), "toggleLike") || !m_backend) return false;
 #ifndef YMUSIC_MOD_TEST_NO_BACKEND
     m_backend->toggleNowLike();
+#endif
+    return true;
+}
+
+bool ModApi::dislikeNow()
+{
+    if (!requirePermission(QStringLiteral("playback:control"), "dislikeNow") || !m_backend) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->dislikeNow();
+#endif
+    return true;
+}
+
+bool ModApi::toggleShuffle()
+{
+    if (!requirePermission(QStringLiteral("playback:control"), "toggleShuffle") || !m_backend) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->toggleShuffle();
+#endif
+    return true;
+}
+
+bool ModApi::toggleRepeat()
+{
+    if (!requirePermission(QStringLiteral("playback:control"), "toggleRepeat") || !m_backend) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->toggleRepeat();
+#endif
+    return true;
+}
+
+bool ModApi::startSleepTimer(int seconds, const QString &fadeMode)
+{
+    if (!requirePermission(QStringLiteral("playback:control"), "startSleepTimer") || !m_backend || seconds <= 0) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->startSleepTimer(seconds, fadeMode);
+#else
+    Q_UNUSED(fadeMode);
+#endif
+    return true;
+}
+
+bool ModApi::cancelSleepTimer()
+{
+    if (!requirePermission(QStringLiteral("playback:control"), "cancelSleepTimer") || !m_backend) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->cancelSleepTimer();
 #endif
     return true;
 }
@@ -432,6 +587,49 @@ bool ModApi::addToQueue(const QString &trackId)
     if (!requirePermission(QStringLiteral("playback:control"), "addToQueue") || !m_backend || trackId.isEmpty()) return false;
 #ifndef YMUSIC_MOD_TEST_NO_BACKEND
     m_backend->trackAction(trackId, 1);
+#endif
+    return true;
+}
+
+bool ModApi::playQueueIndex(int index)
+{
+    if (!requirePermission(QStringLiteral("playback:control"), "playQueueIndex") || !m_backend || index < 0) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    TrackModel *queueModel = m_backend->queue();
+    if (!queueModel || index >= queueModel->rowCount()) return false;
+    const QString trackId = queueModel->data(queueModel->index(index, 0), TrackModel::IdRole).toString();
+    if (trackId.isEmpty()) return false;
+    m_backend->trackAction(trackId, 3);
+#endif
+    return true;
+}
+
+bool ModApi::removeFromQueue(int index)
+{
+    if (!requirePermission(QStringLiteral("playback:control"), "removeFromQueue") || !m_backend || index < 0) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    TrackModel *queueModel = m_backend->queue();
+    if (!queueModel || index >= queueModel->rowCount()) return false;
+    const QString trackId = queueModel->data(queueModel->index(index, 0), TrackModel::IdRole).toString();
+    if (trackId.isEmpty()) return false;
+    m_backend->feature({
+        {QStringLiteral("action"), QStringLiteral("queue")},
+        {QStringLiteral("operation"), QStringLiteral("remove")},
+        {QStringLiteral("index"), index},
+        {QStringLiteral("id"), trackId},
+    });
+#endif
+    return true;
+}
+
+bool ModApi::clearQueue()
+{
+    if (!requirePermission(QStringLiteral("playback:control"), "clearQueue") || !m_backend) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->feature({
+        {QStringLiteral("action"), QStringLiteral("queue")},
+        {QStringLiteral("operation"), QStringLiteral("clear")},
+    });
 #endif
     return true;
 }
@@ -525,6 +723,47 @@ bool ModApi::openPlaylist(const QString &uid, const QString &kind, const QString
     return true;
 }
 
+bool ModApi::openNowArtist()
+{
+    if (!requirePermission(QStringLiteral("ui:slots"), "openNowArtist") || !m_backend) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->openNowArtist();
+#endif
+    return true;
+}
+
+bool ModApi::openNowAlbum()
+{
+    if (!requirePermission(QStringLiteral("ui:slots"), "openNowAlbum") || !m_backend) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->openNowAlbum();
+#endif
+    return true;
+}
+
+bool ModApi::startArtistWave()
+{
+    if (!requirePermission(QStringLiteral("ui:slots"), "startArtistWave") || !m_backend) return false;
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->startArtistWave();
+#endif
+    return true;
+}
+
+bool ModApi::toggleLyrics()
+{
+    if (!requirePermission(QStringLiteral("ui:slots"), "toggleLyrics") || !m_manager) return false;
+    m_manager->requestToggleLyrics();
+    return true;
+}
+
+bool ModApi::toggleQueue()
+{
+    if (!requirePermission(QStringLiteral("ui:slots"), "toggleQueue") || !m_manager) return false;
+    m_manager->requestToggleQueue();
+    return true;
+}
+
 bool ModApi::goBack()
 {
     if (!requirePermission(QStringLiteral("ui:slots"), "goBack") || !m_backend) return false;
@@ -538,6 +777,28 @@ bool ModApi::openCreatePlaylist()
 {
     if (!requirePermission(QStringLiteral("ui:slots"), "openCreatePlaylist") || !m_manager) return false;
     emit m_manager->createPlaylistRequested();
+    return true;
+}
+
+bool ModApi::setPlayerBarHidden(bool hidden)
+{
+    if (!requirePermission(QStringLiteral("ui:layout"), "setPlayerBarHidden") || !m_manager) return false;
+    m_manager->setModPlayerBarHidden(m_manifest.id, hidden);
+    return true;
+}
+
+bool ModApi::setFloatingWindowOpen(bool open)
+{
+    if (!requirePermission(QStringLiteral("ui:window"), "setFloatingWindowOpen") || !m_manager) return false;
+    m_manager->setFloatingWindowOpen(m_manifest.id, open);
+    return true;
+}
+
+bool ModApi::toggleFloatingWindow()
+{
+    if (!requirePermission(QStringLiteral("ui:window"), "toggleFloatingWindow") || !m_manager) return false;
+    const bool next = !m_manager->isFloatingWindowOpen(m_manifest.id);
+    m_manager->setFloatingWindowOpen(m_manifest.id, next);
     return true;
 }
 
@@ -569,6 +830,40 @@ QVariantList ModApi::historyTracks() const
     }
 #endif
     return {};
+}
+
+bool ModApi::isDownloaded(const QString &trackId) const
+{
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    return m_backend && hasPermission(QStringLiteral("library:read")) && !trackId.isEmpty()
+        && m_backend->isDownloaded(trackId);
+#else
+    Q_UNUSED(trackId);
+    return false;
+#endif
+}
+
+bool ModApi::addToPlaylist(const QString &trackId, const QString &kind)
+{
+    if (!requirePermission(QStringLiteral("library:write"), "addToPlaylist") || !m_backend
+        || trackId.isEmpty() || kind.isEmpty()) {
+        return false;
+    }
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->addToPlaylist(trackId, kind);
+#endif
+    return true;
+}
+
+bool ModApi::saveOffline(const QString &trackId)
+{
+    if (!requirePermission(QStringLiteral("library:write"), "saveOffline") || !m_backend || trackId.isEmpty()) {
+        return false;
+    }
+#ifndef YMUSIC_MOD_TEST_NO_BACKEND
+    m_backend->saveOffline(trackId);
+#endif
+    return true;
 }
 
 bool ModApi::setLyricSubtitles(const QString &trackId, const QVariantList &subtitles)
@@ -661,14 +956,22 @@ bool ModApi::setTrackOverrides(const QVariantMap &overrides)
         return false;
     }
     QVariantMap cleaned;
-    for (auto it = overrides.constBegin(); it != overrides.constEnd(); ++it) {
+    int audioCount = 0;
+    const QVariantMap unwrapped = unwrapJsVariant(overrides).toMap();
+    for (auto it = unwrapped.constBegin(); it != unwrapped.constEnd(); ++it) {
         const QString trackId = it.key().trimmed();
         if (trackId.isEmpty()) continue;
         const QVariantMap entry = sanitizeTrackOverrideMap(it.value().toMap(), allowCatalog, allowAudio);
         if (!entry.isEmpty()) {
+            if (entry.contains(QStringLiteral("audioUrl"))
+                || entry.contains(QStringLiteral("audioTrackId"))
+                || entry.contains(QStringLiteral("localFile"))) {
+                ++audioCount;
+            }
             cleaned.insert(trackId, entry);
         }
     }
+    log(QStringLiteral("setTrackOverrides: %1 треков (аудио: %2)").arg(cleaned.size()).arg(audioCount));
 #ifndef YMUSIC_MOD_TEST_NO_BACKEND
     if (m_backend) {
         QVariantMap cmd;
@@ -689,7 +992,7 @@ bool ModApi::setAlbumInjections(const QString &albumId, const QVariantList &trac
     const bool allowAudio = hasPermission(QStringLiteral("audio:override"));
     QVariantList cleaned;
     for (const QVariant &v : tracks) {
-        const QVariantMap raw = v.toMap();
+        const QVariantMap raw = unwrapJsVariant(v).toMap();
         const QString id = raw.value(QStringLiteral("id")).toString().trimmed();
         const QString title = raw.value(QStringLiteral("title")).toString().trimmed();
         if (id.isEmpty() || title.isEmpty()) continue;
@@ -781,6 +1084,15 @@ bool ModApi::saveStorage() const
     return file.commit();
 }
 
+void ModApi::flushStorage()
+{
+    if (!m_storageDirty) {
+        return;
+    }
+    m_storageDirty = false;
+    saveStorage();
+}
+
 QVariant ModApi::storageGet(const QString &key, const QVariant &fallback) const
 {
     if (!hasPermission(QStringLiteral("storage")) || !m_storage.contains(key)) {
@@ -794,12 +1106,11 @@ bool ModApi::storageSet(const QString &key, const QVariant &value)
     if (!requirePermission(QStringLiteral("storage"), "storageSet") || key.isEmpty()) {
         return false;
     }
-    m_storage.insert(key, QJsonValue::fromVariant(value));
-    const bool ok = saveStorage();
-    if (ok) {
-        emit storageChanged(key);
-    }
-    return ok;
+    m_storage.insert(key, QJsonValue::fromVariant(unwrapJsVariant(value)));
+    m_storageDirty = true;
+    m_storageFlushTimer.start(250);
+    emit storageChanged(key);
+    return true;
 }
 
 bool ModApi::storageRemove(const QString &key)
@@ -808,11 +1119,10 @@ bool ModApi::storageRemove(const QString &key)
         return false;
     }
     m_storage.remove(key);
-    const bool ok = saveStorage();
-    if (ok) {
-        emit storageChanged(key);
-    }
-    return ok;
+    m_storageDirty = true;
+    m_storageFlushTimer.start(250);
+    emit storageChanged(key);
+    return true;
 }
 
 QVariantMap ModApi::storageAll() const
@@ -901,6 +1211,42 @@ void ModApi::unregisterShortcut(const QString &actionId)
 {
     if (m_manager) {
         m_manager->unregisterShortcut(m_manifest.id, actionId.trimmed());
+    }
+}
+
+bool ModApi::setTrackBadges(const QVariantMap &badges)
+{
+    if (!requirePermission(QStringLiteral("ui:slots"), "setTrackBadges") || !m_manager) {
+        return false;
+    }
+    const QVariantMap unwrapped = unwrapJsVariant(badges).toMap();
+    QHash<QString, ModTrackBadge> parsed;
+    parsed.reserve(unwrapped.size());
+    for (auto it = unwrapped.constBegin(); it != unwrapped.constEnd(); ++it) {
+        const QString trackId = it.key().trimmed();
+        if (trackId.isEmpty()) continue;
+        const QVariantMap entry = it.value().toMap();
+        const QString text = entry.value(QStringLiteral("text")).toString().trimmed().left(16);
+        if (text.isEmpty()) continue;
+        QString tone = entry.value(QStringLiteral("tone")).toString().trimmed().toLower();
+        if (tone != QLatin1StringView("primary")
+            && tone != QLatin1StringView("secondary")
+            && tone != QLatin1StringView("tertiary")
+            && tone != QLatin1StringView("error")
+            && tone != QLatin1StringView("neutral")) {
+            tone = QStringLiteral("primary");
+        }
+        const QString tooltip = entry.value(QStringLiteral("tooltip")).toString().trimmed().left(200);
+        parsed.insert(trackId, ModTrackBadge{m_manifest.id, text, tone, tooltip});
+    }
+    m_manager->setTrackBadges(m_manifest.id, parsed);
+    return true;
+}
+
+void ModApi::clearTrackBadges()
+{
+    if (m_manager) {
+        m_manager->clearTrackBadgesForMod(m_manifest.id);
     }
 }
 

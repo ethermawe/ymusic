@@ -49,6 +49,7 @@ public:
     int consecutiveErrors() const { return m_consecutiveErrors; }
 
     void setWatchdogTimeoutMs(int ms) { m_watchdogMs = ms > 10 ? ms : 10; }
+    QJSEngine *engine() const { return m_engine.get(); }
 
     bool loadAndActivate();
     void deactivate();

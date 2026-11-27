@@ -8,17 +8,28 @@ QtObject {
 
     readonly property string remoteListUrl: "https://raw.githubusercontent.com/Hazzz895/FckCensorData/main/list_v2.json"
 
-    function resolveAudioUrl(rawUrl, urlTemplate) {
-        if (rawUrl === undefined || rawUrl === null) return "";
-        if (typeof rawUrl === "number") {
-            return urlTemplate ? String(urlTemplate).replace("%%", String(rawUrl)) : "";
-        }
-        const s = String(rawUrl).trim();
+    function normalizeAudioUrl(url) {
+        const s = String(url || "").trim();
         if (s.length === 0) return "";
-        if (s.indexOf("://") < 0 && urlTemplate) {
-            return String(urlTemplate).replace("%%", s);
+        if (s.indexOf("://") < 0) {
+            return "https://" + s.replace(/^\/+/, "");
         }
         return s;
+    }
+
+    function resolveAudioUrl(rawUrl, urlTemplate) {
+        if (rawUrl === undefined || rawUrl === null) return "";
+        let out = "";
+        if (typeof rawUrl === "number") {
+            out = urlTemplate ? String(urlTemplate).replace("%%", String(rawUrl)) : "";
+        } else {
+            const s = String(rawUrl).trim();
+            if (s.length === 0) return "";
+            out = (s.indexOf("://") < 0 && urlTemplate)
+                ? String(urlTemplate).replace("%%", s)
+                : s;
+        }
+        return normalizeAudioUrl(out);
     }
 
     function guessCodec(url) {
@@ -45,14 +56,21 @@ QtObject {
         return names.join(", ");
     }
 
+    function normalizeCover(coverUri) {
+        if (!coverUri) return "";
+        const uri = String(coverUri).replace("%%", "400x400");
+        return uri.indexOf("://") >= 0 ? uri : ("https://" + uri.replace(/^\/+/, ""));
+    }
+
     function parseRemoteList(jsonText) {
         const result = {};
+        const albums = {};
         let parsed = null;
         try {
             parsed = JSON.parse(jsonText);
         } catch (e) {
             if (modApi) modApi.warn("Ошибка парсинга list_v2.json: " + e);
-            return { overrides: result, trackCount: 0, audioCount: 0 };
+            return { overrides: result, albums: albums, trackCount: 0, audioCount: 0, albumCount: 0 };
         }
 
         const sources = parsed && Array.isArray(parsed.sources) ? parsed.sources : [];
@@ -74,8 +92,7 @@ QtObject {
                     const art = formatArtists(t.artists);
                     if (art.length > 0 && !entry.artists) entry.artists = art;
                     if (t.coverUri && !entry.coverUrl) {
-                        const uri = String(t.coverUri).replace("%%", "400x400");
-                        entry.coverUrl = uri.indexOf("://") >= 0 ? uri : ("https://" + uri.replace(/^\/+/, ""));
+                        entry.coverUrl = normalizeCover(t.coverUri);
                     }
                     if (typeof t.durationMs === "number" && t.durationMs > 0 && !entry.durationMs) {
                         entry.durationMs = t.durationMs;
@@ -141,29 +158,84 @@ QtObject {
                     }
                 }
             }
+
+            // 3. Album track injections from src.albums (supports both `volumes` and `tracks`)
+            if (src.albums && typeof src.albums === "object") {
+                const aKeys = Object.keys(src.albums);
+                for (let aIdx = 0; aIdx < aKeys.length; ++aIdx) {
+                    const albumId = String(aKeys[aIdx]);
+                    const albumObj = src.albums[albumId];
+                    if (!albumObj || typeof albumObj !== "object") continue;
+
+                    const tracksList = [];
+                    if (Array.isArray(albumObj.volumes)) {
+                        for (let vIdx = 0; vIdx < albumObj.volumes.length; ++vIdx) {
+                            const vol = albumObj.volumes[vIdx];
+                            if (Array.isArray(vol)) {
+                                for (let ti = 0; ti < vol.length; ++ti) tracksList.push(vol[ti]);
+                            }
+                        }
+                    } else if (Array.isArray(albumObj.tracks)) {
+                        for (let ti = 0; ti < albumObj.tracks.length; ++ti) tracksList.push(albumObj.tracks[ti]);
+                    }
+                    if (tracksList.length === 0) continue;
+
+                    const albumCover = albumObj.coverUri ? normalizeCover(albumObj.coverUri) : "";
+                    const normalized = [];
+                    for (let ti = 0; ti < tracksList.length; ++ti) {
+                        const raw = tracksList[ti];
+                        const tid = String(typeof raw === "object" && raw !== null ? (raw.id !== undefined ? raw.id : "") : raw);
+                        if (tid.length === 0) continue;
+                        const meta = result[tid] || {};
+                        const item = {
+                            id: tid,
+                            title: (raw && raw.title) || meta.title || ("Трек " + tid),
+                            artists: formatArtists(raw && raw.artists) || meta.artists || "",
+                            coverUrl: (raw && raw.coverUri ? normalizeCover(raw.coverUri) : "") || meta.coverUrl || albumCover,
+                            durationMs: (raw && typeof raw.durationMs === "number" ? raw.durationMs : 0) || meta.durationMs || 0,
+                            available: true
+                        };
+                        if (meta.audioUrl) {
+                            item.audioUrl = normalizeAudioUrl(meta.audioUrl);
+                            item.codec = meta.codec || guessCodec(item.audioUrl);
+                        }
+                        if (meta.audioTrackId) item.audioTrackId = meta.audioTrackId;
+                        if (meta.localFile) item.localFile = meta.localFile;
+                        normalized.push(item);
+                    }
+                    if (normalized.length > 0) {
+                        albums[albumId] = normalized;
+                    }
+                }
+            }
         }
 
         return {
             overrides: result,
+            albums: albums,
             trackCount: Object.keys(result).length,
-            audioCount: audioCount
+            audioCount: audioCount,
+            albumCount: Object.keys(albums).length
         };
     }
 
-    function applyAllOverrides(remoteOverrides) {
+    function applyAllOverrides() {
         if (!modApi) return;
         const merged = {};
         const useRemote = Boolean(modApi.storageGet("useRemoteDb", true));
+        const remoteOverrides = modApi.storageGet("cachedRemoteOverrides", ({})) || ({});
         if (useRemote && remoteOverrides && typeof remoteOverrides === "object") {
             const rKeys = Object.keys(remoteOverrides);
             for (let i = 0; i < rKeys.length; ++i) {
                 const id = rKeys[i];
-                merged[id] = Object.assign({}, remoteOverrides[id]);
+                const copy = Object.assign({}, remoteOverrides[id]);
+                if (copy.audioUrl) copy.audioUrl = normalizeAudioUrl(copy.audioUrl);
+                merged[id] = copy;
             }
         }
 
         // User custom overrides always win over remote DB
-        const custom = modApi.storageGet("customOverrides", ({}));
+        const custom = modApi.storageGet("customOverrides", ({})) || ({});
         if (custom && typeof custom === "object") {
             const cKeys = Object.keys(custom);
             for (let j = 0; j < cKeys.length; ++j) {
@@ -179,23 +251,50 @@ QtObject {
         }
 
         modApi.setTrackOverrides(merged);
-        modApi.storageSet("appliedCount", Object.keys(merged).length);
+
+        // Apply cached album injections if enabled
+        const cachedAlbums = modApi.storageGet("cachedRemoteAlbums", ({})) || ({});
+        if (useRemote && cachedAlbums && typeof cachedAlbums === "object") {
+            const aKeys = Object.keys(cachedAlbums);
+            for (let k = 0; k < aKeys.length; ++k) {
+                const albumId = aKeys[k];
+                const list = cachedAlbums[albumId];
+                if (Array.isArray(list) && list.length > 0) {
+                    modApi.setAlbumInjections(albumId, list);
+                }
+            }
+        }
+
+        // Publish declarative badges for track lists and player bar
+        const mKeys = Object.keys(merged);
+        if (Boolean(modApi.storageGet("showPlayerBadge", true))) {
+            const badges = {};
+            for (let m = 0; m < mKeys.length; ++m) {
+                const id = mKeys[m];
+                const hasAudio = Boolean(merged[id].audioUrl || merged[id].localFile || merged[id].audioTrackId);
+                badges[id] = {
+                    text: "FCK",
+                    tone: hasAudio ? "primary" : "tertiary",
+                    tooltip: hasAudio ? "Подмена аудио FckCensor" : "Подмена метаданных FckCensor"
+                };
+            }
+            modApi.setTrackBadges(badges);
+        } else {
+            modApi.clearTrackBadges();
+        }
+        modApi.storageSet("appliedCount", mKeys.length);
     }
 
     function fetchRemoteDb() {
         if (!modApi) return;
-        modApi.storageSet("remoteStatus", "Загрузка базы FckCensorData...");
+        modApi.storageSet("remoteStatus", "Загрузка базы FckCensorData…");
         modApi.httpGet(remoteListUrl, "fck-censor-db");
     }
 
     Component.onCompleted: {
         if (!modApi) return;
         modApi.registerTrackMenuAction("spoof-track", "Подменить в FckCensor", "graphic_eq", false);
-
-        // Apply cached remote + custom overrides immediately on startup
-        const cached = modApi.storageGet("cachedRemoteOverrides", ({}));
-        applyAllOverrides(cached);
-
+        applyAllOverrides();
         if (Boolean(modApi.storageGet("useRemoteDb", true))) {
             fetchRemoteDb();
         }
@@ -203,6 +302,15 @@ QtObject {
 
     property Connections apiConn: Connections {
         target: root.modApi
+
+        function onStorageChanged(key) {
+            if (!root.modApi) return;
+            if (key === "useRemoteDb" || key === "customOverrides" || key === "showPlayerBadge") {
+                root.applyAllOverrides();
+            } else if (key === "refreshNonce") {
+                root.fetchRemoteDb();
+            }
+        }
 
         function onHttpFinished(requestId, statusCode, body, error) {
             if (requestId !== "fck-censor-db" || !root.modApi) return;
@@ -213,11 +321,17 @@ QtObject {
             }
             const parsed = root.parseRemoteList(body);
             root.modApi.storageSet("cachedRemoteOverrides", parsed.overrides);
+            root.modApi.storageSet("cachedRemoteAlbums", parsed.albums);
             root.modApi.storageSet("remoteTrackCount", parsed.trackCount);
             root.modApi.storageSet("remoteAudioCount", parsed.audioCount);
-            root.modApi.storageSet("remoteStatus", "База загружена: " + parsed.trackCount + " треков (" + parsed.audioCount + " аудио)");
-            root.applyAllOverrides(parsed.overrides);
-            root.modApi.log("FckCensorData loaded: " + parsed.trackCount + " tracks, " + parsed.audioCount + " audio");
+            root.modApi.storageSet("remoteAlbumCount", parsed.albumCount);
+            root.modApi.storageSet(
+                "remoteStatus",
+                "База обновлена: " + parsed.trackCount + " треков · " + parsed.audioCount + " аудио"
+                + (parsed.albumCount > 0 ? (" · " + parsed.albumCount + " альбомов") : "")
+            );
+            root.applyAllOverrides();
+            root.modApi.log("FckCensorData loaded: " + parsed.trackCount + " tracks, " + parsed.audioCount + " audio, " + parsed.albumCount + " albums");
         }
 
         function onTrackMenuActionTriggered(actionId, trackId, trackTitle) {

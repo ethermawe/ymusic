@@ -238,7 +238,8 @@ QQmlEngine *ModManager::sandboxEngineForMod(const QString &modId)
         }
     };
 
-    auto interceptor = std::make_shared<ModSandboxUrlInterceptor>(manifest->id, manifest->directory, onError);
+    auto interceptor = std::make_shared<ModSandboxUrlInterceptor>(
+        manifest->id, manifest->directory, eng->importPathList(), onError);
     eng->addUrlInterceptor(interceptor.get());
     eng->setNetworkAccessManagerFactory(new ModNetworkAccessManagerFactory(*manifest, onError));
 #ifndef YMUSIC_MOD_TEST_NO_BACKEND
@@ -470,6 +471,7 @@ void ModManager::destroyAllApis()
     m_apis.clear();
     for (const QPointer<ModApi> &api : apis) {
         if (api) {
+            api->flushStorage();
             api->disconnect();
             api->deleteLater();
         }
@@ -487,6 +489,15 @@ void ModManager::destroyAllApis()
         ++m_lyricSubtitlesRevision;
         emit lyricSubtitlesChanged();
     }
+    if (!m_trackBadges.isEmpty()) {
+        m_trackBadges.clear();
+        ++m_trackBadgesRevision;
+        emit trackBadgesChanged();
+    }
+    if (!m_playerBarHiddenBy.isEmpty()) {
+        m_playerBarHiddenBy.clear();
+        emit layoutStateChanged();
+    }
 }
 
 void ModManager::scanAndSync(bool initialStartup)
@@ -496,6 +507,23 @@ void ModManager::scanAndSync(bool initialStartup)
 
     const QDir modsDir(ymusic::paths::modsDirectory());
     if (modsDir.exists()) {
+        // Auto-unpack any .ymmod archives dropped directly into the mods directory
+        const auto droppedArchives = modsDir.entryInfoList(
+            {QStringLiteral("*.ymmod")},
+            QDir::Files | QDir::NoSymLinks,
+            QDir::Name);
+        for (const QFileInfo &archiveInfo : droppedArchives) {
+            const QVariantMap res = installModFromArchiveInternal(archiveInfo.absoluteFilePath(), false);
+            if (res.value(QStringLiteral("ok")).toBool()) {
+                QFile::remove(archiveInfo.absoluteFilePath());
+            } else {
+                appendLog(QStringLiteral("system"),
+                          QStringLiteral("warn"),
+                          QStringLiteral("Не удалось распаковать '%1': %2")
+                              .arg(archiveInfo.fileName(), res.value(QStringLiteral("error")).toString()));
+            }
+        }
+
         const auto subdirs = modsDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks, QDir::Name);
         for (const QFileInfo &dirInfo : subdirs) {
             ModManifest parsed = parseManifest(dirInfo.absoluteFilePath());
@@ -695,6 +723,8 @@ void ModManager::setModEnabled(const QString &modId, bool enabled)
         }
     } else {
         ids.removeAll(modId);
+        clearModLayoutOverrides(modId);
+        clearTrackBadgesForMod(modId);
     }
     if (wasEnabled != enabled) {
         m_pendingRestartPrompt = true;
@@ -1044,6 +1074,143 @@ void ModManager::clearLyricSubtitlesForMod(const QString &modId)
     }
 }
 
+void ModManager::setTrackBadges(const QString &modId, const QHash<QString, ModTrackBadge> &badges)
+{
+    if (modId.isEmpty()) return;
+    if (badges.isEmpty()) {
+        clearTrackBadgesForMod(modId);
+        return;
+    }
+    m_trackBadges.insert(modId, badges);
+    ++m_trackBadgesRevision;
+    emit trackBadgesChanged();
+}
+
+void ModManager::clearTrackBadgesForMod(const QString &modId)
+{
+    if (m_trackBadges.remove(modId)) {
+        ++m_trackBadgesRevision;
+        emit trackBadgesChanged();
+    }
+}
+
+QVariantList ModManager::trackBadgesFor(const QString &trackId) const
+{
+    QVariantList result;
+    if (!modsEnabled() || trackId.isEmpty() || m_trackBadges.isEmpty()) {
+        return result;
+    }
+    for (auto it = m_trackBadges.constBegin(); it != m_trackBadges.constEnd(); ++it) {
+        if (!m_apis.contains(it.key())) continue;
+        const auto badgeIt = it.value().constFind(trackId);
+        if (badgeIt == it.value().constEnd()) continue;
+        const ModTrackBadge &b = badgeIt.value();
+        QVariantMap map;
+        map.insert(QStringLiteral("modId"), b.modId);
+        map.insert(QStringLiteral("text"), b.text);
+        map.insert(QStringLiteral("tone"), b.tone);
+        map.insert(QStringLiteral("tooltip"), b.tooltip);
+        result.append(map);
+    }
+    return result;
+}
+
+void ModManager::setShowingLyrics(bool showing)
+{
+    if (m_showingLyrics == showing) return;
+    m_showingLyrics = showing;
+    emit panelStateChanged();
+}
+
+void ModManager::setShowingQueue(bool showing)
+{
+    if (m_showingQueue == showing) return;
+    m_showingQueue = showing;
+    emit panelStateChanged();
+}
+
+void ModManager::setModPlayerBarHidden(const QString &modId, bool hidden)
+{
+    if (modId.isEmpty()) return;
+    const bool wasHidden = !m_playerBarHiddenBy.isEmpty();
+    if (hidden) {
+        m_playerBarHiddenBy.insert(modId);
+    } else {
+        m_playerBarHiddenBy.remove(modId);
+    }
+    const bool nowHidden = !m_playerBarHiddenBy.isEmpty();
+    if (wasHidden != nowHidden) {
+        emit layoutStateChanged();
+    }
+}
+
+void ModManager::clearModLayoutOverrides(const QString &modId)
+{
+    if (modId.isEmpty()) return;
+    const bool wasHidden = !m_playerBarHiddenBy.isEmpty();
+    m_playerBarHiddenBy.remove(modId);
+    const bool nowHidden = !m_playerBarHiddenBy.isEmpty();
+    if (wasHidden != nowHidden) {
+        emit layoutStateChanged();
+    }
+    if (m_openFloatingWindows.remove(modId)) {
+        ++m_floatingWindowsRevision;
+        emit floatingWindowsChanged();
+    }
+}
+
+QVariantList ModManager::floatingWindowEntries() const
+{
+    QVariantList out;
+    if (!modsEnabled()) return out;
+    const QStringList enabledIds = m_settings ? m_settings->enabledModIds() : QStringList();
+    for (const ModManifest &m : m_manifests) {
+        if (!m.valid || !enabledIds.contains(m.id)) continue;
+        if (!m_apis.value(m.id)) continue;
+        if (!m.hasPermission(QStringLiteral("ui:window"))) continue;
+        const auto items = m.slotsMap.value(QStringLiteral("window.floating"));
+        if (items.isEmpty()) continue;
+        // Enforce at most 1 floating window per mod.
+        const ModSlotItem &item = items.first();
+        QVariantMap map;
+        map.insert(QStringLiteral("modId"), m.id);
+        map.insert(QStringLiteral("entryId"), item.entryId);
+        map.insert(QStringLiteral("title"), item.title);
+        map.insert(QStringLiteral("sourceUrl"), QUrl::fromLocalFile(item.file));
+        out.append(map);
+    }
+    return out;
+}
+
+bool ModManager::isFloatingWindowOpen(const QString &modId) const
+{
+    return !modId.isEmpty() && m_openFloatingWindows.contains(modId);
+}
+
+void ModManager::setFloatingWindowOpen(const QString &modId, bool open)
+{
+    if (modId.isEmpty()) return;
+    const bool wasOpen = m_openFloatingWindows.contains(modId);
+    if (wasOpen == open) return;
+    if (open) {
+        m_openFloatingWindows.insert(modId);
+    } else {
+        m_openFloatingWindows.remove(modId);
+    }
+    ++m_floatingWindowsRevision;
+    emit floatingWindowsChanged();
+}
+
+void ModManager::requestToggleLyrics()
+{
+    emit lyricsToggleRequested();
+}
+
+void ModManager::requestToggleQueue()
+{
+    emit queueToggleRequested();
+}
+
 QString ModManager::lyricSubtitleFor(const QString &trackId, int lineIndex) const
 {
     if (trackId.isEmpty() || lineIndex < 0 || m_lyricSubtitles.isEmpty()) {
@@ -1119,6 +1286,11 @@ bool ModManager::openModsFolder() const
 QVariantMap ModManager::installModFromFolder(const QUrl &folderUrl)
 {
     const QString srcPath = folderUrl.isLocalFile() ? folderUrl.toLocalFile() : folderUrl.toString();
+    return installModFromFolderInternal(srcPath, true);
+}
+
+QVariantMap ModManager::installModFromFolderInternal(const QString &srcPath, bool rescan)
+{
     const QFileInfo srcInfo(srcPath);
     if (!srcInfo.isDir()) {
         return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Выбранный путь не является папкой")}};
@@ -1153,7 +1325,9 @@ QVariantMap ModManager::installModFromFolder(const QUrl &folderUrl)
     }
 
     appendLog(parsed.id, QStringLiteral("info"), QStringLiteral("Установлен мод «%1» v%2").arg(parsed.name, parsed.version));
-    scanAndSync(false);
+    if (rescan) {
+        scanAndSync(false);
+    }
     return {
         {QStringLiteral("ok"), true},
         {QStringLiteral("id"), parsed.id},
@@ -1166,6 +1340,11 @@ QVariantMap ModManager::installModFromFolder(const QUrl &folderUrl)
 QVariantMap ModManager::installModFromArchive(const QUrl &archiveUrl)
 {
     const QString archivePath = archiveUrl.isLocalFile() ? archiveUrl.toLocalFile() : archiveUrl.toString();
+    return installModFromArchiveInternal(archivePath, true);
+}
+
+QVariantMap ModManager::installModFromArchiveInternal(const QString &archivePath, bool rescan)
+{
     const QFileInfo archiveInfo(archivePath);
     if (!archiveInfo.isFile()) {
         return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("Выбранный файл архива не найден")}};
@@ -1283,7 +1462,7 @@ QVariantMap ModManager::installModFromArchive(const QUrl &archiveUrl)
         return {{QStringLiteral("ok"), false}, {QStringLiteral("error"), QStringLiteral("В архиве не найден manifest.json")}};
     }
 
-    return installModFromFolder(QUrl::fromLocalFile(modRoot));
+    return installModFromFolderInternal(modRoot, rescan);
 }
 
 bool ModManager::uninstallMod(const QString &modId)

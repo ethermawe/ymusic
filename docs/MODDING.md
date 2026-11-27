@@ -126,24 +126,27 @@ mods/
 Каждый обычный мод (слоты, `entry.script`, `entry.settings`) выполняется в **изолированном `QQmlEngine`** с пустым корневым контекстом и собственным дочерним `QQmlContext`, в котором доступны только `modApi` и `slotContext`:
 
 - Внутренние объекты приложения (`Backend`, `AppSettings`, `WindowController`, `Updater`, `ModManager`, `UiState`) недоступны из кода мода (`typeof backend === "undefined"`).
-- **Белый список импортов:** модам разрешены только `QtQuick`, `QtQuick.Controls`, `QtQuick.Layouts`, `QtQuick.Window`, `QtQuick.Shapes`, `QtQuick.Effects`, `QtQml`, публичный модуль `ymusic.sdk 1.0` и относительные файлы внутри папки самого мода. Попытка выполнить `import ymusic.ui` или обратиться к файлам вне директории мода блокируется и записывается в Консоль модов.
+- **Белый список импортов:** модам разрешены только `QtQuick`, `QtQuick.Controls`, `QtQuick.Layouts`, `QtQuick.Window`, `QtQuick.Shapes`, `QtQuick.Effects` (включая `MultiEffect`), `QtQml`, публичный модуль `ymusic.sdk 1.0` и относительные файлы внутри папки самого мода. Попытка выполнить `import ymusic.ui` или обратиться к файлам вне директории мода блокируется и записывается в Консоль модов.
 - **Сетевая изоляция:** каждый мод получает собственный `QNetworkAccessManager` (`ModNetworkAccessManager`). Любые запросы через `modApi.httpRequest`, `XMLHttpRequest` или `Image { source: "http..." }` разрешены только к хостам из `network:<host>`. Остальные запросы блокируются.
 - **Внешние ссылки:** вместо прямого вызова `Qt.openUrlExternally` используйте `modApi.openExternalUrl(url)` (требует разрешения `external`, принимает только `http://` и `https://`).
 - **Исключение (`overrides`):** механизм `overrides/*.qml` подменяет файлы `ymusic.ui` целиком и выполняется в основном движке приложения без песочницы. При установке такого мода UI показывает явное предупреждение: «мод получает полный доступ».
 
 | Разрешение | Доступ | Ограничения |
 |---|---|---|
-| `playback:read` | Свойства текущего трека, состояния плеера, прогресса, громкости, темпа | Без доступа к OAuth-токену |
-| `playback:control` | `toggle()`, `next()`, `prev()`, `seek()`, `setVolume()`, `toggleLike()`, `playNext()`, `addToQueue()` | Нет доступа к аккаунту и выходу |
-| `library:read` | `queueTracks()`, `currentTracks()`, `historyTracks()`, сигнал `libraryChanged` | Только чтение |
+| `playback:read` | Свойства текущего трека, состояния плеера (`muted`, `sleepTimerActive`, `sleepTimerRemainingSecs`), прогресса, громкости, темпа | Без доступа к OAuth-токену |
+| `playback:control` | `toggle()`, `next()`, `prev()`, `seek()`, `setVolume()`, `toggleMute()`, `toggleShuffle()`, `toggleRepeat()`, `setTempo()`, `toggleLike()`, `dislikeNow()`, `startSleepTimer()`, `cancelSleepTimer()`, `playNext()`, `addToQueue()`, `playQueueIndex()`, `removeFromQueue()`, `clearQueue()` | Нет доступа к аккаунту и выходу |
+| `library:read` | `queueTracks()`, `currentTracks()`, `historyTracks()`, `isDownloaded()`, сигнал `libraryChanged` | Только чтение |
+| `library:write` | `addToPlaylist(trackId, kind)`, `saveOffline(trackId)` | Изменение плейлистов и офлайн-загрузок |
 | `catalog:override` | `setTrackOverrides()`, `setAlbumInjections()`, `clearTrackOverrides()` (метаданные треков, `available`, вставка удалённых треков в альбомы) | Только отображение/каталог, без замены аудио |
 | `audio:override` | Поля `audioUrl`, `audioTrackId`, `localFile`, `codec` в `setTrackOverrides()` и `setAlbumInjections()` | `audioUrl` принимает только `https://` или `http://localhost` / `127.0.0.1` |
 | `lyrics:read` | `lyricsTrackId`, `lyricsSynced`, `lyricsLines`, сигнал `lyricsChanged` | Только чтение |
 | `lyrics:transform` | `setLyricSubtitles(trackId, lines)`, `clearLyricSubtitles()` | Добавляет подстрочник под строками текста |
 | `spectrum:read` | `spectrumLevels()` (48 полос), `spectrumEnergies()` (5 полос), сигнал `spectrumUpdated` | 60 Hz, без сырого PCM |
-| `ui:slots` | UI-слоты, навигация (`openHome`, `openPlaylist` и т.д.), `showToast()`, `openImmersive()`, `openSettings()`, `openCreatePlaylist()`, `registerTrackMenuAction()`, `registerShortcut()` | Без доступа к `ymusic.ui` |
+| `ui:slots` | UI-слоты, декларативные бейджи (`setTrackBadges`, `clearTrackBadges`), навигация (`openHome`, `openPlaylist`, `openNowArtist`, `openNowAlbum`, `startArtistWave` и т.д.), `showToast()`, `openImmersive()`, `toggleLyrics()`, `toggleQueue()`, `openSettings()`, `openCreatePlaylist()`, `registerTrackMenuAction()`, `registerShortcut()` | Без доступа к `ymusic.ui` |
+| `ui:layout` | `setPlayerBarHidden(bool)` — скрытие/показ стандартной нижней панели плеера | Только управление раскладкой; автоматически сбрасывается при выключении мода |
+| `ui:window` | Слот `window.floating`, свойство `floatingWindowOpen`, методы `setFloatingWindowOpen(bool)`, `toggleFloatingWindow()` | Максимум 1 плавающее окно на мод (до 640×480), закрывается автоматически при выключении мода |
 | `ui:override` | Подмена QML-файлов `ymusic.ui` через `ModUrlInterceptor` | Полный доступ вне песочницы; применяется после перезапуска |
-| `storage` | `storageGet`, `storageSet`, `storageRemove`, `storageAll`, сигнал `storageChanged(key)` | Отдельный файл `mod-data/<mod-id>.json` |
+| `storage` | `storageGet`, `storageSet`, `storageRemove`, `storageAll`, сигнал `storageChanged(key)` | Отдельный файл `mod-data/<mod-id>.json`; запись на диск автоматически дебаунсится (250 мс) и сбрасывается при выгрузке мода |
 | `clipboard` | `copyText(text)` | Только запись |
 | `external` | `openExternalUrl(url)` | Только `http://` и `https://` |
 | `network:<host>` | `httpGet`, `httpRequest`, `XMLHttpRequest`, сетевые `Image` | Только разрешённый хост; для `httpRequest` только HTTPS (или `localhost`/`127.0.0.1`), лимит ответа 4 МБ, таймаут 15 с |
@@ -159,9 +162,13 @@ mods/
 | Слот | Хост | Раскладка | `slotContext` | Назначение |
 |---|---|---|---|---|
 | `window.backdrop` | `Main.qml` (`z: -1`) | `fill` | `{}` | Фон окна, шейдеры |
+| `window.overlay` | `Main.qml` (поверх контента) | `fill` | `{}` | Глобальный оверлей поверх окна (например, верхний островок плеера) |
+| `window.floating` | `Main.qml` (`Window` поверх окон ОС) | `fill` | `{ floating, screenWidth, screenHeight }` | Плавающее безрамочное окно поверх всех окон ОС (требует `ui:window`, максимум 1 на мод) |
 | `topbar.center` | `TopBar.qml` | `fill` | `{ topBarWidth, compact }` | Центральная часть верхней панели |
+| `topBar.actions` | `TopBar.qml` | `row` (`height: buttonSize`) | `{ buttonSize, compact }` | Кнопки действий в верхней панели |
 | `topbar.right` | `TopBar.qml` | `row` (`height: buttonSize`) | `{ buttonSize, compact }` | Кнопки справа в верхней панели |
 | `sidebar.page` | `Main.qml` + `Sidebar.qml` | `fill` | `{}` | Отдельная страница в навигации |
+| `sidebar.footer` | `Sidebar.qml` | `column` | `{ compact }` | Нижняя область боковой панели |
 | `home.top` | `HomeView.qml` | `column` | `{ narrow }` | Блок вверху Главной |
 | `home.sections` | `HomeView.qml` | `column` | `{ narrow }` | Секции на Главной |
 | `search.top` | `SearchView.qml` | `column` | `{ query, filter, loading }` | Блок вверху экрана поиска |
@@ -197,8 +204,8 @@ mods/
 
 - **Мод:** `modId`, `modName`, `permissions`, `hasPermission(perm)`
 - **Трек (`playback:read`):** `hasTrack`, `trackId`, `trackTitle`, `trackArtists`, `trackAlbum`, `trackCover`, `trackLiked`, `trackIsAi`
-- **Плеер (`playback:read`):** `playing`, `buffering`, `volume` (`0..1`), `shuffle`, `repeatMode` (`0` = выкл, `1` = все, `2` = один), `tempo`, `positionSecs`, `durationSecs`, `progress` (`0..1`)
-- **Навигация и профиль:** `currentPage`, `canGoBack`, `loggedIn`, `userName`, `userAvatar`, `pinnedPlaylists`
+- **Плеер (`playback:read`):** `playing`, `buffering`, `volume` (`0..1`), `muted`, `shuffle`, `repeatMode` (`0` = выкл, `1` = все, `2` = один), `tempo`, `positionSecs`, `durationSecs`, `progress` (`0..1`), `sleepTimerActive`, `sleepTimerRemainingSecs`
+- **Навигация, панели и профиль:** `currentPage`, `canGoBack`, `showingLyrics`, `showingQueue`, `loggedIn`, `userName`, `userAvatar`, `pinnedPlaylists`
 - **Текст (`lyrics:read`):** `lyricsTrackId`, `lyricsSynced`, `lyricsLines` (массив `{ text, time, words }`)
 
 ### Сигналы
@@ -216,21 +223,28 @@ mods/
 
 ### Методы
 
-- **Управление (`playback:control`):** `toggle()`, `next()`, `prev()`, `seek(0..1)`, `setVolume(0..1)`, `toggleLike()`, `playNext(trackId)`, `addToQueue(trackId)`
-- **Навигация (`ui:slots`):** `openHome()`, `openWave()`, `openLikes()`, `openDownloads()`, `openPlaylists()`, `openAlbums()`, `openArtists()`, `openSearch(query)`, `openPlaylist(uid, kind, title)`, `goBack()`, `openCreatePlaylist()`
-- **Списки треков (`library:read`):** `queueTracks()`, `currentTracks()`, `historyTracks()` — возвращают массивы `{ id, title, artists, album, durationSecs, coverUrl, liked, available, isAi }`
+- **Управление (`playback:control`):** `toggle()`, `next()`, `prev()`, `seek(0..1)`, `setVolume(0..1)`, `toggleMute()`, `toggleShuffle()`, `toggleRepeat()`, `setTempo(speed)`, `toggleLike()`, `dislikeNow()`, `startSleepTimer(secs, fadeMode)`, `cancelSleepTimer()`, `playNext(trackId)`, `addToQueue(trackId)`, `playQueueIndex(index)`, `removeFromQueue(index)`, `clearQueue()`
+- **Навигация (`ui:slots`):** `openHome()`, `openWave()`, `openLikes()`, `openDownloads()`, `openPlaylists()`, `openAlbums()`, `openArtists()`, `openSearch(query)`, `openPlaylist(uid, kind, title)`, `openNowArtist()`, `openNowAlbum()`, `startArtistWave()`, `goBack()`, `openCreatePlaylist()`
+- **Списки треков и библиотека (`library:read` / `library:write`):**
+  - `queueTracks()`, `currentTracks()`, `historyTracks()` — возвращают массивы `{ id, title, artists, album, durationSecs, coverUrl, liked, available, isAi }` (`library:read`)
+  - `isDownloaded(trackId)` — проверяет, сохранён ли трек офлайн (`library:read`)
+  - `addToPlaylist(trackId, kind)`, `saveOffline(trackId)` — добавление в плейлист и сохранение офлайн (`library:write`)
 - **Подмена каталога и аудио (`catalog:override`, `audio:override`):**
   - `setTrackOverrides(map)` — словарь `trackId -> { title, artists, album, coverUrl, available, durationMs, audioUrl, audioTrackId, localFile, codec }` (автоматически применяется во всех списках, очереди и плеере; аудиополя требуют `audio:override`)
   - `setAlbumInjections(albumId, tracks)` — добавляет отсутствующие/удалённые треки в трек-лист альбома `albumId`
   - `clearTrackOverrides()` — сбрасывает все подмены этого мода (вызывается автоматически при выключении или перезагрузке мода)
 - **Субтитры (`lyrics:transform`):** `setLyricSubtitles(trackId, subtitles)`, `clearLyricSubtitles()`
 - **Спектр (`spectrum:read`):** `spectrumLevels()` (`number[48]`), `spectrumEnergies()` (`number[5]`, от низов к верхам)
-- **Хранилище (`storage`):** `storageGet(key, fallback)`, `storageSet(key, value)`, `storageRemove(key)`, `storageAll()`
-- **UI (`ui:slots`):**
+- **Хранилище (`storage`):** `storageGet(key, fallback)`, `storageSet(key, value)`, `storageRemove(key)`, `storageAll()` — запись изменений на диск через `storageSet`/`storageRemove` автоматически дебаунсится (250 мс) с гарантированным сбросом при выгрузке/перезагрузке мода
+- **UI (`ui:slots`, `ui:layout`):**
+  - `setTrackBadges(badges)`, `clearTrackBadges()` — декларативные бейджи треков для списков треков и панели плеера (`badges` — словарь `trackId -> { text, tone, tooltip }`, где `tone`: `"primary"` | `"secondary"` | `"tertiary"` | `"error"` | `"neutral"`). Рекомендуется для лёгких текстовых бейджей вместо QML-слотов в строках списка; автоматически очищаются при выключении или перезагрузке мода
   - `showToast(message)`
   - `openImmersive()`, `closeImmersive()`
+  - `toggleLyrics()`, `toggleQueue()`
   - `openSettings()`
-  - `openExternalUrl(url)`
+  - `openExternalUrl(url)` *(требует `external`)*
+  - `setPlayerBarHidden(hidden)` *(требует `ui:layout`)*
+  - `setFloatingWindowOpen(open)`, `toggleFloatingWindow()`, свойство `floatingWindowOpen` *(требует `ui:window`)*
   - `registerTrackMenuAction(actionId, label, symbol, destructive)`, `unregisterTrackMenuAction(actionId)`
   - `registerShortcut(actionId, sequence, description)`, `unregisterShortcut(actionId)`
 - **Буфер (`clipboard`):** `copyText(text)`
@@ -251,6 +265,12 @@ mods/
   - `Theme.fontSize` (`smallest`, `smaller`, `small`, `normal`, `large`, `title`, `headline`)
   - `Theme.fontFamily`, `Theme.monoFontFamily`, `Theme.iconFontFamily`, `Theme.dark`, `Theme.reduceMotion`, `Theme.performanceMode`, `Theme.withAlpha(color, alpha)`
 - **Контролы:** `StyledText`, `TitleText`, `NoteText`, `Card`, `IconButton`, `TextButton` (`Filled` / `Tonal` / `Outlined` / `Text`), `MaterialSymbol`, `ContentSection`, `ConfigSwitch`, `OutlinedTextField`, `StyledMenu`, `StyledMenuItem`, `StyledMenuSeparator`.
+- **Выразительные M3-компоненты (`ymusic.sdk 1.0`):**
+  - `RoundedImage` — изображение со скруглённой 4-угловой `Canvas`-маской без шейдерных накладных расходов и иконкой-заглушкой (`source`, `radius`, `fallbackSymbol`, `fallbackIconSize`, `backgroundColor`, `maskColor`, `borderColor`, `ready`).
+  - `StyledSlider` — горизонтальный слайдер в стиле M3 с плавным увеличением бегунка при наведении/перетаскивании (`value`, `from`, `to`, `enabled`, `accentColor`, `trackColor`, `pressed`; сигналы `moved(newValue)`, `releasedValue(finalValue)`).
+  - `Chip` — чип фильтра/действия (`text`, `symbol`, `selected`, `clickable`; сигнал `clicked()`).
+  - `Badge` — компактная пилюля-бейдж (`text`, `symbol`, `tone`: `"primary"` | `"secondary"` | `"tertiary"` | `"error"` | `"neutral"`).
+  - `SpectrumBars` — анимированные полосы эквалайзера (`energies`, `barCount`, `active`, `barColor`, `barWidth`, `barSpacing`, `maxHeight`, `minHeight`).
 
 ### Миграция существующих модов на `apiVersion: "1.0"`
 
@@ -462,7 +482,7 @@ Component.onCompleted: {
 
 - **`contentItem` в `RippleButton` / `AbstractButton`:** не задавайте `anchors.centerIn: parent` напрямую на `contentItem` — `AbstractButton` сам управляет его геометрией. Используйте обёртку `contentItem: Item { Row { anchors.centerIn: parent } }`.
 - **Обработка `onSpectrumUpdated()`:** вызывается на 60 Hz в UI-потоке. Отключайте `Connections` через `enabled: root.visible` и не делайте там тяжёлых вычислений или логирования.
-- **`trackRow.badges` и `card.overlay`:** инстанцируются для каждого видимого элемента списка или сетки. Держите компоненты минимальными (без `ShaderEffect` и тяжёлого `Canvas`). Если моды не используют эти слоты, они не создаются.
+- **`trackRow.badges` и `card.overlay`:** инстанцируются для каждого видимого элемента списка или сетки. Держите компоненты минимальными (без `ShaderEffect` и тяжёлого `Canvas`). Если моды не используют эти слоты, они не создаются. Для простых текстовых бейджей в списках треков и панели плеера предпочтительнее использовать декларативный `modApi.setTrackBadges()`.
 
 ---
 

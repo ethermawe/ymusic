@@ -72,21 +72,29 @@ public:
     }
 
     // Storage
-    Q_INVOKABLE QVariant storageGet(const QString &key, const QVariant &fallback = QVariant())
+    Q_INVOKABLE QString storageGetJson(const QString &key)
     {
-        return m_api ? m_api->storageGet(key, fallback) : fallback;
+        if (!m_api) return {};
+        const QVariant val = m_api->storageGet(key);
+        if (!val.isValid()) return {};
+        const QJsonValue jv = QJsonValue::fromVariant(val);
+        if (jv.isUndefined()) return {};
+        QJsonObject wrap;
+        wrap.insert(QStringLiteral("v"), jv);
+        return QString::fromUtf8(QJsonDocument(wrap).toJson(QJsonDocument::Compact));
     }
-    Q_INVOKABLE bool storageSet(const QString &key, const QVariant &val)
+    Q_INVOKABLE bool storageSet(const QString &key, const QJSValue &val)
     {
-        return m_api && m_api->storageSet(key, val);
+        return m_api && m_api->storageSet(key, val.toVariant());
     }
     Q_INVOKABLE bool storageRemove(const QString &key)
     {
         return m_api && m_api->storageRemove(key);
     }
-    Q_INVOKABLE QVariantMap storageAll()
+    Q_INVOKABLE QJSValue storageAll()
     {
-        return m_api ? m_api->storageAll() : QVariantMap{};
+        if (!m_api || !m_host || !m_host->engine()) return QJSValue(QJSValue::UndefinedValue);
+        return m_host->engine()->toScriptValue(m_api->storageAll());
     }
 
     // Player
@@ -110,10 +118,13 @@ public:
         if (!checkPermission(QStringLiteral("player"), QStringLiteral("playback:control"), QStringLiteral("ym.player.seek"))) return false;
         return m_api && m_api->seek(progress);
     }
-    Q_INVOKABLE QVariantList playerQueue()
+    Q_INVOKABLE QJSValue playerQueue()
     {
-        if (!checkPermission(QStringLiteral("player"), QStringLiteral("library:read"), QStringLiteral("ym.player.queue"))) return {};
-        return m_api ? m_api->queueTracks() : QVariantList{};
+        if (!m_host || !m_host->engine()) return QJSValue(QJSValue::UndefinedValue);
+        if (!checkPermission(QStringLiteral("player"), QStringLiteral("library:read"), QStringLiteral("ym.player.queue"))) {
+            return m_host->engine()->newArray(0);
+        }
+        return m_host->engine()->toScriptValue(m_api ? m_api->queueTracks() : QVariantList{});
     }
     Q_INVOKABLE bool playerAddToQueue(const QString &trackId)
     {
@@ -127,15 +138,21 @@ public:
     }
 
     // Library
-    Q_INVOKABLE QVariantList libraryHistory()
+    Q_INVOKABLE QJSValue libraryHistory()
     {
-        if (!checkPermission(QStringLiteral("library"), QStringLiteral("library:read"), QStringLiteral("ym.library.history"))) return {};
-        return m_api ? m_api->historyTracks() : QVariantList{};
+        if (!m_host || !m_host->engine()) return QJSValue(QJSValue::UndefinedValue);
+        if (!checkPermission(QStringLiteral("library"), QStringLiteral("library:read"), QStringLiteral("ym.library.history"))) {
+            return m_host->engine()->newArray(0);
+        }
+        return m_host->engine()->toScriptValue(m_api ? m_api->historyTracks() : QVariantList{});
     }
-    Q_INVOKABLE QVariantList libraryPlaylists()
+    Q_INVOKABLE QJSValue libraryPlaylists()
     {
-        if (!checkPermission(QStringLiteral("library"), QStringLiteral("library:read"), QStringLiteral("ym.library.playlists"))) return {};
-        return m_api ? m_api->pinnedPlaylists() : QVariantList{};
+        if (!m_host || !m_host->engine()) return QJSValue(QJSValue::UndefinedValue);
+        if (!checkPermission(QStringLiteral("library"), QStringLiteral("library:read"), QStringLiteral("ym.library.playlists"))) {
+            return m_host->engine()->newArray(0);
+        }
+        return m_host->engine()->toScriptValue(m_api ? m_api->pinnedPlaylists() : QVariantList{});
     }
 
     // Commands
@@ -280,7 +297,11 @@ const char *kYmBootstrapJs = R"js(
         settings: {
             _schema: null,
             define: function(schema) { this._schema = schema; },
-            get: function(key, fallback) { return bridge.storageGet(String(key), fallback); },
+            get: function(key, fallback) {
+                const raw = bridge.storageGetJson(String(key));
+                if (!raw || raw.length === 0) return fallback;
+                try { return JSON.parse(raw).v; } catch (e) { return fallback; }
+            },
             set: function(key, val) {
                 const ok = bridge.storageSet(String(key), val);
                 if (ok) {
@@ -299,7 +320,11 @@ const char *kYmBootstrapJs = R"js(
             }
         },
         storage: {
-            get: function(k, fb) { return bridge.storageGet(String(k), fb); },
+            get: function(k, fb) {
+                const raw = bridge.storageGetJson(String(k));
+                if (!raw || raw.length === 0) return fb;
+                try { return JSON.parse(raw).v; } catch (e) { return fb; }
+            },
             set: function(k, v) { return bridge.storageSet(String(k), v); },
             remove: function(k) { return bridge.storageRemove(String(k)); },
             all: function() { return bridge.storageAll(); }
@@ -330,7 +355,8 @@ const char *kYmBootstrapJs = R"js(
     };
 
     const internal = {
-        invokeHook: function(point, payload) {
+        invokeHookJson: function(point, payloadJson) {
+            const payload = payloadJson && payloadJson.length > 0 ? JSON.parse(payloadJson) : null;
             const list = hookMap[point];
             if (!list || list.length === 0) return { handled: false, payload: payload };
             let current = payload;
@@ -345,7 +371,8 @@ const char *kYmBootstrapJs = R"js(
             }
             return { handled: true, cancelled: false, payload: current };
         },
-        dispatchEvent: function(name, data) {
+        dispatchEventJson: function(name, dataJson) {
+            const data = dataJson && dataJson.length > 0 ? JSON.parse(dataJson) : null;
             const list = eventMap[name];
             if (!list) return;
             for (let i = 0; i < list.length; ++i) {
@@ -590,10 +617,13 @@ HookInvokeResult ModScriptHost::invokeHook(const QString &point, const QVariant 
         return out;
     }
 
+    const QString payloadJson = QString::fromUtf8(
+        QJsonDocument::fromVariant(payload).toJson(QJsonDocument::Compact));
+
     QJSValue res = runWithWatchdog([&]() {
         QJSValue internal = m_engine->globalObject().property(QStringLiteral("__ymInternal"));
-        QJSValue fn = internal.property(QStringLiteral("invokeHook"));
-        return fn.call({point, m_engine->toScriptValue(payload)});
+        QJSValue fn = internal.property(QStringLiteral("invokeHookJson"));
+        return fn.call({point, payloadJson});
     }, QStringLiteral("hook:") + point);
 
     if (res.isError() || res.isUndefined() || m_autoDisabled) {
@@ -611,10 +641,12 @@ HookInvokeResult ModScriptHost::invokeHook(const QString &point, const QVariant 
 void ModScriptHost::dispatchEvent(const QString &eventName, const QVariant &data)
 {
     if (!isLoaded() || !m_engine) return;
+    const QString dataJson = QString::fromUtf8(
+        QJsonDocument::fromVariant(data).toJson(QJsonDocument::Compact));
     runWithWatchdog([&]() {
         QJSValue internal = m_engine->globalObject().property(QStringLiteral("__ymInternal"));
-        QJSValue fn = internal.property(QStringLiteral("dispatchEvent"));
-        return fn.call({eventName, m_engine->toScriptValue(data)});
+        QJSValue fn = internal.property(QStringLiteral("dispatchEventJson"));
+        return fn.call({eventName, dataJson});
     }, QStringLiteral("event:") + eventName);
 }
 

@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
     qputenv("XDG_DATA_HOME", (tmpDir.path() + QStringLiteral("/data")).toUtf8());
     qputenv("XDG_CONFIG_HOME", (tmpDir.path() + QStringLiteral("/config")).toUtf8());
     QGuiApplication app(argc, argv);
-    app.setApplicationVersion(QStringLiteral("0.2.6"));
+    app.setApplicationVersion(QStringLiteral("0.3.1"));
 
     // 1. Validate mod id rules
     CHECK(isValidModId(QStringLiteral("hello-ymusic")));
@@ -650,6 +650,276 @@ int main(int argc, char *argv[]) {
     }
     CHECK(hangHost->isAutoDisabled());
     QCoreApplication::processEvents();
+
+    // 4. End-to-end verification of bundled example mods (`hello-ymusic` and `fck-censor`) in real sandbox
+    const QString helloSrc = QStringLiteral("/home/finrixx/Проекты/yandexmus/ymusic/examples/mods/hello-ymusic");
+    if (QDir(helloSrc).exists()) {
+        const QVariantMap instRes = manager.installModFromFolder(QUrl::fromLocalFile(helloSrc));
+        CHECK(instRes.value(QStringLiteral("ok")).toBool());
+        CHECK(!instRes.value(QStringLiteral("hasOverrides")).toBool());
+        manager.setModEnabled(QStringLiteral("hello-ymusic"), true);
+
+        ModApi *helloApi = manager.apiForMod(QStringLiteral("hello-ymusic"));
+        CHECK(helloApi != nullptr);
+        helloApi->call(QStringLiteral("resetStats"), {});
+        const QVariantMap hookRes = manager.runHookChain(
+            QStringLiteral("track_after_play"),
+            QVariantMap{{QStringLiteral("id"), QStringLiteral("42")}, {QStringLiteral("title"), QStringLiteral("Demo Track")}});
+        CHECK(hookRes.value(QStringLiteral("action")).toString() == QStringLiteral("continue"));
+        const QVariantMap stats = helloApi->call(QStringLiteral("getStats"), {}).toMap();
+        CHECK(stats.value(QStringLiteral("playedCount")).toInt() == 1);
+        CHECK(stats.value(QStringLiteral("lastTrackTitle")).toString() == QStringLiteral("Demo Track"));
+
+        const QString helloDir = manager.modDirectoryForMod(QStringLiteral("hello-ymusic"));
+        for (const QString &rel : {
+                 QStringLiteral("ui/Page.qml"),
+                 QStringLiteral("ui/Settings.qml"),
+                 QStringLiteral("ui/ImmersiveBadge.qml"),
+             }) {
+            QString qmlErr;
+            std::unique_ptr<QObject> obj(manager.createSandboxedObject(
+                QStringLiteral("hello-ymusic"),
+                QUrl::fromLocalFile(helloDir + u'/' + rel),
+                {},
+                &qmlErr));
+            if (!obj) {
+                std::cerr << "hello-ymusic QML failed (" << rel.toStdString() << "): " << qmlErr.toStdString() << std::endl;
+            }
+            CHECK(obj != nullptr);
+        }
+        manager.setModEnabled(QStringLiteral("hello-ymusic"), false);
+    }
+
+    const QString fckSrc = QStringLiteral("/home/finrixx/Проекты/yandexmus/ymusic/examples/mods/fck-censor");
+    if (QDir(fckSrc).exists()) {
+        const QVariantMap instRes = manager.installModFromFolder(QUrl::fromLocalFile(fckSrc));
+        CHECK(instRes.value(QStringLiteral("ok")).toBool());
+        manager.setModEnabled(QStringLiteral("fck-censor"), true);
+        const QString fckDir = manager.modDirectoryForMod(QStringLiteral("fck-censor"));
+        for (const QString &rel : {
+                 QStringLiteral("ui/SettingsTab.qml"),
+             }) {
+            QString qmlErr;
+            std::unique_ptr<QObject> obj(manager.createSandboxedObject(
+                QStringLiteral("fck-censor"),
+                QUrl::fromLocalFile(fckDir + u'/' + rel),
+                {},
+                &qmlErr));
+            if (!obj) {
+                std::cerr << "fck-censor QML failed (" << rel.toStdString() << "): " << qmlErr.toStdString() << std::endl;
+            }
+            CHECK(obj != nullptr);
+        }
+        manager.setModEnabled(QStringLiteral("fck-censor"), false);
+    }
+
+    // 5. Layout/panel state, ui:layout + library:write permissions, ref-counting, cleanup, and QtQuick.Effects allowlist
+    CHECK(ModSandboxUrlInterceptor::isAllowedImportModule(QStringLiteral("QtQuick.Effects")));
+    CHECK(ModSandboxUrlInterceptor::isAllowedQtModulePath(QStringLiteral("QtQuick/Effects")));
+    CHECK(ModSandboxUrlInterceptor::isAllowedQtModulePath(QStringLiteral("QtQuick/Effects/qmldir")));
+
+    const QString layoutModADir = ymusic::paths::modsDirectory() + QStringLiteral("/layout-mod-a");
+    CHECK(writeText(layoutModADir + QStringLiteral("/manifest.json"), R"({
+        "id": "layout-mod-a",
+        "name": "Layout Mod A",
+        "version": "1.0.0",
+        "apiVersion": "1.0",
+        "permissions": ["ui:slots", "ui:layout", "library:write"]
+    })"));
+    const QString layoutModBDir = ymusic::paths::modsDirectory() + QStringLiteral("/layout-mod-b");
+    CHECK(writeText(layoutModBDir + QStringLiteral("/manifest.json"), R"({
+        "id": "layout-mod-b",
+        "name": "Layout Mod B",
+        "version": "1.0.0",
+        "apiVersion": "1.0",
+        "permissions": ["ui:layout"]
+    })"));
+    const ModManifest parsedLayoutA = parseManifest(layoutModADir);
+    CHECK(parsedLayoutA.valid);
+    CHECK(parsedLayoutA.hasPermission(QStringLiteral("ui:layout")));
+    CHECK(parsedLayoutA.hasPermission(QStringLiteral("library:write")));
+
+    manager.reloadMods();
+    manager.setModEnabled(QStringLiteral("layout-mod-a"), true);
+    manager.setModEnabled(QStringLiteral("layout-mod-b"), true);
+
+    ModApi *layoutApiA = manager.apiForMod(QStringLiteral("layout-mod-a"));
+    ModApi *layoutApiB = manager.apiForMod(QStringLiteral("layout-mod-b"));
+    CHECK(layoutApiA != nullptr);
+    CHECK(layoutApiB != nullptr);
+
+    // Panel state & toggle requests
+    CHECK(!layoutApiA->showingLyrics());
+    CHECK(!layoutApiA->showingQueue());
+    int panelSignals = 0;
+    QObject::connect(layoutApiA, &ModApi::uiPanelChanged, [&]() { ++panelSignals; });
+    manager.setShowingLyrics(true);
+    manager.setShowingQueue(true);
+    CHECK(layoutApiA->showingLyrics());
+    CHECK(layoutApiA->showingQueue());
+    CHECK(panelSignals == 2);
+    CHECK(!layoutApiB->showingLyrics()); // missing ui:slots
+
+    int lyricsToggles = 0;
+    int queueToggles = 0;
+    QObject::connect(&manager, &ModManager::lyricsToggleRequested, [&]() { ++lyricsToggles; });
+    QObject::connect(&manager, &ModManager::queueToggleRequested, [&]() { ++queueToggles; });
+    CHECK(layoutApiA->toggleLyrics());
+    CHECK(layoutApiA->toggleQueue());
+    CHECK(lyricsToggles == 1);
+    CHECK(queueToggles == 1);
+    CHECK(!layoutApiB->toggleLyrics()); // missing ui:slots
+
+    // Reference-counted playerBarHidden across multiple mods + cleanup on disable/unload
+    CHECK(!manager.playerBarHidden());
+    CHECK(layoutApiA->setPlayerBarHidden(true));
+    CHECK(manager.playerBarHidden());
+    CHECK(layoutApiB->setPlayerBarHidden(true));
+    CHECK(manager.playerBarHidden());
+    CHECK(layoutApiA->setPlayerBarHidden(false));
+    CHECK(manager.playerBarHidden()); // layout-mod-b still hides it
+    CHECK(layoutApiB->setPlayerBarHidden(false));
+    CHECK(!manager.playerBarHidden());
+
+    // Cleanup when mod is disabled / unloaded
+    CHECK(layoutApiA->setPlayerBarHidden(true));
+    CHECK(manager.playerBarHidden());
+    manager.setModEnabled(QStringLiteral("layout-mod-a"), false);
+    QCoreApplication::processEvents();
+    CHECK(!manager.playerBarHidden());
+    manager.setModEnabled(QStringLiteral("layout-mod-b"), false);
+
+    // 6. Declarative track badges API & debounced storage flush on mod unload
+    const QString badgeModDir = ymusic::paths::modsDirectory() + QStringLiteral("/badge-storage-mod");
+    CHECK(writeText(badgeModDir + QStringLiteral("/manifest.json"), R"({
+        "id": "badge-storage-mod",
+        "name": "Badge & Storage Mod",
+        "version": "1.0.0",
+        "apiVersion": "1.0",
+        "permissions": ["ui:slots", "storage"]
+    })"));
+    const QString noSlotsModDir = ymusic::paths::modsDirectory() + QStringLiteral("/no-slots-mod");
+    CHECK(writeText(noSlotsModDir + QStringLiteral("/manifest.json"), R"({
+        "id": "no-slots-mod",
+        "name": "No Slots Mod",
+        "version": "1.0.0",
+        "apiVersion": "1.0",
+        "permissions": ["storage"]
+    })"));
+    manager.reloadMods();
+    manager.setModEnabled(QStringLiteral("badge-storage-mod"), true);
+    manager.setModEnabled(QStringLiteral("no-slots-mod"), true);
+
+    ModApi *badgeApi = manager.apiForMod(QStringLiteral("badge-storage-mod"));
+    ModApi *noSlotsApi = manager.apiForMod(QStringLiteral("no-slots-mod"));
+    CHECK(badgeApi != nullptr);
+    CHECK(noSlotsApi != nullptr);
+
+    // Permission check: ui:slots required
+    CHECK(!noSlotsApi->setTrackBadges(QVariantMap{
+        {QStringLiteral("100"), QVariantMap{{QStringLiteral("text"), QStringLiteral("NO")}}}
+    }));
+
+    const int revBefore = manager.trackBadgesRevision();
+    int badgeSignals = 0;
+    QObject::connect(&manager, &ModManager::trackBadgesChanged, [&]() { ++badgeSignals; });
+
+    QVariantMap badgeInput;
+    badgeInput.insert(QStringLiteral("1001"), QVariantMap{
+        {QStringLiteral("text"), QStringLiteral("  12345678901234567890  ")},
+        {QStringLiteral("tone"), QStringLiteral("invalid-tone")},
+        {QStringLiteral("tooltip"), QString(250, u'x')},
+    });
+    badgeInput.insert(QStringLiteral("1002"), QVariantMap{
+        {QStringLiteral("text"), QStringLiteral("UNCEN")},
+        {QStringLiteral("tone"), QStringLiteral("error")},
+        {QStringLiteral("tooltip"), QStringLiteral("Restored track")},
+    });
+    badgeInput.insert(QStringLiteral("1003"), QVariantMap{
+        {QStringLiteral("text"), QStringLiteral("   ")},
+        {QStringLiteral("tone"), QStringLiteral("secondary")},
+    });
+    CHECK(badgeApi->setTrackBadges(badgeInput));
+    CHECK(manager.trackBadgesRevision() == revBefore + 1);
+    CHECK(badgeSignals == 1);
+
+    const QVariantList badges1001 = manager.trackBadgesFor(QStringLiteral("1001"));
+    CHECK(badges1001.size() == 1);
+    const QVariantMap b1 = badges1001.first().toMap();
+    CHECK(b1.value(QStringLiteral("modId")).toString() == QStringLiteral("badge-storage-mod"));
+    CHECK(b1.value(QStringLiteral("text")).toString() == QStringLiteral("1234567890123456"));
+    CHECK(b1.value(QStringLiteral("tone")).toString() == QStringLiteral("primary"));
+    CHECK(b1.value(QStringLiteral("tooltip")).toString().size() == 200);
+
+    const QVariantList badges1002 = manager.trackBadgesFor(QStringLiteral("1002"));
+    CHECK(badges1002.size() == 1);
+    const QVariantMap b2 = badges1002.first().toMap();
+    CHECK(b2.value(QStringLiteral("text")).toString() == QStringLiteral("UNCEN"));
+    CHECK(b2.value(QStringLiteral("tone")).toString() == QStringLiteral("error"));
+    CHECK(b2.value(QStringLiteral("tooltip")).toString() == QStringLiteral("Restored track"));
+
+    CHECK(manager.trackBadgesFor(QStringLiteral("1003")).isEmpty()); // empty text skipped
+    CHECK(manager.trackBadgesFor(QStringLiteral("9999")).isEmpty());
+
+    // clearTrackBadges cleans up and increments revision
+    const int revBeforeClear = manager.trackBadgesRevision();
+    badgeApi->clearTrackBadges();
+    CHECK(manager.trackBadgesRevision() == revBeforeClear + 1);
+    CHECK(manager.trackBadgesFor(QStringLiteral("1001")).isEmpty());
+    CHECK(manager.trackBadgesFor(QStringLiteral("1002")).isEmpty());
+
+    // Re-apply badges and write debounced storage, then disable mod immediately (before 250ms timer)
+    CHECK(badgeApi->setTrackBadges(QVariantMap{
+        {QStringLiteral("2001"), QVariantMap{
+            {QStringLiteral("text"), QStringLiteral("MOD")},
+            {QStringLiteral("tone"), QStringLiteral("tertiary")},
+        }}
+    }));
+    CHECK(manager.trackBadgesFor(QStringLiteral("2001")).size() == 1);
+    CHECK(badgeApi->storageSet(QStringLiteral("debouncedKey"), QStringLiteral("savedOnUnload")));
+    CHECK(badgeApi->storageSet(QStringLiteral("toRemove"), 123));
+    CHECK(badgeApi->storageRemove(QStringLiteral("toRemove")));
+
+    const int revBeforeDisable = manager.trackBadgesRevision();
+    manager.setModEnabled(QStringLiteral("badge-storage-mod"), false);
+    QCoreApplication::processEvents();
+    CHECK(manager.trackBadgesRevision() > revBeforeDisable);
+    CHECK(manager.trackBadgesFor(QStringLiteral("2001")).isEmpty());
+
+    // Verify debounced storage was flushed cleanly on unload
+    const QString storagePath = ymusic::paths::modDataDirectory() + QStringLiteral("/badge-storage-mod.json");
+    QFile storageFile(storagePath);
+    CHECK(storageFile.open(QIODevice::ReadOnly));
+    const QJsonObject persisted = QJsonDocument::fromJson(storageFile.readAll()).object();
+    CHECK(persisted.value(QStringLiteral("debouncedKey")).toString() == QStringLiteral("savedOnUnload"));
+    CHECK(!persisted.contains(QStringLiteral("toRemove")));
+
+    // Re-enable mod and verify storage is reloaded from disk
+    manager.setModEnabled(QStringLiteral("badge-storage-mod"), true);
+    ModApi *reloadedBadgeApi = manager.apiForMod(QStringLiteral("badge-storage-mod"));
+    CHECK(reloadedBadgeApi != nullptr);
+    CHECK(reloadedBadgeApi->storageGet(QStringLiteral("debouncedKey")).toString() == QStringLiteral("savedOnUnload"));
+    manager.setModEnabled(QStringLiteral("badge-storage-mod"), false);
+    manager.setModEnabled(QStringLiteral("no-slots-mod"), false);
+
+    // 7. Drop-in .ymmod archive placed directly into mods directory auto-unpacks on scan
+    const QString dropArchivePath = ymusic::paths::modsDirectory() + QStringLiteral("/drop-in-mod.ymmod");
+    {
+        QZipWriter writer(dropArchivePath);
+        CHECK(writer.status() == QZipWriter::NoError);
+        writer.addFile(QStringLiteral("manifest.json"), QByteArray(R"({
+            "id": "drop-in-mod",
+            "name": "Drop-In Mod",
+            "version": "1.0.0",
+            "apiVersion": "1.0",
+            "permissions": ["ui:slots"]
+        })"));
+        writer.close();
+    }
+    CHECK(QFileInfo::exists(dropArchivePath));
+    manager.reloadMods();
+    CHECK(!QFileInfo::exists(dropArchivePath));
+    CHECK(QFileInfo::exists(ymusic::paths::modsDirectory() + QStringLiteral("/drop-in-mod/manifest.json")));
 
     return 0;
 }

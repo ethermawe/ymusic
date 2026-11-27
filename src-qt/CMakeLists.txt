@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(ymusic_qt LANGUAGES CXX)
 include(GNUInstallDirs)
 
-set(YMUSIC_VERSION "0.3.0" CACHE STRING "Application version")
+set(YMUSIC_VERSION "0.3.1" CACHE STRING "Application version")
 string(REGEX REPLACE "^v" "" YMUSIC_VERSION_CLEAN "${YMUSIC_VERSION}")
 string(REGEX MATCHALL "[0-9]+" YMUSIC_VERSION_PARTS "${YMUSIC_VERSION_CLEAN}")
 list(LENGTH YMUSIC_VERSION_PARTS _ymusic_ver_len)
@@ -313,16 +313,21 @@ qt_add_qml_module(ymusic-qml
 )
 
 set(YMUSIC_SDK_QML_FILES
+    sdk/qml/Badge.qml
     sdk/qml/Card.qml
+    sdk/qml/Chip.qml
     sdk/qml/ConfigSwitch.qml
     sdk/qml/ContentSection.qml
     sdk/qml/IconButton.qml
     sdk/qml/MaterialSymbol.qml
     sdk/qml/NoteText.qml
     sdk/qml/OutlinedTextField.qml
+    sdk/qml/RoundedImage.qml
+    sdk/qml/SpectrumBars.qml
     sdk/qml/StyledMenu.qml
     sdk/qml/StyledMenuItem.qml
     sdk/qml/StyledMenuSeparator.qml
+    sdk/qml/StyledSlider.qml
     sdk/qml/StyledText.qml
     sdk/qml/TextButton.qml
     sdk/qml/TitleText.qml

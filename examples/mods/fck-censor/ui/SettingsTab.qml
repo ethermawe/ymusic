@@ -11,16 +11,22 @@ Column {
     spacing: 16
 
     property bool useRemoteDb: modApi ? Boolean(modApi.storageGet("useRemoteDb", true)) : true
-    property string remoteStatus: modApi ? String(modApi.storageGet("remoteStatus", "Ожидание загрузки...")) : ""
+    property bool showPlayerBadge: modApi ? Boolean(modApi.storageGet("showPlayerBadge", true)) : true
+    property string remoteStatus: modApi ? String(modApi.storageGet("remoteStatus", "Ожидание загрузки…")) : ""
     property var customOverrides: modApi ? (modApi.storageGet("customOverrides", ({})) || ({})) : ({})
     property int appliedCount: modApi ? Number(modApi.storageGet("appliedCount", 0)) : 0
+    property int remoteTrackCount: modApi ? Number(modApi.storageGet("remoteTrackCount", 0)) : 0
+    property int remoteAudioCount: modApi ? Number(modApi.storageGet("remoteAudioCount", 0)) : 0
 
     function syncFromStorage() {
         if (!modApi) return;
         useRemoteDb = Boolean(modApi.storageGet("useRemoteDb", true));
+        showPlayerBadge = Boolean(modApi.storageGet("showPlayerBadge", true));
         remoteStatus = String(modApi.storageGet("remoteStatus", "Готово"));
         customOverrides = modApi.storageGet("customOverrides", ({})) || ({});
         appliedCount = Number(modApi.storageGet("appliedCount", 0));
+        remoteTrackCount = Number(modApi.storageGet("remoteTrackCount", 0));
+        remoteAudioCount = Number(modApi.storageGet("remoteAudioCount", 0));
 
         const draftId = String(modApi.storageGet("draftTrackId", "") || "");
         const draftTitle = String(modApi.storageGet("draftTrackTitle", "") || "");
@@ -34,35 +40,25 @@ Column {
         }
     }
 
-    function reapplyNow() {
-        if (!modApi) return;
-        const merged = {};
-        if (useRemoteDb) {
-            const cached = modApi.storageGet("cachedRemoteOverrides", ({})) || ({});
-            const rKeys = Object.keys(cached);
-            for (let i = 0; i < rKeys.length; ++i) {
-                merged[rKeys[i]] = Object.assign({}, cached[rKeys[i]]);
-            }
-        }
-        const cKeys = Object.keys(customOverrides);
-        for (let j = 0; j < cKeys.length; ++j) {
-            const id = cKeys[j];
-            const ov = customOverrides[id];
-            if (!ov) continue;
-            if (ov.disabled) delete merged[id];
-            else merged[id] = Object.assign({}, merged[id] || {}, ov);
-        }
-        modApi.setTrackOverrides(merged);
-        appliedCount = Object.keys(merged).length;
-        modApi.storageSet("appliedCount", appliedCount);
+    function loadOverrideIntoForm(id) {
+        const ov = root.customOverrides[id] || ({});
+        trackIdField.text = id;
+        titleField.text = ov.title || "";
+        artistField.text = ov.artists || "";
+        coverField.text = ov.coverUrl || "";
+        audioField.text = ov.localFile || ov.audioUrl || ov.audioTrackId || "";
     }
 
     Component.onCompleted: syncFromStorage()
 
     Connections {
         target: root.modApi
-        function onHttpFinished(requestId) {
-            if (requestId === "fck-censor-db") {
+        function onStorageChanged(key) {
+            if (!root.modApi) return;
+            if (key === "remoteStatus" || key === "appliedCount" || key === "remoteTrackCount"
+                || key === "remoteAudioCount" || key === "customOverrides"
+                || key === "useRemoteDb" || key === "showPlayerBadge"
+                || key === "draftTrackId") {
                 Qt.callLater(root.syncFromStorage);
             }
         }
@@ -72,6 +68,30 @@ Column {
         title: "База подмен FckCensorData"
         symbol: "graphic_eq"
 
+        Flow {
+            x: 8
+            width: parent.width - 16
+            spacing: 8
+
+            Badge {
+                symbol: "check_circle"
+                text: "Активно: " + root.appliedCount
+                tone: "primary"
+            }
+            Badge {
+                symbol: "library_music"
+                text: "База: " + root.remoteTrackCount
+                tone: "secondary"
+                visible: root.remoteTrackCount > 0
+            }
+            Badge {
+                symbol: "audio_file"
+                text: "Аудио: " + root.remoteAudioCount
+                tone: "tertiary"
+                visible: root.remoteAudioCount > 0
+            }
+        }
+
         ConfigSwitch {
             text: "Автоматические подмены из FckCensorData"
             checked: root.useRemoteDb
@@ -79,13 +99,23 @@ Column {
                 root.useRemoteDb = checked;
                 if (root.modApi) {
                     root.modApi.storageSet("useRemoteDb", checked);
-                    root.reapplyNow();
+                }
+            }
+        }
+
+        ConfigSwitch {
+            text: "Показывать бейдж FckCensor в плеере"
+            checked: root.showPlayerBadge
+            onToggledTo: (checked) => {
+                root.showPlayerBadge = checked;
+                if (root.modApi) {
+                    root.modApi.storageSet("showPlayerBadge", checked);
                 }
             }
         }
 
         NoteText {
-            text: root.remoteStatus + " · Активно подмен: " + root.appliedCount
+            text: root.remoteStatus
         }
 
         Flow {
@@ -99,9 +129,8 @@ Column {
                 text: "Обновить базу"
                 onClicked: {
                     if (!root.modApi) return;
-                    root.remoteStatus = "Обновление базы...";
-                    root.modApi.httpGet("https://raw.githubusercontent.com/Hazzz895/FckCensorData/main/list_v2.json", "fck-censor-db");
-                    root.modApi.showToast("Запрос на обновление базы отправлен");
+                    root.modApi.storageSet("refreshNonce", Date.now());
+                    root.modApi.showToast("Обновление базы FckCensorData…");
                 }
             }
             TextButton {
@@ -121,6 +150,24 @@ Column {
             x: 8
             width: parent.width - 16
             spacing: 8
+
+            Flow {
+                width: parent.width
+                spacing: 8
+
+                Chip {
+                    symbol: "music_note"
+                    text: "Подставить текущий трек"
+                    enabled: root.modApi && root.modApi.hasTrack
+                    onClicked: {
+                        if (!root.modApi || !root.modApi.hasTrack) return;
+                        trackIdField.text = root.modApi.trackId || "";
+                        titleField.text = root.modApi.trackTitle || "";
+                        artistField.text = root.modApi.trackArtists || "";
+                        coverField.text = root.modApi.trackCover || "";
+                    }
+                }
+            }
 
             OutlinedTextField {
                 id: trackIdField
@@ -148,7 +195,8 @@ Column {
                 placeholder: "URL обложки (необязательно)"
             }
 
-            Row {
+            Flow {
+                width: parent.width
                 spacing: 8
 
                 TextButton {
@@ -179,8 +227,28 @@ Column {
                         next[id] = entry;
                         root.customOverrides = next;
                         root.modApi.storageSet("customOverrides", next);
-                        root.reapplyNow();
                         root.modApi.showToast("Подмена для трека " + id + " сохранена");
+                        trackIdField.text = "";
+                        titleField.text = "";
+                        artistField.text = "";
+                        audioField.text = "";
+                        coverField.text = "";
+                    }
+                }
+
+                TextButton {
+                    variant: TextButton.Outlined
+                    symbol: "block"
+                    text: "Отключить для трека"
+                    enabled: trackIdField.text.trim().length > 0
+                    onClicked: {
+                        if (!root.modApi) return;
+                        const id = trackIdField.text.trim();
+                        const next = Object.assign({}, root.customOverrides);
+                        next[id] = { disabled: true, title: titleField.text.trim() || ("Трек " + id) };
+                        root.customOverrides = next;
+                        root.modApi.storageSet("customOverrides", next);
+                        root.modApi.showToast("Подмена из базы отключена для трека " + id);
                         trackIdField.text = "";
                         titleField.text = "";
                         artistField.text = "";
@@ -193,7 +261,7 @@ Column {
     }
 
     ContentSection {
-        title: "Сохранённые пользовательские подмены"
+        title: "Сохранённые пользовательские правила"
         symbol: "list"
         visible: Object.keys(root.customOverrides).length > 0
 
@@ -210,15 +278,26 @@ Column {
                     required property string modelData
                     readonly property var ov: root.customOverrides[modelData] || ({})
                     width: parent ? parent.width : 0
-                    height: 48
+                    height: 54
                     radius: Theme.rounding.small
                     color: Theme.colors.surfaceContainer
 
                     RowLayout {
                         anchors.fill: parent
-                        anchors.leftMargin: 12
+                        anchors.leftMargin: 10
                         anchors.rightMargin: 8
                         spacing: 10
+
+                        RoundedImage {
+                            Layout.preferredWidth: 36
+                            Layout.preferredHeight: 36
+                            Layout.alignment: Qt.AlignVCenter
+                            source: delegateItem.ov.coverUrl || ""
+                            radius: 8
+                            fallbackSymbol: delegateItem.ov.disabled ? "block" : "graphic_eq"
+                            fallbackIconSize: 18
+                            maskColor: Theme.colors.surfaceContainer
+                        }
 
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -231,25 +310,35 @@ Column {
                             }
                             StyledText {
                                 Layout.fillWidth: true
-                                text: delegateItem.ov.localFile || delegateItem.ov.audioUrl || (delegateItem.ov.audioTrackId ? ("trackId: " + delegateItem.ov.audioTrackId) : "Только метаданные")
+                                text: delegateItem.ov.disabled
+                                    ? "Подмена из базы отключена"
+                                    : (delegateItem.ov.localFile || delegateItem.ov.audioUrl || (delegateItem.ov.audioTrackId ? ("trackId: " + delegateItem.ov.audioTrackId) : "Только метаданные"))
                                 font.pixelSize: Theme.fontSize.smaller
-                                color: Theme.colors.onSurfaceVariant
+                                color: delegateItem.ov.disabled ? Theme.colors.error : Theme.colors.onSurfaceVariant
                                 elide: Text.ElideRight
                             }
+                        }
+
+                        IconButton {
+                            symbol: "edit"
+                            size: 32
+                            iconSize: 18
+                            tooltip: "Редактировать"
+                            visible: !delegateItem.ov.disabled
+                            onClicked: root.loadOverrideIntoForm(delegateItem.modelData)
                         }
 
                         IconButton {
                             symbol: "delete"
                             size: 32
                             iconSize: 18
-                            tooltip: "Удалить подмену"
+                            tooltip: "Удалить правило"
                             onClicked: {
                                 const next = Object.assign({}, root.customOverrides);
                                 delete next[delegateItem.modelData];
                                 root.customOverrides = next;
                                 if (root.modApi) {
                                     root.modApi.storageSet("customOverrides", next);
-                                    root.reapplyNow();
                                 }
                             }
                         }

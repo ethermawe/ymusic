@@ -62,7 +62,7 @@ Item {
 
         MouseArea {
             anchors.fill: parent
-            acceptedButtons: Qt.RightButton
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
             hoverEnabled: true
             onClicked: (mouse) => {
                 if (mouse.button === Qt.RightButton) {
@@ -98,10 +98,10 @@ Item {
 
             ModSlotHost {
                 layoutMode: "row"
-                spacing: root.tiny ? 2 : 4
+                spacing: 6
                 height: root.buttonSize
                 anchors.verticalCenter: parent.verticalCenter
-                visible: implicitWidth > 0
+                visible: entries.length > 0
                 slotName: "playerBar.left"
                 slotContext: ({
                     scheme: root.scheme,
@@ -320,7 +320,9 @@ Item {
                             id: nowTitleItem
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Math.min(implicitWidth, Math.max(0, parent.width - (playerAiBadge.visible ? playerAiBadge.width + 6 : 0)))
+                            readonly property real badgesWidth: (playerAiBadge.visible ? playerAiBadge.width + 6 : 0)
+                                + (playerTrackBadges.visible ? playerTrackBadges.width + 6 : 0)
+                            width: Math.min(implicitWidth, Math.max(0, parent.width - badgesWidth))
                             text: Backend.hasTrack ? Backend.nowTitle : qsTr("Ничего не играет")
                             elide: Text.ElideRight
                             animateChange: true
@@ -376,6 +378,68 @@ Item {
                             anchors.leftMargin: 6
                             anchors.verticalCenter: parent.verticalCenter
                             scheme: root.scheme
+                        }
+
+                        Row {
+                            id: playerTrackBadges
+                            readonly property var modBadges: {
+                                const _rev = ModManager.trackBadgesRevision;
+                                const tid = Backend.hasTrack ? String(Backend.nowId || "") : "";
+                                return tid.length > 0 ? ModManager.trackBadgesFor(tid) : [];
+                            }
+                            spacing: 4
+                            height: 18
+                            visible: Backend.hasTrack && modBadges.length > 0
+                            anchors.left: playerAiBadge.visible ? playerAiBadge.right : nowTitleItem.right
+                            anchors.leftMargin: 6
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            Repeater {
+                                model: playerTrackBadges.modBadges
+                                delegate: Rectangle {
+                                    id: badgePill
+                                    required property var modelData
+                                    readonly property string tone: String(modelData?.tone || "")
+                                    readonly property string tipText: String(modelData?.tooltip || "")
+                                    readonly property color bg: tone === "primary" ? root.scheme.primaryContainer
+                                        : tone === "secondary" ? root.scheme.secondaryContainer
+                                        : tone === "tertiary" ? root.scheme.tertiaryContainer
+                                        : tone === "error" ? root.scheme.errorContainer
+                                        : root.scheme.surfaceContainerHigh
+                                    readonly property color fg: tone === "primary" ? root.scheme.onPrimaryContainer
+                                        : tone === "secondary" ? root.scheme.onSecondaryContainer
+                                        : tone === "tertiary" ? root.scheme.onTertiaryContainer
+                                        : tone === "error" ? root.scheme.onErrorContainer
+                                        : root.scheme.onSurfaceVariant
+
+                                    height: 18
+                                    radius: 9
+                                    implicitWidth: badgeLbl.implicitWidth + 10
+                                    color: bg
+                                    border.width: 1
+                                    border.color: Qt.alpha(fg, 0.18)
+
+                                    StyledText {
+                                        id: badgeLbl
+                                        anchors.centerIn: parent
+                                        text: String(badgePill.modelData?.text || "")
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        font.letterSpacing: 0.4
+                                        color: badgePill.fg
+                                    }
+
+                                    HoverHandler {
+                                        id: badgeHover
+                                        enabled: badgePill.tipText.length > 0
+                                    }
+
+                                    StyledToolTip {
+                                        visible: badgeHover.hovered && badgePill.tipText.length > 0
+                                        text: badgePill.tipText
+                                    }
+                                }
+                            }
                         }
                     }
 

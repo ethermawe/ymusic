@@ -332,6 +332,16 @@ Item {
             }
         }
 
+        ModSlotHost {
+            Layout.fillWidth: true
+            Layout.preferredHeight: implicitHeight
+            layoutMode: "column"
+            spacing: 8
+            visible: !root.isCompact && entries.length > 0
+            slotName: "sidebar.footer"
+            slotContext: ({ compact: root.isCompact, sidebarWidth: root.width })
+        }
+
         NavigationItem {
             Layout.fillWidth: true
             compact: root.isCompact
