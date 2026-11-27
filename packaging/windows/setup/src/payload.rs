@@ -233,7 +233,7 @@ fn collect_files_sorted(
         } else if ft.is_file() {
             let rel = abs
                 .strip_prefix(root)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+                .map_err(io::Error::other)?
                 .to_path_buf();
             out.push((rel, abs));
         }

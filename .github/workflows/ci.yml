@@ -96,11 +96,9 @@ jobs:
       - name: Check Rust formatting & lints
         run: |
           cargo fmt --check
+          cargo fmt --manifest-path packaging/windows/setup/Cargo.toml --check
           cargo clippy --locked --lib -- -D warnings
-        with:
-          workspaces: |
-            .
-            packaging/windows/setup
+          cargo clippy --manifest-path packaging/windows/setup/Cargo.toml --locked -- -D warnings
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
