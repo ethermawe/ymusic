@@ -128,6 +128,16 @@ Item {
                 slotContext: ({ buttonSize: root.buttonSize, compact: root.compact })
             }
 
+            ModSlotHost {
+                layoutMode: "row"
+                spacing: 6
+                height: root.buttonSize
+                anchors.verticalCenter: parent.verticalCenter
+                visible: entries.length > 0
+                slotName: "topBar.actions"
+                slotContext: ({ buttonSize: root.buttonSize, compact: root.compact })
+            }
+
             ToolbarButton {
                 id: overflow
                 effect: ToolbarButton.Spin
@@ -246,7 +256,20 @@ Item {
         readonly property string trimmedPart: search.text.trim()
         readonly property bool hasBest: Boolean(Backend.searchSuggestBest && Backend.searchSuggestBest.title)
         readonly property bool hasSuggestData: Backend.searchQuickTracks.length > 0 || hasBest || Backend.searchSuggestions.length > 0
-        readonly property bool showingHistory: search.editing && trimmedPart.length === 0 && Backend.searchHistory.length > 0
+        readonly property var matchedHistory: {
+            if (trimmedPart.length === 0) return Backend.searchHistory
+            const needle = trimmedPart.toLowerCase()
+            const out = []
+            for (let i = 0; i < Backend.searchHistory.length; ++i) {
+                const entry = String(Backend.searchHistory[i] || "")
+                if (entry.toLowerCase().indexOf(needle) >= 0) {
+                    out.push(entry)
+                    if (out.length >= 4) break
+                }
+            }
+            return out
+        }
+        readonly property bool showingHistory: search.editing && matchedHistory.length > 0 && (trimmedPart.length === 0 || !hasSuggestData)
         readonly property bool suggestionsOpen: search.editing && ((trimmedPart.length > 0 && hasSuggestData) || showingHistory)
 
         x: Math.max(12, Math.min(search.x, root.width - width - 12))
@@ -317,21 +340,38 @@ Item {
                 }
 
                 Repeater {
-                    model: suggestionsPopup.showingHistory ? Backend.searchHistory : []
+                    model: suggestionsPopup.showingHistory ? suggestionsPopup.matchedHistory : []
                     delegate: Rectangle {
                         id: histItem
                         required property string modelData
                         width: suggestColumn.width
                         height: 34
                         radius: Appearance.rounding.small
-                        color: histHover.hovered ? Appearance.colors.surfaceContainerHighest : "transparent"
+                        color: (histHover.hovered || removeHistHover.hovered) ? Appearance.colors.surfaceContainerHighest : "transparent"
 
                         Behavior on color { ElementMoveFastColor {} }
 
+                        HoverHandler { id: histHover }
+
+                        MouseArea {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.right: removeHistBtn.left
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                search.text = histItem.modelData
+                                root.dismissSearch()
+                                Backend.search(histItem.modelData)
+                            }
+                        }
+
                         Row {
-                            anchors.fill: parent
+                            anchors.left: parent.left
                             anchors.leftMargin: 10
-                            anchors.rightMargin: 10
+                            anchors.right: removeHistBtn.left
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
                             spacing: 8
 
                             MaterialSymbol {
@@ -342,19 +382,42 @@ Item {
                             }
                             StyledText {
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: parent.width - 28
+                                width: Math.max(0, parent.width - 24)
                                 text: histItem.modelData
                                 elide: Text.ElideRight
                                 font.pixelSize: Appearance.fontSize.small
                             }
                         }
 
-                        HoverHandler { id: histHover; cursorShape: Qt.PointingHandCursor }
-                        TapHandler {
-                            onTapped: {
-                                search.text = histItem.modelData
-                                root.dismissSearch()
-                                Backend.search(histItem.modelData)
+                        Item {
+                            id: removeHistBtn
+                            anchors.right: parent.right
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 26
+                            height: 26
+                            opacity: (histHover.hovered || removeHistHover.hovered) ? 1 : 0.45
+
+                            Behavior on opacity { NumberAnimation { duration: 120 } }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 13
+                                color: removeHistHover.hovered ? Qt.alpha(Appearance.colors.onSurface, 0.12) : "transparent"
+                            }
+
+                            MaterialSymbol {
+                                anchors.centerIn: parent
+                                text: "close"
+                                iconSize: 15
+                                color: removeHistHover.hovered ? Appearance.colors.onSurface : Appearance.colors.onSurfaceVariant
+                            }
+
+                            HoverHandler { id: removeHistHover; cursorShape: Qt.PointingHandCursor }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Backend.feature({action: "remove_search_history_item", query: histItem.modelData})
                             }
                         }
                     }
@@ -425,8 +488,9 @@ Item {
                     HoverHandler { id: bestSuggestHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler {
                         onTapped: {
+                            const q = suggestionsPopup.trimmedPart
                             root.dismissSearch()
-                            Backend.feature({action: "open_search_best", source: "suggest"})
+                            Backend.feature({action: "open_search_best", source: "suggest", query: q})
                         }
                     }
                 }
@@ -525,8 +589,9 @@ Item {
                         HoverHandler { id: quickHover; cursorShape: Qt.PointingHandCursor }
                         TapHandler {
                             onTapped: {
+                                const q = suggestionsPopup.trimmedPart
                                 root.dismissSearch()
-                                Backend.feature({action: "play_quick_track", id: quickTrackItem.modelData.id})
+                                Backend.feature({action: "play_quick_track", id: quickTrackItem.modelData.id, query: q})
                             }
                         }
                     }

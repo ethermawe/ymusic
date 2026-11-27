@@ -10,7 +10,7 @@ FocusScope {
     focus: true
 
     property var selected: ({})
-    property bool fetching: true
+    property bool fetching: false
     property bool applying: false
     property string errorMessage: ""
     property bool settingsOpen: false
@@ -130,6 +130,10 @@ FocusScope {
     }
 
     function reload() {
+        if (!Backend.loggedIn) {
+            fetching = false;
+            return;
+        }
         fetching = true;
         errorMessage = "";
         Backend.feature({action: "wave_settings"});
@@ -143,7 +147,23 @@ FocusScope {
 
     Component.onCompleted: {
         selected = Object.assign({}, Backend.waveSettings.selected || {});
-        reload();
+        if (Backend.loggedIn && root.groups.length === 0) {
+            reload();
+        }
+    }
+
+    Connections {
+        target: Backend
+        function onAuthChanged() {
+            if (Backend.loggedIn && root.groups.length === 0 && !root.fetching) {
+                root.reload();
+            }
+        }
+        function onFeaturesChanged() {
+            if (root.groups.length > 0 && root.fetching) {
+                root.fetching = false;
+            }
+        }
     }
 
     BackdropClock {
@@ -861,7 +881,7 @@ FocusScope {
                     SpectrumView {
                         id: ring
                         anchors.fill: parent
-                        Reveal.shown: root.showsRing && (root.wavePlaying || !root.auroraActive)
+                        Reveal.shown: root.showsRing && root.wavePlaying
                         kind: SpectrumView.Ring
                         wave: AppSettings.waveVisualizerShape === "wave"
                         sensitivity: AppSettings.waveVisualizerSensitivity
@@ -898,7 +918,7 @@ FocusScope {
                             squiggleColor: root.accentPrimary
                             dim: coreHover.hovered ? 0.24 : 0.34
                             Behavior on dim { ElementMoveFast {} }
-                            loading: Backend.listLoading || root.applying || !root.inWave
+                            loading: Backend.listLoading || root.applying
                             source: AppSettings.waveOrbArtwork && root.inWave && Backend.hasCover ? Backend.nowCover : ""
                             placeholderSymbol: "my_wave"
                             fallbackKey: Backend.listTitle || "Моя волна"
@@ -994,7 +1014,7 @@ FocusScope {
                                 implicitHeight: 36
                                 implicitWidth: activePillRow.implicitWidth + 24
                                 hoverEnabled: true
-                                enabled: !root.applying && !root.fetching
+                                enabled: !root.applying && (!root.fetching || root.groups.length > 0)
                                 scale: down ? 0.95 : (hovered ? 1.03 : 1)
                                 Behavior on scale { enabled: !Appearance.performanceMode; Bounce {} }
                                 onClicked: root.selectAndApply(modelData.key, "")
@@ -1031,7 +1051,7 @@ FocusScope {
                                 required property var modelData
                                 text: modelData.name
                                 chosen: false
-                                enabled: !root.applying && !root.fetching
+                                enabled: !root.applying && (!root.fetching || root.groups.length > 0)
                                 onClicked: root.selectAndApply(modelData.key, modelData.seed)
                             }
                         }
@@ -1210,7 +1230,7 @@ FocusScope {
                                     Chip {
                                         text: "Любой"
                                         chosen: !root.selected[group.modelData.key]
-                                        enabled: !root.applying && !root.fetching
+                                        enabled: !root.applying && (!root.fetching || root.groups.length > 0)
                                         onClicked: root.select(group.modelData.key, "")
                                     }
 
@@ -1220,7 +1240,7 @@ FocusScope {
                                             required property var modelData
                                             text: modelData.name
                                             chosen: root.selected[group.modelData.key] === modelData.seed
-                                            enabled: !root.applying && !root.fetching
+                                            enabled: !root.applying && (!root.fetching || root.groups.length > 0)
                                             onClicked: root.select(group.modelData.key, modelData.seed)
                                         }
                                     }

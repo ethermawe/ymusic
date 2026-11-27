@@ -933,6 +933,15 @@ Item {
                     ]
                     onActivated: (index) => AppSettings.volumeStep = root.volumeSteps[index]
                 }
+                ConfigSelection {
+                    text: "Раскрытие громкости в плеере"
+                    currentIndex: AppSettings.volumeExpandOnHover ? 0 : 1
+                    segments: [
+                        Segment { text: "При наведении" },
+                        Segment { text: "По клику" }
+                    ]
+                    onActivated: (index) => AppSettings.volumeExpandOnHover = (index === 0)
+                }
             }
 
             ContentSection {

@@ -108,28 +108,6 @@ Item {
         color: Appearance.colors.surfaceContainerHighest
         border.width: 1
         border.color: Qt.alpha(Appearance.colors.primary, Appearance.colors.dark ? 0.28 : 0.22)
-        clip: true
-
-        // Subtle draining accent strip inset inside the pill's flat bottom edge
-        Item {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.leftMargin: card.radius
-            anchors.rightMargin: card.radius
-            anchors.bottomMargin: 3
-            height: 2
-            visible: !Appearance.performanceMode && root.shown
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                radius: 1
-                width: parent.width * root.lifeProgress
-                color: Qt.alpha(Appearance.colors.primary, 0.72)
-            }
-        }
     }
 
     Row {
@@ -137,14 +115,60 @@ Item {
         anchors.centerIn: parent
         spacing: 10
 
-        ShapeIcon {
+        Item {
             anchors.verticalCenter: parent.verticalCenter
-            size: 28
-            iconSize: 16
-            shape: "cookie6"
-            symbol: root.effectiveSymbol
-            color: Appearance.colors.primaryContainer
-            iconColor: Appearance.colors.onPrimaryContainer
+            width: 32
+            height: 32
+
+            Canvas {
+                id: ringCanvas
+                anchors.fill: parent
+                visible: !Appearance.performanceMode && root.shown
+
+                property real progress: root.lifeProgress
+                property color accent: Appearance.colors.primary
+                onProgressChanged: requestPaint()
+                onAccentChanged: requestPaint()
+                onVisibleChanged: if (visible) requestPaint()
+
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    const cx = width / 2
+                    const cy = height / 2
+                    const r = Math.min(cx, cy) - 1.5
+                    const lw = 2.2
+
+                    // Track ring
+                    ctx.beginPath()
+                    ctx.arc(cx, cy, r, 0, Math.PI * 2, false)
+                    ctx.strokeStyle = Qt.alpha(accent, 0.16)
+                    ctx.lineWidth = lw
+                    ctx.stroke()
+
+                    // Active draining arc from 12 o'clock
+                    if (progress > 0.005) {
+                        const start = -Math.PI / 2
+                        const end = start + Math.PI * 2 * Math.max(0, Math.min(1, progress))
+                        ctx.beginPath()
+                        ctx.arc(cx, cy, r, start, end, false)
+                        ctx.strokeStyle = accent
+                        ctx.lineWidth = lw
+                        ctx.lineCap = "round"
+                        ctx.stroke()
+                    }
+                }
+            }
+
+            ShapeIcon {
+                anchors.centerIn: parent
+                size: 24
+                iconSize: 14
+                shape: "cookie6"
+                symbol: root.effectiveSymbol
+                color: Appearance.colors.primaryContainer
+                iconColor: Appearance.colors.onPrimaryContainer
+            }
         }
 
         StyledText {

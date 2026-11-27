@@ -3,10 +3,109 @@ use parking_lot::Mutex;
 use crate::api::Track;
 
 const LIMIT: usize = 100;
+const SEARCH_HISTORY_LIMIT: usize = 15;
 static LOCK: Mutex<()> = Mutex::new(());
+static SEARCH_LOCK: Mutex<()> = Mutex::new(());
 
 fn path() -> Option<std::path::PathBuf> {
-    dirs::data_local_dir().map(|p| p.join("ymusic/history.json"))
+    #[cfg(test)]
+    {
+        return Some(std::env::temp_dir().join("ymusic-unit-test-data/history.json"));
+    }
+    #[cfg(not(test))]
+    {
+        dirs::data_local_dir().map(|p| p.join("ymusic/history.json"))
+    }
+}
+
+fn search_history_path() -> Option<std::path::PathBuf> {
+    #[cfg(test)]
+    {
+        return Some(std::env::temp_dir().join("ymusic-unit-test-data/search_history.json"));
+    }
+    #[cfg(not(test))]
+    {
+        dirs::data_local_dir().map(|p| p.join("ymusic/search_history.json"))
+    }
+}
+
+pub fn load_search_history() -> Vec<String> {
+    let _guard = SEARCH_LOCK.lock();
+    load_search_history_unlocked()
+}
+
+fn load_search_history_unlocked() -> Vec<String> {
+    search_history_path()
+        .and_then(|p| fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice::<Vec<String>>(&b).ok())
+        .map(|items| {
+            let mut deduped = Vec::with_capacity(SEARCH_HISTORY_LIMIT);
+            for raw in items {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let lower = trimmed.to_lowercase();
+                if !deduped.iter().any(|existing: &String| existing.to_lowercase() == lower) {
+                    deduped.push(trimmed.to_string());
+                    if deduped.len() >= SEARCH_HISTORY_LIMIT {
+                        break;
+                    }
+                }
+            }
+            deduped
+        })
+        .unwrap_or_default()
+}
+
+fn record_search_in(items: &mut Vec<String>, query: &str) {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let needle = trimmed.to_lowercase();
+    items.retain(|existing| existing.to_lowercase() != needle);
+    items.insert(0, trimmed.to_string());
+    items.truncate(SEARCH_HISTORY_LIMIT);
+}
+
+fn remove_search_in(items: &mut Vec<String>, query: &str) {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let needle = trimmed.to_lowercase();
+    items.retain(|existing| existing.to_lowercase() != needle);
+}
+
+fn save_search_history_unlocked(items: &[String]) -> std::io::Result<()> {
+    let p = search_history_path().ok_or_else(|| std::io::Error::other("нет каталога данных"))?;
+    fs::create_dir_all(p.parent().unwrap())?;
+    let tmp = p.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_vec(items)?)?;
+    fs::rename(tmp, p)
+}
+
+pub fn record_search_query(query: &str) -> Vec<String> {
+    let _guard = SEARCH_LOCK.lock();
+    let mut items = load_search_history_unlocked();
+    record_search_in(&mut items, query);
+    let _ = save_search_history_unlocked(&items);
+    items
+}
+
+pub fn remove_search_query(query: &str) -> Vec<String> {
+    let _guard = SEARCH_LOCK.lock();
+    let mut items = load_search_history_unlocked();
+    remove_search_in(&mut items, query);
+    let _ = save_search_history_unlocked(&items);
+    items
+}
+
+pub fn clear_search_history() -> Vec<String> {
+    let _guard = SEARCH_LOCK.lock();
+    let _ = save_search_history_unlocked(&[]);
+    Vec::new()
 }
 
 pub fn load() -> Vec<Track> {
@@ -79,5 +178,25 @@ mod tests {
         record_in(&mut tracks, track("90"));
         assert_eq!(tracks[0].id, "90");
         assert_eq!(tracks.iter().filter(|t| t.id == "90").count(), 1);
+    }
+
+    #[test]
+    fn search_history_deduplicates_unicode_bounds_and_removes() {
+        let mut items = Vec::new();
+        for i in 0..20 {
+            record_search_in(&mut items, &format!("Запрос {i}"));
+        }
+        assert_eq!(items.len(), SEARCH_HISTORY_LIMIT);
+        assert_eq!(items[0], "Запрос 19");
+
+        record_search_in(&mut items, "  запрос 12 ");
+        assert_eq!(items[0], "запрос 12");
+        assert_eq!(
+            items.iter().filter(|s| s.to_lowercase() == "запрос 12").count(),
+            1
+        );
+
+        remove_search_in(&mut items, "ЗАПРОС 12");
+        assert!(!items.iter().any(|s| s.to_lowercase() == "запрос 12"));
     }
 }

@@ -16,7 +16,14 @@ const PREBUFFER_BYTES: usize = 96 * 1024;
 const MAX_CACHE_BYTES: u64 = 1024 * 1024 * 1024;
 
 fn cache_root() -> Option<PathBuf> {
-    dirs::cache_dir().map(|d| d.join("ymusic"))
+    #[cfg(test)]
+    {
+        return Some(std::env::temp_dir().join("ymusic-unit-test-cache"));
+    }
+    #[cfg(not(test))]
+    {
+        dirs::cache_dir().map(|d| d.join("ymusic"))
+    }
 }
 
 fn safe_track_id(track_id: &str) -> String {
@@ -32,7 +39,14 @@ pub fn track_path(track_id: &str) -> Option<PathBuf> {
 }
 
 fn offline_root() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|d| d.join("ymusic").join("offline"))
+    #[cfg(test)]
+    {
+        return Some(std::env::temp_dir().join("ymusic-unit-test-offline"));
+    }
+    #[cfg(not(test))]
+    {
+        dirs::data_local_dir().map(|d| d.join("ymusic").join("offline"))
+    }
 }
 
 pub fn offline_bundle_dir(track_id: &str) -> Option<PathBuf> {

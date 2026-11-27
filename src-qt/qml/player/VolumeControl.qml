@@ -56,7 +56,15 @@ Item {
 
         HoverHandler {
             id: pillHover
-            onHoveredChanged: if (!hovered && !slider.pressed) root.expanded = false
+            onHoveredChanged: {
+                if (hovered) {
+                    if (AppSettings.volumeExpandOnHover) {
+                        root.expanded = true
+                    }
+                } else if (!slider.pressed) {
+                    root.expanded = false
+                }
+            }
         }
 
         StyledSlider {

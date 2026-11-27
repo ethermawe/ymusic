@@ -16,6 +16,16 @@ Flickable {
     ScrollBar.vertical: StyledScrollBar { topPadding: 3 + Appearance.sizes.topBarHeight }
     FastWheel { target: root }
 
+    property real lastContentY: 0
+    onVisibleChanged: lastContentY = contentY
+    onContentYChanged: {
+        const dy = contentY - lastContentY;
+        lastContentY = contentY;
+        if (visible && contentHeight > height + 40 && Math.abs(dy) < 400) {
+            UiState.reportScroll(dy, contentY <= originY + 8);
+        }
+    }
+
     readonly property real margin: Appearance.sizes.pageMargin
     readonly property var filterValues: ["all", "track", "album", "artist", "playlist"]
     readonly property bool hasQuery: Backend.searchQuery.trim().length > 0
@@ -98,12 +108,75 @@ Flickable {
 
                 Repeater {
                     model: Backend.searchHistory
-                    delegate: TextButton {
+                    delegate: Rectangle {
+                        id: historyChip
                         required property string modelData
-                        variant: TextButton.Tonal
-                        text: modelData
-                        symbol: "history"
-                        onClicked: Backend.search(modelData)
+                        implicitWidth: chipRow.implicitWidth + 16
+                        height: 34
+                        radius: Appearance.rounding.full
+                        color: chipHover.hovered
+                            ? Appearance.colors.secondaryContainerHover
+                            : Appearance.colors.secondaryContainer
+
+                        Behavior on color { ElementMoveFastColor {} }
+
+                        HoverHandler { id: chipHover }
+
+                        Row {
+                            id: chipRow
+                            anchors.centerIn: parent
+                            spacing: 6
+
+                            Row {
+                                id: chipMain
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 6
+
+                                MaterialSymbol {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "history"
+                                    iconSize: 16
+                                    color: Appearance.colors.onSecondaryContainer
+                                }
+                                StyledText {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: historyChip.modelData
+                                    font.pixelSize: Appearance.fontSize.small
+                                    font.weight: Font.Medium
+                                    color: Appearance.colors.onSecondaryContainer
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: Backend.search(historyChip.modelData)
+                                }
+                            }
+
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 20
+                                height: 20
+                                radius: 10
+                                color: chipRemoveHover.hovered
+                                    ? Qt.alpha(Appearance.colors.onSecondaryContainer, 0.16)
+                                    : "transparent"
+
+                                MaterialSymbol {
+                                    anchors.centerIn: parent
+                                    text: "close"
+                                    iconSize: 14
+                                    color: Appearance.colors.onSecondaryContainer
+                                }
+
+                                HoverHandler { id: chipRemoveHover; cursorShape: Qt.PointingHandCursor }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: Backend.feature({action: "remove_search_history_item", query: historyChip.modelData})
+                                }
+                            }
+                        }
                     }
                 }
             }

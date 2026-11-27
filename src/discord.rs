@@ -509,11 +509,13 @@ fn run(rx: mpsc::Receiver<Cmd>, sink: Option<Arc<dyn EventSink>>) {
         let mut sent = false;
         let mut last_err: Option<String> = None;
 
+        let mut reconnected_in_attempt = false;
         for _attempt in 0..4 {
             if conn.is_none() {
                 match connect_any(&client_ids) {
                     Ok(stream) => {
                         conn = Some(stream);
+                        compat = CompatLevel::Full;
                         connected_at = Some(Instant::now());
                         did_post_connect_resync = false;
                     }
@@ -538,12 +540,16 @@ fn run(rx: mpsc::Receiver<Cmd>, sink: Option<Arc<dyn EventSink>>) {
                     last_err = Some(msg.clone());
                     let is_rejection =
                         msg.contains("Discord отклонил запрос") || msg.contains("неожиданн");
-                    if !is_rejection {
+                    if is_rejection {
+                        if let Some(next_compat) = compat.fallback() {
+                            compat = next_compat;
+                            continue;
+                        }
+                    } else if !reconnected_in_attempt {
+                        // Transient socket drop/timeout: reconnect cleanly without downgrading Listening -> Playing.
+                        reconnected_in_attempt = true;
                         conn = None;
                         connected_at = None;
-                    }
-                    if let Some(next_compat) = compat.fallback() {
-                        compat = next_compat;
                         continue;
                     }
                     conn = None;

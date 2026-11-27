@@ -13,6 +13,7 @@ use crate::audio::{Audio, Event, SourceData};
 use crate::cache;
 use crate::config;
 use crate::discord::Discord;
+use crate::history;
 use crate::lastfm::{Lastfm, LastfmConfig};
 use crate::mpris::{Action as MprisAction, Meta as MprisMeta, Mpris, Status as MprisStatus};
 
@@ -1075,14 +1076,14 @@ mod queue_tests {
             sink: Arc::new(CaptureSink(events.clone())),
         });
 
-        let v1 = core.begin_cached_view(Some("likes"), 2, "Мне нравится".into(), String::new());
+        let v1 = core.begin_cached_view(Some("__test_likes"), 2, "Мне нравится".into(), String::new());
         let _v2 = core.begin_cached_view(None, 7, "Загружено".into(), String::new());
-        let _v3 = core.begin_cached_view(Some("likes"), 2, "Мне нравится".into(), String::new());
+        let _v3 = core.begin_cached_view(Some("__test_likes"), 2, "Мне нравится".into(), String::new());
         events.lock().clear();
 
         let applied = core.apply_cached_view(
             v1,
-            Some("likes"),
+            Some("__test_likes"),
             Some("Мне нравится".into()),
             Some(String::new()),
             Vec::new(),
@@ -1093,6 +1094,7 @@ mod queue_tests {
         assert!(applied);
         assert_eq!(core.state.lock().list.len(), 1);
         assert!(events.lock().iter().any(|(t, j)| *t == EVENT_TRACKS_LOADED && j.contains("\"42\"")));
+        cache::remove_view("__test_likes");
     }
 
     #[test]
@@ -1586,35 +1588,45 @@ impl YMusicCore {
             }
             "play_quick_track" => {
                 let Some(id) = cmd["id"].as_str().filter(|s| !s.is_empty()) else { return };
-                let idx_found = {
+                let query_hint = cmd["query"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+                let (idx_found, fallback_title) = {
                     let mut st = self.state.lock();
                     if let Some(pos) = st.quick_search_tracks.iter().position(|t| t.id == id) {
+                        let title = st.quick_search_tracks[pos].title.clone();
                         st.queue = st.quick_search_tracks.clone();
                         st.wave = None;
                         st.unshuffled_queue = None;
-                        Some(pos)
+                        (Some(pos), Some(title))
                     } else if let Some(api::SearchBest::Track(ref bt)) = st.search_best
                         && bt.id == id
                     {
+                        let title = bt.title.clone();
                         st.queue = vec![bt.clone()];
                         st.wave = None;
                         st.unshuffled_queue = None;
-                        Some(0)
+                        (Some(0), Some(title))
                     } else if let Some(pos) = st.list.iter().position(|t| t.id == id) {
+                        let title = st.list[pos].title.clone();
                         st.queue = st.list.clone();
                         st.wave = None;
                         st.unshuffled_queue = None;
-                        Some(pos)
+                        (Some(pos), Some(title))
                     } else {
-                        None
+                        (None, None)
                     }
                 };
+                if let Some(q) = query_hint.or(fallback_title) {
+                    let history = history::record_search_query(&q);
+                    self.state.lock().search_history = history.clone();
+                    self.send_feature("search_history", serde_json::json!({ "history": history }));
+                }
                 if let Some(index) = idx_found {
                     self.play_index(index, true);
                 }
             }
             "open_search_best" => {
                 let source = cmd["source"].as_str().unwrap_or("search");
+                let query_hint = cmd["query"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
                 let best = {
                     let st = self.state.lock();
                     if source == "suggest" {
@@ -1624,6 +1636,19 @@ impl YMusicCore {
                     }
                 };
                 let Some(best) = best else { return };
+                if source == "suggest" {
+                    let record_term = query_hint.or_else(|| match &best {
+                        api::SearchBest::Track(t) => Some(t.title.clone()),
+                        api::SearchBest::Artist(a) => Some(a.name.clone()),
+                        api::SearchBest::Album(a) => Some(a.title.clone()),
+                        api::SearchBest::Playlist(p) => Some(p.title.clone()),
+                    });
+                    if let Some(q) = record_term {
+                        let history = history::record_search_query(&q);
+                        self.state.lock().search_history = history.clone();
+                        self.send_feature("search_history", serde_json::json!({ "history": history }));
+                    }
+                }
                 match best {
                     api::SearchBest::Track(t) => {
                         {
@@ -1639,8 +1664,16 @@ impl YMusicCore {
                     api::SearchBest::Playlist(p) => self.clone().open_playlist(p.uid, p.kind, p.title),
                 }
             }
+            "remove_search_history_item" => {
+                if let Some(query) = cmd["query"].as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                    let history = history::remove_search_query(query);
+                    self.state.lock().search_history = history.clone();
+                    self.send_feature("search_history", serde_json::json!({ "history": history }));
+                }
+            }
             "clear_search_history" => {
-                self.state.lock().search_history.clear();
+                let history = history::clear_search_history();
+                self.state.lock().search_history = history;
                 self.send_feature("search_history", serde_json::json!({ "history": [] }));
             }
             "search_more" => {
@@ -2027,11 +2060,14 @@ impl YMusicCore {
             st.ai_strict_tracks = settings.ai_strict_tracks;
             st.show_ai_labels = settings.show_ai_labels;
             st.wave_selected = settings.wave_selected.clone();
+            st.search_history = history::load_search_history();
         }
 
+        let initial_search_history = core.state.lock().search_history.clone();
         core.send_playback_state(false);
         core.send_pinned_playlists();
         core.send_view_feature();
+        core.send_feature("search_history", serde_json::json!({"history": initial_search_history}));
         core.send_feature("wave_applied", serde_json::json!({"selected": settings.wave_selected}));
         if let Some(session) = settings.session {
             core.apply_saved_session(session);
@@ -3708,10 +3744,7 @@ impl YMusicCore {
             st.search_loading_more = false;
             st.search_best = None;
             if !query.trim().is_empty() {
-                let trimmed = query.trim().to_string();
-                st.search_history.retain(|item| !item.eq_ignore_ascii_case(&trimmed));
-                st.search_history.insert(0, trimmed);
-                st.search_history.truncate(8);
+                st.search_history = history::record_search_query(&query);
             }
             st.search_history.clone()
         };

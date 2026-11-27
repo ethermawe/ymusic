@@ -84,6 +84,7 @@ class AppSettings : public QObject {
     Q_PROPERTY(bool minimizeToTray READ minimizeToTray WRITE setMinimizeToTray NOTIFY minimizeToTrayChanged)
     Q_PROPERTY(bool burstsEnabled READ burstsEnabled WRITE setBurstsEnabled NOTIFY burstsEnabledChanged)
     Q_PROPERTY(double volumeStep READ volumeStep WRITE setVolumeStep NOTIFY volumeStepChanged)
+    Q_PROPERTY(bool volumeExpandOnHover READ volumeExpandOnHover WRITE setVolumeExpandOnHover NOTIFY volumeExpandOnHoverChanged)
     Q_PROPERTY(bool autoUpdateEnabled READ autoUpdateEnabled WRITE setAutoUpdateEnabled NOTIFY autoUpdateEnabledChanged)
     Q_PROPERTY(QString lastSeenVersion READ lastSeenVersion WRITE setLastSeenVersion NOTIFY lastSeenVersionChanged)
     Q_PROPERTY(bool modsEnabled READ modsEnabled WRITE setModsEnabled NOTIFY modsSettingsChanged)
@@ -192,6 +193,7 @@ public:
     bool minimizeToTray() const { return m_store.value("ui/minimizeToTray", true).toBool(); }
     bool burstsEnabled() const { return m_store.value("ui/burstsEnabled", true).toBool(); }
     double volumeStep() const { return std::clamp(m_store.value("ui/volumeStep", 0.05).toDouble(), 0.01, 0.2); }
+    bool volumeExpandOnHover() const { return m_store.value("ui/volumeExpandOnHover", true).toBool(); }
     bool autoUpdateEnabled() const { return m_store.value("app/autoUpdateEnabled", true).toBool(); }
     QString lastSeenVersion() const { return m_store.value("app/lastSeenVersion", "").toString(); }
     bool modsEnabled() const { return m_store.value("mods/enabled", true).toBool(); }
@@ -527,6 +529,12 @@ public:
             emit volumeStepChanged();
         }
     }
+    void setVolumeExpandOnHover(bool value) {
+        if (value != volumeExpandOnHover()) {
+            save("ui/volumeExpandOnHover", value);
+            emit volumeExpandOnHoverChanged();
+        }
+    }
     void setAutoUpdateEnabled(bool value) {
         if (value != autoUpdateEnabled()) {
             save("app/autoUpdateEnabled", value);
@@ -640,6 +648,7 @@ public:
         emit minimizeToTrayChanged();
         emit burstsEnabledChanged();
         emit volumeStepChanged();
+        emit volumeExpandOnHoverChanged();
         emit themeChanged();
         emit appearanceChanged();
     }
@@ -668,6 +677,7 @@ signals:
     void minimizeToTrayChanged();
     void burstsEnabledChanged();
     void volumeStepChanged();
+    void volumeExpandOnHoverChanged();
     void themeChanged();
     void appearanceChanged();
     void autoUpdateEnabledChanged();
