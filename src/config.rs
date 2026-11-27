@@ -83,8 +83,8 @@ mod linux_keyring {
     use super::{KEYRING_SERVICE, KeyringError, KeyringRead, SecretSlot};
 
     fn entry(slot: SecretSlot) -> Result<Entry, KeyringError> {
-        let store: Arc<Store> = Store::new()
-            .map_err(|e| KeyringError::Unavailable(e.to_string()))?;
+        let store: Arc<Store> =
+            Store::new().map_err(|e| KeyringError::Unavailable(e.to_string()))?;
         let mods = HashMap::from([("label", slot.label)]);
         keyring_core::api::CredentialStoreApi::build(
             store.as_ref(),
@@ -125,7 +125,10 @@ mod linux_keyring {
                 KeyringRead::Unavailable
             }
             Err(err) => {
-                eprintln!("[ymusic::config] keyring get_password ({}): {err}", slot.user);
+                eprintln!(
+                    "[ymusic::config] keyring get_password ({}): {err}",
+                    slot.user
+                );
                 KeyringRead::Unavailable
             }
         }
@@ -190,7 +193,9 @@ mod windows_keyring {
         CredReadW, CredWriteW,
     };
 
-    use super::{KeyringError, KeyringRead, SecretSlot, WIN_CRED_USER, decode_utf16_blob, encode_utf16_le};
+    use super::{
+        KeyringError, KeyringRead, SecretSlot, WIN_CRED_USER, decode_utf16_blob, encode_utf16_le,
+    };
 
     fn to_wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -259,7 +264,9 @@ mod windows_keyring {
         let ok = unsafe { CredWriteW(&cred, 0) };
         if ok == 0 {
             let code = unsafe { GetLastError() };
-            Err(KeyringError::WriteFailed(format!("CredWriteW error {code}")))
+            Err(KeyringError::WriteFailed(format!(
+                "CredWriteW error {code}"
+            )))
         } else {
             Ok(())
         }
@@ -397,7 +404,9 @@ fn save_token_with(
         }
         Err(err) => {
             let reason = err.to_string();
-            eprintln!("[ymusic::config] системный keyring недоступен ({reason}), сохраняю секрет в файл (0600)");
+            eprintln!(
+                "[ymusic::config] системный keyring недоступен ({reason}), сохраняю секрет в файл (0600)"
+            );
             backend.delete();
             write_legacy_token(legacy_path, token)?;
             Ok(TokenSaveOutcome::FileFallback { reason })
@@ -439,7 +448,11 @@ pub fn load_lastfm_session() -> Option<String> {
 
 pub fn save_lastfm_session(session_key: &str) -> io::Result<TokenSaveOutcome> {
     let path = slot_legacy_path(LASTFM_SESSION_SLOT);
-    save_token_with(&PlatformKeyring(LASTFM_SESSION_SLOT), path.as_deref(), session_key)
+    save_token_with(
+        &PlatformKeyring(LASTFM_SESSION_SLOT),
+        path.as_deref(),
+        session_key,
+    )
 }
 
 pub fn clear_lastfm_session() {
@@ -595,12 +608,16 @@ fn settings_path() -> Option<PathBuf> {
 }
 
 pub fn load_settings_from(path: &std::path::Path) -> UserSettings {
-    let Ok(data) = fs::read_to_string(path) else { return UserSettings::default() };
+    let Ok(data) = fs::read_to_string(path) else {
+        return UserSettings::default();
+    };
     serde_json::from_str(&data).unwrap_or_default()
 }
 
 pub fn load_settings() -> UserSettings {
-    let Some(path) = settings_path() else { return UserSettings::default() };
+    let Some(path) = settings_path() else {
+        return UserSettings::default();
+    };
     load_settings_from(&path)
 }
 
@@ -684,7 +701,8 @@ mod token_tests {
     }
 
     fn temp_token_path(name: &str) -> (PathBuf, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("ymusic-cfg-test-{}-{name}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("ymusic-cfg-test-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let file = dir.join("token");
@@ -700,7 +718,10 @@ mod token_tests {
         save_token_with(&kr, Some(&legacy), "y0_fresh").unwrap();
         assert!(!legacy.exists());
         assert_eq!(kr.secret.borrow().as_deref(), Some("y0_fresh"));
-        assert_eq!(load_token_with(&kr, Some(&legacy)).as_deref(), Some("y0_fresh"));
+        assert_eq!(
+            load_token_with(&kr, Some(&legacy)).as_deref(),
+            Some("y0_fresh")
+        );
 
         clear_token_with(&kr, Some(&legacy));
         assert!(kr.secret.borrow().is_none());
@@ -735,7 +756,10 @@ mod token_tests {
             let mode = fs::metadata(&legacy).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode, 0o600);
         }
-        assert_eq!(load_token_with(&kr, Some(&legacy)).as_deref(), Some("y0_fallback"));
+        assert_eq!(
+            load_token_with(&kr, Some(&legacy)).as_deref(),
+            Some("y0_fallback")
+        );
 
         clear_token_with(&kr, Some(&legacy));
         assert!(!legacy.exists());

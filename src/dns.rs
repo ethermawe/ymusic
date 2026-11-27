@@ -1,8 +1,8 @@
 #[cfg(unix)]
 use std::ffi::{CStr, CString};
+use std::net::SocketAddr;
 #[cfg(unix)]
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket};
-use std::net::SocketAddr;
 #[cfg(unix)]
 use std::sync::OnceLock;
 
@@ -37,7 +37,11 @@ fn has_ipv6() -> bool {
 
 #[cfg(unix)]
 fn lookup(host: &str) -> std::io::Result<Vec<SocketAddr>> {
-    let family = if has_ipv6() { libc::AF_UNSPEC } else { libc::AF_INET };
+    let family = if has_ipv6() {
+        libc::AF_UNSPEC
+    } else {
+        libc::AF_INET
+    };
     let mut addrs = getaddrinfo(host, family)?;
     // IPv4 первым: он работает почти везде, IPv6 остаётся запасным
     addrs.sort_by_key(|a| a.is_ipv6());

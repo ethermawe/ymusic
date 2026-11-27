@@ -1,8 +1,11 @@
+use parking_lot::Mutex;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc::{self, RecvTimeoutError}, Arc};
-use parking_lot::Mutex;
+use std::sync::{
+    Arc,
+    mpsc::{self, RecvTimeoutError},
+};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,14 +18,25 @@ use crate::cache::StreamReader;
 pub enum Event {
     Started(u64),
     GaplessTransition(u64),
-    Position { generation: u64, secs: f64, paused: bool },
+    Position {
+        generation: u64,
+        secs: f64,
+        paused: bool,
+    },
     Ended(u64),
     Error(u64, String),
 }
 
 pub enum SourceData {
-    Cached { file: File, len: u64, hint: Option<String> },
-    Stream { reader: StreamReader, hint: Option<String> },
+    Cached {
+        file: File,
+        len: u64,
+        hint: Option<String>,
+    },
+    Stream {
+        reader: StreamReader,
+        hint: Option<String>,
+    },
 }
 
 enum Cmd {
@@ -83,7 +97,11 @@ struct SpectrumRing {
 
 impl Default for SpectrumRing {
     fn default() -> Self {
-        Self { samples: [0.0; RING_SIZE], write_pos: 0, sample_rate: 44100 }
+        Self {
+            samples: [0.0; RING_SIZE],
+            write_pos: 0,
+            sample_rate: 44100,
+        }
     }
 }
 
@@ -114,10 +132,11 @@ impl SpectrumRing {
         }
         mean /= FFT_SIZE as f32;
 
-        for i in 0..FFT_SIZE {
-            let hann = 0.5 * (1.0 - (std::f32::consts::TAU * i as f32 / (FFT_SIZE - 1) as f32).cos());
+        for (i, slot) in buf.iter_mut().enumerate().take(FFT_SIZE) {
+            let hann =
+                0.5 * (1.0 - (std::f32::consts::TAU * i as f32 / (FFT_SIZE - 1) as f32).cos());
             let s = self.samples[(start + i) % RING_SIZE] - mean;
-            buf[i] = (s * hann, 0.0);
+            *slot = (s * hann, 0.0);
         }
         fft_in_place(&mut buf);
 
@@ -129,15 +148,14 @@ impl SpectrumRing {
         let max_bin = FFT_SIZE / 2 - 1;
         let denom = (count.saturating_sub(1)).max(1) as f32;
 
-        for band in 0..count {
+        for (band, slot) in out.iter_mut().enumerate().take(count) {
             let f0 = min_freq * ratio.powf(band as f32 / count as f32);
             let f1 = min_freq * ratio.powf((band + 1) as f32 / count as f32);
             let b0 = ((f0 / bin_hz).floor() as usize).clamp(1, max_bin);
             let b1 = ((f1 / bin_hz).ceil() as usize).clamp(b0, max_bin);
             let mut sum_sq = 0.0f32;
             let mut peak = 0.0f32;
-            for b in b0..=b1 {
-                let (re, im) = buf[b];
+            for &(re, im) in buf.iter().take(b1 + 1).skip(b0) {
                 let mag = (re * re + im * im).sqrt() / (FFT_SIZE as f32 * 0.25);
                 sum_sq += mag * mag;
                 peak = peak.max(mag);
@@ -156,7 +174,7 @@ impl SpectrumRing {
             } else {
                 0.78 + 0.22 * ((raw - 0.78) / 0.22).tanh()
             };
-            out[band] = level.clamp(0.0, 1.0);
+            *slot = level.clamp(0.0, 1.0);
         }
         count
     }
@@ -315,7 +333,11 @@ impl Audio {
             .name("audio".into())
             .spawn(move || run(rx, ring_clone, active_clone, on_event))
             .expect("failed to spawn audio thread");
-        Self { tx, spectrum, spectrum_active }
+        Self {
+            tx,
+            spectrum,
+            spectrum_active,
+        }
     }
 
     pub fn spectrum_levels(&self, out: &mut [f32]) -> usize {
@@ -339,16 +361,33 @@ impl Audio {
     }
 
     pub fn load(&self, generation: u64, data: SourceData, track_gain: f32) {
-        let _ = self.tx.send(Cmd::Load(generation, data, track_gain.clamp(0.1, 2.0)));
+        let _ = self
+            .tx
+            .send(Cmd::Load(generation, data, track_gain.clamp(0.1, 2.0)));
     }
 
     pub fn queue_gapless(&self, generation: u64, data: SourceData, track_gain: f32) {
-        let _ = self.tx.send(Cmd::QueueGapless(generation, data, track_gain.clamp(0.1, 2.0)));
+        let _ = self.tx.send(Cmd::QueueGapless(
+            generation,
+            data,
+            track_gain.clamp(0.1, 2.0),
+        ));
     }
 
-    pub fn crossfade_load(&self, generation: u64, data: SourceData, track_gain: f32, duration: Duration) {
+    pub fn crossfade_load(
+        &self,
+        generation: u64,
+        data: SourceData,
+        track_gain: f32,
+        duration: Duration,
+    ) {
         let clamped = duration.min(Duration::from_secs(12));
-        let _ = self.tx.send(Cmd::CrossfadeLoad(generation, data, track_gain.clamp(0.1, 2.0), clamped));
+        let _ = self.tx.send(Cmd::CrossfadeLoad(
+            generation,
+            data,
+            track_gain.clamp(0.1, 2.0),
+            clamped,
+        ));
     }
 
     #[allow(dead_code)]
@@ -482,7 +521,10 @@ fn run(
     let mut sink = match DeviceSinkBuilder::open_default_sink() {
         Ok(sink) => sink,
         Err(e) => {
-            on_event(Event::Error(0, format!("Не удалось открыть аудиоустройство: {e}")));
+            on_event(Event::Error(
+                0,
+                format!("Не удалось открыть аудиоустройство: {e}"),
+            ));
             return;
         }
     };
@@ -523,7 +565,9 @@ fn run(
         let target_media = target_media.max(0.0);
         let scaled = target_media / f64::from(current_speed.max(0.1));
         if let Err(err) = player.try_seek(Duration::from_secs_f64(scaled)) {
-            eprintln!("[ymusic::audio] try_seek({target_media:.2}s) failed ({err}), attempting reopen fallback");
+            eprintln!(
+                "[ymusic::audio] try_seek({target_media:.2}s) failed ({err}), attempting reopen fallback"
+            );
             if let Some((file, len, hint)) = current_cached
                 && let Ok(mut cloned) = file.try_clone()
             {
@@ -532,7 +576,11 @@ fn run(
                 let mut dummy_stream = None;
                 let mut dummy_backup = None;
                 if let Ok(src) = decode_source(
-                    SourceData::Cached { file: cloned, len: *len, hint: hint.clone() },
+                    SourceData::Cached {
+                        file: cloned,
+                        len: *len,
+                        hint: hint.clone(),
+                    },
                     &mut dummy_stream,
                     &mut dummy_backup,
                 ) {
@@ -540,7 +588,11 @@ fn run(
                     player.clear();
                     let skipped = src.skip_duration(Duration::from_secs_f64(target_media));
                     media_pos_us.store((target_media * 1_000_000.0) as u64, Ordering::Relaxed);
-                    player.append(SpectrumTap::new(skipped, spectrum.clone(), media_pos_us.clone()));
+                    player.append(SpectrumTap::new(
+                        skipped,
+                        spectrum.clone(),
+                        media_pos_us.clone(),
+                    ));
                     if was_paused {
                         player.pause();
                     } else {
@@ -552,13 +604,14 @@ fn run(
     };
 
     loop {
-        let tick = if crossfade.is_some() || (fade_in_remaining > 0 && active && !player.is_paused()) {
-            FADE_IN_TICK
-        } else if active && !player.is_paused() {
-            Duration::from_millis(50)
-        } else {
-            Duration::from_millis(250)
-        };
+        let tick =
+            if crossfade.is_some() || (fade_in_remaining > 0 && active && !player.is_paused()) {
+                FADE_IN_TICK
+            } else if active && !player.is_paused() {
+                Duration::from_millis(50)
+            } else {
+                Duration::from_millis(250)
+            };
         match rx.recv_timeout(tick) {
             Ok(Cmd::Load(new_generation, data, new_gain)) => {
                 if crossfade.take().is_some() {
@@ -607,7 +660,11 @@ fn run(
                 let mut next_stream = None;
                 let mut next_cached = None;
                 if let Ok(src) = decode_source(data, &mut next_stream, &mut next_cached) {
-                    player.append(SpectrumTap::new(src, spectrum.clone(), media_pos_us.clone()));
+                    player.append(SpectrumTap::new(
+                        src,
+                        spectrum.clone(),
+                        media_pos_us.clone(),
+                    ));
                     pending_gapless_gen = Some((next_gen, next_gain));
                 }
             }
@@ -619,7 +676,11 @@ fn run(
                     generation = new_generation;
                     track_gain = new_gain;
                     if let Ok(src) = decode_source(data, &mut stream, &mut current_cached) {
-                        player.append(SpectrumTap::new(src, spectrum.clone(), media_pos_us.clone()));
+                        player.append(SpectrumTap::new(
+                            src,
+                            spectrum.clone(),
+                            media_pos_us.clone(),
+                        ));
                         current_volume = effective_target(target_volume, sleep_fade, track_gain);
                         player.set_volume(current_volume);
                         player.play();
@@ -642,7 +703,11 @@ fn run(
                         Ok(src) => {
                             player.set_speed(current_speed);
                             player.set_volume(0.0);
-                            player.append(SpectrumTap::new(src, spectrum.clone(), media_pos_us.clone()));
+                            player.append(SpectrumTap::new(
+                                src,
+                                spectrum.clone(),
+                                media_pos_us.clone(),
+                            ));
                             player.play();
                             let to_vol = effective_target(target_volume, sleep_fade, track_gain);
                             crossfade = Some(CrossfadeState {
@@ -659,7 +724,10 @@ fn run(
                             outgoing_player.clear();
                             release(&mut outgoing_stream);
                             active = false;
-                            on_event(Event::Error(generation, format!("Не удалось декодировать трек: {e}")));
+                            on_event(Event::Error(
+                                generation,
+                                format!("Не удалось декодировать трек: {e}"),
+                            ));
                         }
                     }
                 }
@@ -698,11 +766,25 @@ fn run(
                 }
             }
             Ok(Cmd::Seek(secs)) if active => {
-                seek_with_fallback(&player, secs, current_speed, &current_cached, &spectrum, &media_pos_us);
+                seek_with_fallback(
+                    &player,
+                    secs,
+                    current_speed,
+                    &current_cached,
+                    &spectrum,
+                    &media_pos_us,
+                );
             }
             Ok(Cmd::SeekRelative(delta)) if active => {
                 let cur = media_pos_us.load(Ordering::Relaxed) as f64 / 1_000_000.0;
-                seek_with_fallback(&player, cur + delta, current_speed, &current_cached, &spectrum, &media_pos_us);
+                seek_with_fallback(
+                    &player,
+                    cur + delta,
+                    current_speed,
+                    &current_cached,
+                    &spectrum,
+                    &media_pos_us,
+                );
             }
             Ok(Cmd::Volume(v)) => {
                 target_volume = v;
@@ -752,7 +834,8 @@ fn run(
         }
 
         if let Some(ref cf) = crossfade {
-            let t = (cf.started_at.elapsed().as_secs_f32() / cf.duration.as_secs_f32().max(0.05)).clamp(0.0, 1.0);
+            let t = (cf.started_at.elapsed().as_secs_f32() / cf.duration.as_secs_f32().max(0.05))
+                .clamp(0.0, 1.0);
             let (out_g, in_g) = crossfade_gain_curve(t);
             outgoing_player.set_volume(cf.from_vol * out_g);
             current_volume = cf.to_vol * in_g;
@@ -831,7 +914,10 @@ mod spectrum_tests {
         assert_eq!(n, SPECTRUM_BANDS);
         let bass_peak = bands[0..8].iter().copied().fold(0.0f32, f32::max);
         let high_peak = bands[30..42].iter().copied().fold(0.0f32, f32::max);
-        assert!(bass_peak > 0.45 && bass_peak < 0.92, "bass_peak={bass_peak}");
+        assert!(
+            bass_peak > 0.45 && bass_peak < 0.92,
+            "bass_peak={bass_peak}"
+        );
         assert!(high_peak > 0.25, "high_peak={high_peak}");
     }
 
@@ -885,7 +971,9 @@ mod spectrum_tests {
             std::num::NonZero::new(self.sample_rate).unwrap()
         }
         fn total_duration(&self) -> Option<Duration> {
-            Some(Duration::from_secs_f64(self.total_frames as f64 / f64::from(self.sample_rate)))
+            Some(Duration::from_secs_f64(
+                self.total_frames as f64 / f64::from(self.sample_rate),
+            ))
         }
         fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
             let target = (pos.as_secs_f64() * f64::from(self.sample_rate)).round() as u64;

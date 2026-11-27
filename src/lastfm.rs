@@ -1,8 +1,8 @@
+use parking_lot::Mutex;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use parking_lot::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::Client;
@@ -92,7 +92,7 @@ impl ActiveTrackState {
             return None;
         }
         let target = if self.duration_secs > 0.0 {
-            (self.duration_secs * 0.5).min(240.0).max(30.0)
+            (self.duration_secs * 0.5).clamp(30.0, 240.0)
         } else {
             120.0
         };
@@ -200,7 +200,10 @@ impl Lastfm {
                 love_on_like: settings.lastfm_love_on_like,
                 skip_ai: settings.lastfm_skip_ai,
                 custom_api_key: settings.lastfm_custom_api_key.clone().unwrap_or_default(),
-                custom_api_secret: settings.lastfm_custom_api_secret.clone().unwrap_or_default(),
+                custom_api_secret: settings
+                    .lastfm_custom_api_secret
+                    .clone()
+                    .unwrap_or_default(),
             };
             st.session_key = session;
             st.username = settings.lastfm_username.clone();
@@ -422,7 +425,9 @@ impl Lastfm {
         let (rt, http, creds, sk, np) = {
             let mut guard = self.inner.lock();
             let st = &mut *guard;
-            let Some(active) = st.active.as_mut() else { return };
+            let Some(active) = st.active.as_mut() else {
+                return;
+            };
             active.started_ts = unix_now();
             active.accumulated_play_secs = 0.0;
             active.last_pos_secs = Some(0.0);
@@ -435,8 +440,12 @@ impl Lastfm {
                 return;
             }
             let Some(rt) = st.rt.clone() else { return };
-            let Some(creds) = resolve_credentials(&st.config) else { return };
-            let Some(sk) = st.session_key.clone() else { return };
+            let Some(creds) = resolve_credentials(&st.config) else {
+                return;
+            };
+            let Some(sk) = st.session_key.clone() else {
+                return;
+            };
             active.now_playing_sent = true;
             let req = (
                 active.artist.clone(),
@@ -474,7 +483,12 @@ impl Lastfm {
             }
 
             // If resume/unpause happened without a fresh Started event, still send NowPlaying once.
-            if !paused && send_np && !active.now_playing_sent && !active.artist.is_empty() && !active.title.is_empty() {
+            if !paused
+                && send_np
+                && !active.now_playing_sent
+                && !active.artist.is_empty()
+                && !active.title.is_empty()
+            {
                 active.now_playing_sent = true;
                 if let (Some(rt), Some(creds), Some(sk)) = (
                     st.rt.clone(),
@@ -531,8 +545,12 @@ impl Lastfm {
                 return;
             }
             let Some(rt) = st.rt.clone() else { return };
-            let Some(creds) = resolve_credentials(&st.config) else { return };
-            let Some(sk) = st.session_key.clone() else { return };
+            let Some(creds) = resolve_credentials(&st.config) else {
+                return;
+            };
+            let Some(sk) = st.session_key.clone() else {
+                return;
+            };
             let artist = track
                 .artist_links
                 .first()
@@ -564,8 +582,12 @@ impl Lastfm {
                 return;
             }
             let Some(rt) = st.rt.clone() else { return };
-            let Some(creds) = resolve_credentials(&st.config) else { return };
-            let Some(sk) = st.session_key.clone() else { return };
+            let Some(creds) = resolve_credentials(&st.config) else {
+                return;
+            };
+            let Some(sk) = st.session_key.clone() else {
+                return;
+            };
             st.flushing = true;
             let count = st.pending.len().min(50);
             (rt, st.http.clone(), creds, sk, st.pending[..count].to_vec())
@@ -656,15 +678,28 @@ struct Credentials {
 }
 
 fn builtin_credentials() -> Option<Credentials> {
-    let compile_key = option_env!("LASTFM_API_KEY").map(str::trim).filter(|s| !s.is_empty());
-    let compile_secret = option_env!("LASTFM_API_SECRET").map(str::trim).filter(|s| !s.is_empty());
+    let compile_key = option_env!("LASTFM_API_KEY")
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let compile_secret = option_env!("LASTFM_API_SECRET")
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
-    let runtime_key = std::env::var("LASTFM_API_KEY").ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let runtime_secret = std::env::var("LASTFM_API_SECRET").ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let runtime_key = std::env::var("LASTFM_API_KEY")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let runtime_secret = std::env::var("LASTFM_API_SECRET")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
     let api_key = runtime_key.or_else(|| compile_key.map(str::to_string))?;
     let api_secret = runtime_secret.or_else(|| compile_secret.map(str::to_string))?;
-    Some(Credentials { api_key, api_secret })
+    Some(Credentials {
+        api_key,
+        api_secret,
+    })
 }
 
 fn resolve_credentials(cfg: &LastfmConfig) -> Option<Credentials> {
@@ -687,7 +722,11 @@ fn build_default_status(st: &Inner) -> String {
         return "Нужны API Key и Secret".to_string();
     }
     if st.session_key.is_some() {
-        let user = st.username.as_deref().filter(|s| !s.is_empty()).unwrap_or("подключён");
+        let user = st
+            .username
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("подключён");
         if !st.config.enabled {
             return format!("{user} (скробблинг отключён)");
         }

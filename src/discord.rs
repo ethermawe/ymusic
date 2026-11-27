@@ -218,6 +218,7 @@ fn is_track_visible(config: &DiscordConfig, current: Option<&TrackInfo>, status:
         && (status == Status::Playing || (status == Status::Paused && config.show_when_paused))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_cmd(
     cmd: Cmd,
     config: &mut DiscordConfig,
@@ -1043,11 +1044,23 @@ mod tests {
     fn compat_fallback_strips_newer_fields() {
         let cfg = DiscordConfig::default();
         let t = track();
-        let b = build_activity(&t, Status::Playing, 1000.0, CompatLevel::ListeningBasic, &cfg);
+        let b = build_activity(
+            &t,
+            Status::Playing,
+            1000.0,
+            CompatLevel::ListeningBasic,
+            &cfg,
+        );
         assert_eq!(b["type"], 2);
         assert!(b.get("status_display_type").is_none());
 
-        let c = build_activity(&t, Status::Playing, 1000.0, CompatLevel::PlayingCompat, &cfg);
+        let c = build_activity(
+            &t,
+            Status::Playing,
+            1000.0,
+            CompatLevel::PlayingCompat,
+            &cfg,
+        );
         assert_eq!(c["type"], 0);
         assert!(c.get("buttons").is_some());
 

@@ -39,7 +39,10 @@ pub fn read_embedded_payload(exe_path: &Path) -> io::Result<Option<EmbeddedPaylo
     let meta_len = u32::from_le_bytes(footer[0..4].try_into().unwrap()) as u64;
     let payload_len = u64::from_le_bytes(footer[4..12].try_into().unwrap());
 
-    if meta_len == 0 || meta_len > 1024 * 1024 || payload_len + meta_len + TRAILER_FIXED_LEN > total_len {
+    if meta_len == 0
+        || meta_len > 1024 * 1024
+        || payload_len + meta_len + TRAILER_FIXED_LEN > total_len
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Corrupted installer payload trailer",
@@ -199,8 +202,8 @@ pub fn write_packed_installer(
         file_count,
         total_bytes,
     };
-    let meta_json = serde_json::to_vec(&metadata)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let meta_json =
+        serde_json::to_vec(&metadata).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     let mut out = File::create(output_path)?;
     out.write_all(&stub_bytes)?;
@@ -284,7 +287,9 @@ mod tests {
         assert_eq!(meta.version, "0.3.0");
         assert_eq!(meta.file_count, 2);
 
-        let read_back = read_embedded_payload(&packed).unwrap().expect("payload missing");
+        let read_back = read_embedded_payload(&packed)
+            .unwrap()
+            .expect("payload missing");
         assert_eq!(read_back.offset, 22);
         assert_eq!(read_back.metadata.version, "0.3.0");
 
@@ -295,7 +300,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(reported.len(), 2);
-        assert_eq!(fs::read(dst.join("ymusic.exe")).unwrap(), b"binary-data-12345");
+        assert_eq!(
+            fs::read(dst.join("ymusic.exe")).unwrap(),
+            b"binary-data-12345"
+        );
         assert_eq!(
             fs::read_to_string(dst.join("qml/Main.qml")).unwrap(),
             "import QtQuick\nItem {}\n"

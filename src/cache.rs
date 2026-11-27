@@ -1,9 +1,9 @@
+use parking_lot::{Condvar, Mutex};
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use parking_lot::{Condvar, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use reqwest::Client;
@@ -29,7 +29,13 @@ fn cache_root() -> Option<PathBuf> {
 fn safe_track_id(track_id: &str) -> String {
     track_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -98,16 +104,22 @@ pub fn is_offline(track_id: &str) -> bool {
 /// Автоматически мигрирует старые плоские файлы `<md5>.mp3` + `<md5>.json` в пакеты `<track_id>/`.
 pub fn migrate_legacy_offline_files() {
     let Some(root) = offline_root() else { return };
-    let Ok(entries) = fs::read_dir(&root) else { return };
+    let Ok(entries) = fs::read_dir(&root) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_file() || path.extension().is_none_or(|ext| ext != "json") {
             continue;
         }
         let Ok(data) = fs::read(&path) else { continue };
-        let Ok(track) = serde_json::from_slice::<crate::api::Track>(&data) else { continue };
+        let Ok(track) = serde_json::from_slice::<crate::api::Track>(&data) else {
+            continue;
+        };
         let legacy_mp3 = path.with_extension("mp3");
-        let Some(bundle_dir) = offline_bundle_dir(&track.id) else { continue };
+        let Some(bundle_dir) = offline_bundle_dir(&track.id) else {
+            continue;
+        };
         if fs::create_dir_all(&bundle_dir).is_err() {
             continue;
         }
@@ -127,23 +139,32 @@ pub fn migrate_legacy_offline_files() {
 }
 
 pub fn save_offline_metadata(track: &crate::api::Track) -> Result<()> {
-    let path = offline_metadata_path(&track.id).ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?;
+    let path =
+        offline_metadata_path(&track.id).ok_or_else(|| anyhow::anyhow!("нет каталога данных"))?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     static SEQ: AtomicU64 = AtomicU64::new(0);
-    let tmp = path.with_extension(format!("{}-{}.json.tmp", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+    let tmp = path.with_extension(format!(
+        "{}-{}.json.tmp",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     fs::write(&tmp, serde_json::to_vec_pretty(track)?)?;
     fs::rename(tmp, path)?;
     Ok(())
 }
 
 pub async fn download_offline_cover(http: &Client, track: &crate::api::Track) {
-    let Some(cover_dest) = offline_cover_path(&track.id) else { return };
+    let Some(cover_dest) = offline_cover_path(&track.id) else {
+        return;
+    };
     if fs::metadata(&cover_dest).is_ok_and(|m| m.is_file() && m.len() > 128) {
         return;
     }
-    let Some(url) = track.cover_url(400) else { return };
+    let Some(url) = track.cover_url(400) else {
+        return;
+    };
     if let Some(parent) = cover_dest.parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
@@ -172,10 +193,18 @@ pub fn offline_tracks() -> Result<(Vec<crate::api::Track>, u64)> {
         if entry_path.is_dir() {
             let meta_path = entry_path.join("metadata.json");
             let audio_path = entry_path.join("audio.mp3");
-            let Ok(data) = fs::read(&meta_path) else { continue };
-            let Ok(mut track) = serde_json::from_slice::<crate::api::Track>(&data) else { continue };
-            let Ok(meta) = fs::metadata(&audio_path) else { continue };
-            if meta.len() <= 1024 { continue; }
+            let Ok(data) = fs::read(&meta_path) else {
+                continue;
+            };
+            let Ok(mut track) = serde_json::from_slice::<crate::api::Track>(&data) else {
+                continue;
+            };
+            let Ok(meta) = fs::metadata(&audio_path) else {
+                continue;
+            };
+            if meta.len() <= 1024 {
+                continue;
+            }
             size += meta.len();
             track.available = true;
             tracks.push(track);
@@ -200,21 +229,31 @@ pub fn recover_offline_metadata(known: &[crate::api::Track]) {
                 let _ = fs::rename(&legacy_mp3, &new_audio);
             }
         }
-        if is_offline(&track.id)
-            && offline_metadata_path(&track.id).is_some_and(|p| !p.exists())
-        {
+        if is_offline(&track.id) && offline_metadata_path(&track.id).is_some_and(|p| !p.exists()) {
             let _ = save_offline_metadata(track);
         }
     }
-    for track in known { recover(track); }
-    let Some(dir) = cache_root().map(|p| p.join("views")) else { return };
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    for track in known {
+        recover(track);
+    }
+    let Some(dir) = cache_root().map(|p| p.join("views")) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
-        let Ok(bytes) = fs::read(entry.path()) else { continue };
-        let Ok(view) = serde_json::from_slice::<serde_json::Value>(&bytes) else { continue };
+        let Ok(bytes) = fs::read(entry.path()) else {
+            continue;
+        };
+        let Ok(view) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            continue;
+        };
         if let Some(tracks) = view.get("tracks").and_then(|v| v.as_array()) {
             for value in tracks {
-                if let Ok(track) = serde_json::from_value::<crate::api::Track>(value.clone()) { recover(&track); }
+                if let Ok(track) = serde_json::from_value::<crate::api::Track>(value.clone()) {
+                    recover(&track);
+                }
             }
         }
     }
@@ -244,7 +283,9 @@ fn view_cache_path(key: &str) -> Option<PathBuf> {
 }
 
 pub fn save_view<T: Serialize>(key: &str, value: &T) {
-    let Some(path) = view_cache_path(key) else { return };
+    let Some(path) = view_cache_path(key) else {
+        return;
+    };
     let Some(dir) = path.parent() else { return };
     if fs::create_dir_all(dir).is_err() {
         return;
@@ -261,7 +302,9 @@ pub fn load_view<T: DeserializeOwned>(key: &str) -> Option<T> {
 }
 
 pub fn remove_view(key: &str) {
-    if let Some(path) = view_cache_path(key) { let _ = fs::remove_file(path); }
+    if let Some(path) = view_cache_path(key) {
+        let _ = fs::remove_file(path);
+    }
 }
 
 pub fn read_cached_cover(url: &str) -> Option<Vec<u8>> {
@@ -328,7 +371,9 @@ pub fn is_track_cached(track_id: &str) -> bool {
 }
 
 pub fn save_track(track_id: &str, bytes: &[u8]) {
-    let Some(path) = track_path(track_id) else { return };
+    let Some(path) = track_path(track_id) else {
+        return;
+    };
     let Some(dir) = path.parent() else { return };
     if fs::create_dir_all(dir).is_err() {
         return;
@@ -364,14 +409,24 @@ pub async fn download_to_file(http: &Client, url: &str, path: &std::path::Path) 
         tokio::fs::create_dir_all(parent).await?;
     }
     static SEQ: AtomicU64 = AtomicU64::new(0);
-    let tmp = path.with_extension(format!("{}-{}.part", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+    let tmp = path.with_extension(format!(
+        "{}-{}.part",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     // Also remove an unfinished download if its async task is cancelled.
     struct PartialFile(PathBuf);
     impl Drop for PartialFile {
-        fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
     }
     let _partial = PartialFile(tmp.clone());
-    let mut file = tokio::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).await?;
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .await?;
     let mut received = 0u64;
     while let Some(chunk) = response.chunk().await? {
         received += chunk.len() as u64;
@@ -379,7 +434,10 @@ pub async fn download_to_file(http: &Client, url: &str, path: &std::path::Path) 
         file.write_all(&chunk).await?;
     }
     anyhow::ensure!(received > 1024, "сервер вернул пустой аудиофайл");
-    anyhow::ensure!(expected.is_none_or(|n| n == received), "аудиофайл загружен не полностью");
+    anyhow::ensure!(
+        expected.is_none_or(|n| n == received),
+        "аудиофайл загружен не полностью"
+    );
     file.flush().await?;
     file.sync_all().await?;
     drop(file);
@@ -388,11 +446,15 @@ pub async fn download_to_file(http: &Client, url: &str, path: &std::path::Path) 
 }
 
 pub fn trim_track_cache() {
-    if let Some(dir) = cache_root().map(|p| p.join("tracks")) { trim_cache(&dir); }
+    if let Some(dir) = cache_root().map(|p| p.join("tracks")) {
+        trim_cache(&dir);
+    }
 }
 
 pub fn clear_track_cache() {
-    let Some(dir) = cache_root().map(|p| p.join("tracks")) else { return };
+    let Some(dir) = cache_root().map(|p| p.join("tracks")) else {
+        return;
+    };
     if let Ok(rd) = fs::read_dir(&dir) {
         for entry in rd.flatten() {
             let _ = fs::remove_file(entry.path());
@@ -408,10 +470,21 @@ mod download_tests {
     fn offline_metadata_round_trip_and_removal() {
         let id = format!("offline-test-{}", std::process::id());
         let track = crate::api::Track {
-            id: id.clone(), title: "Offline test".into(), artists: "Test artist".into(),
-            album_id: None, album_title: String::new(), artist_id: None, artist_links: Vec::new(),
-            duration_ms: 1000, cover_uri: None, available: false,
-            has_sync_lyrics: false, has_text_lyrics: false, r128_i: None, r128_tp: None, is_ai: false,
+            id: id.clone(),
+            title: "Offline test".into(),
+            artists: "Test artist".into(),
+            album_id: None,
+            album_title: String::new(),
+            artist_id: None,
+            artist_links: Vec::new(),
+            duration_ms: 1000,
+            cover_uri: None,
+            available: false,
+            has_sync_lyrics: false,
+            has_text_lyrics: false,
+            r128_i: None,
+            r128_tp: None,
+            is_ai: false,
         };
         let path = offline_track_path(&id).unwrap();
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -437,13 +510,24 @@ mod download_tests {
             let (mut socket, _) = listener.accept().unwrap();
             let mut request = [0; 4096];
             let _ = socket.read(&mut request);
-            write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n").unwrap();
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
             socket.write_all(&body).unwrap();
         });
         static SEQ: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!("ymusic-download-test-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        let dir = std::env::temp_dir().join(format!(
+            "ymusic-download-test-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         fs::create_dir_all(&dir).unwrap();
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let client = Client::builder().no_proxy().build().unwrap();
         let result = runtime.block_on(download_to_file(&client, &url, &dir.join("track.mp3")));
         server.join().unwrap();
@@ -528,8 +612,10 @@ pub async fn fetch_cover(http: &Client, url: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn trim_cache(dir: & std::path::Path) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+fn trim_cache(dir: &std::path::Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     let mut files = Vec::new();
     let mut total = 0u64;
     for entry in entries.flatten() {
@@ -759,10 +845,10 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
                             if let Some((tmp, path, mut f)) = disk_cache_file.take() {
                                 let _ = f.flush();
                                 drop(f);
-                                if fs::rename(&tmp, &path).is_ok() {
-                                    if let Some(dir) = path.parent() {
-                                        trim_cache(dir);
-                                    }
+                                if fs::rename(&tmp, &path).is_ok()
+                                    && let Some(dir) = path.parent()
+                                {
+                                    trim_cache(dir);
                                 }
                             }
                             break;
@@ -797,11 +883,10 @@ pub async fn stream_track(http: Client, url: String, track_id: String) -> Result
                             .header(reqwest::header::RANGE, format!("bytes={offset}-"))
                             .send()
                             .await
+                            && r.status() == reqwest::StatusCode::PARTIAL_CONTENT
                         {
-                            if r.status() == reqwest::StatusCode::PARTIAL_CONTENT {
-                                resumed = Some(r);
-                                break;
-                            }
+                            resumed = Some(r);
+                            break;
                         }
                     }
                     if let Some(new_resp) = resumed {

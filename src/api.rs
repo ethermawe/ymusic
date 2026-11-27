@@ -62,7 +62,10 @@ impl Track {
 
     /// Коэффициент громкости по стандарту EBU R128 (целевой уровень -14 LUFS с защитой от клиппинга по True Peak).
     pub fn r128_gain(&self) -> f32 {
-        let Some(integrated) = self.r128_i.filter(|v| v.is_finite() && *v < 0.0 && *v > -70.0) else {
+        let Some(integrated) = self
+            .r128_i
+            .filter(|v| v.is_finite() && *v < 0.0 && *v > -70.0)
+        else {
             return 1.0;
         };
         let target_lufs = -14.0f32;
@@ -76,18 +79,19 @@ impl Track {
 }
 
 pub fn cover_url(uri: Option<&str>, size: u32) -> Option<String> {
-    uri.map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|u| {
-            let sized = u.replace("%%", &format!("{size}x{size}"));
-            if sized.starts_with("https://") || sized.starts_with("http://") || sized.starts_with("file://") {
-                sized
-            } else if sized.starts_with("//") {
-                format!("https:{sized}")
-            } else {
-                format!("https://{}", sized.trim_start_matches('/'))
-            }
-        })
+    uri.map(str::trim).filter(|s| !s.is_empty()).map(|u| {
+        let sized = u.replace("%%", &format!("{size}x{size}"));
+        if sized.starts_with("https://")
+            || sized.starts_with("http://")
+            || sized.starts_with("file://")
+        {
+            sized
+        } else if sized.starts_with("//") {
+            format!("https:{sized}")
+        } else {
+            format!("https://{}", sized.trim_start_matches('/'))
+        }
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -418,31 +422,32 @@ impl Api {
             .or(acc["default_avatar_id"].as_str())
             .or(r["default_avatar_id"].as_str())
             .or(r["defaultAvatarId"].as_str());
-        if let Some(id) = avatar_id {
-            if !id.is_empty() && id != "0/0-0" {
-                avatar_url = Some(format!("https://avatars.yandex.net/get-yapic/{id}/islands-200"));
-            }
+        if let Some(id) = avatar_id
+            && !id.is_empty()
+            && id != "0/0-0"
+        {
+            avatar_url = Some(format!(
+                "https://avatars.yandex.net/get-yapic/{id}/islands-200"
+            ));
         }
-        if avatar_url.is_none() {
-            if let Some(uri) = acc["avatarUrl"]
+        if avatar_url.is_none()
+            && let Some(uri) = acc["avatarUrl"]
                 .as_str()
                 .or(acc["avatar"].as_str())
                 .or(r["avatarUrl"].as_str())
-            {
-                if !uri.is_empty() {
-                    let full = if uri.starts_with("//") {
-                        format!("https:{uri}")
-                    } else if !uri.starts_with("http") {
-                        format!("https://{uri}")
-                    } else {
-                        uri.to_string()
-                    };
-                    avatar_url = Some(full.replace("%%", "200x200"));
-                }
-            }
+            && !uri.is_empty()
+        {
+            let full = if uri.starts_with("//") {
+                format!("https:{uri}")
+            } else if !uri.starts_with("http") {
+                format!("https://{uri}")
+            } else {
+                uri.to_string()
+            };
+            avatar_url = Some(full.replace("%%", "200x200"));
         }
-        if avatar_url.is_none() {
-            if let Ok(resp) = self
+        if avatar_url.is_none()
+            && let Ok(resp) = self
                 .auth(
                     self.http
                         .get("https://login.yandex.ru/info?format=json")
@@ -450,39 +455,42 @@ impl Api {
                 )
                 .send()
                 .await
+            && let Ok(info) = resp.json::<Value>().await
+        {
+            let is_empty = info["is_avatar_empty"].as_bool().unwrap_or(false);
+            if !is_empty
+                && let Some(id) = info["default_avatar_id"].as_str()
+                && !id.is_empty()
+                && id != "0/0-0"
             {
-                if let Ok(info) = resp.json::<Value>().await {
-                    let is_empty = info["is_avatar_empty"].as_bool().unwrap_or(false);
-                    if !is_empty {
-                        if let Some(id) = info["default_avatar_id"].as_str() {
-                            if !id.is_empty() && id != "0/0-0" {
-                                avatar_url = Some(format!(
-                                    "https://avatars.yandex.net/get-yapic/{id}/islands-200"
-                                ));
-                            }
-                        }
-                    }
-                }
+                avatar_url = Some(format!(
+                    "https://avatars.yandex.net/get-yapic/{id}/islands-200"
+                ));
             }
         }
-        if avatar_url.is_none() {
-            if let Ok(user_info) = self.get(&format!("/users/{uid}"), &[]).await {
-                let u = &user_info["user"];
-                let id = u["defaultAvatarId"]
-                    .as_str()
-                    .or(u["default_avatar_id"].as_str())
-                    .or(user_info["defaultAvatarId"].as_str());
-                if let Some(id) = id {
-                    if !id.is_empty() && id != "0/0-0" {
-                        avatar_url = Some(format!(
-                            "https://avatars.yandex.net/get-yapic/{id}/islands-200"
-                        ));
-                    }
-                }
+        if avatar_url.is_none()
+            && let Ok(user_info) = self.get(&format!("/users/{uid}"), &[]).await
+        {
+            let u = &user_info["user"];
+            let id = u["defaultAvatarId"]
+                .as_str()
+                .or(u["default_avatar_id"].as_str())
+                .or(user_info["defaultAvatarId"].as_str());
+            if let Some(id) = id
+                && !id.is_empty()
+                && id != "0/0-0"
+            {
+                avatar_url = Some(format!(
+                    "https://avatars.yandex.net/get-yapic/{id}/islands-200"
+                ));
             }
         }
 
-        Ok(Account { uid, name, avatar_url })
+        Ok(Account {
+            uid,
+            name,
+            avatar_url,
+        })
     }
 
     /// Возвращает список `(track_id, composite_id)` лайкнутых треков.
@@ -559,9 +567,7 @@ impl Api {
         let r = self
             .get(&format!("/users/{uid}/dislikes/tracks"), &[])
             .await?;
-        let arr = r["library"]["tracks"]
-            .as_array()
-            .or_else(|| r.as_array());
+        let arr = r["library"]["tracks"].as_array().or_else(|| r.as_array());
         Ok(arr
             .map(|items| {
                 items
@@ -614,7 +620,10 @@ impl Api {
             }
             let joined = chunk.join(",");
             let r = self
-                .post_form("/tracks", &[("track-ids", &joined), ("with-positions", "false")])
+                .post_form(
+                    "/tracks",
+                    &[("track-ids", &joined), ("with-positions", "false")],
+                )
                 .await?;
             if let Some(items) = r.as_array() {
                 let parsed: Vec<Track> = items.iter().filter_map(parse_track).collect();
@@ -652,7 +661,12 @@ impl Api {
             .as_array()
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|v| v.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string))
+                    .filter_map(|v| {
+                        v.as_str()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string)
+                    })
                     .take(8)
                     .collect()
             })
@@ -675,7 +689,9 @@ impl Api {
         if let Some(blocks) = r["blocks"].as_array() {
             for block in blocks {
                 let btype = block["type"].as_str().unwrap_or("");
-                let Some(entities) = block["entities"].as_array() else { continue };
+                let Some(entities) = block["entities"].as_array() else {
+                    continue;
+                };
                 match btype {
                     "personal-playlists" => {
                         for ent in entities {
@@ -748,8 +764,16 @@ impl Api {
         self.search_filtered_page(text, filter, 0).await
     }
 
-    pub async fn search_filtered_page(&self, text: &str, filter: &str, page: u32) -> Result<SearchResults> {
-        anyhow::ensure!(["all", "track", "album", "artist", "playlist"].contains(&filter), "неизвестный фильтр поиска");
+    pub async fn search_filtered_page(
+        &self,
+        text: &str,
+        filter: &str,
+        page: u32,
+    ) -> Result<SearchResults> {
+        anyhow::ensure!(
+            ["all", "track", "album", "artist", "playlist"].contains(&filter),
+            "неизвестный фильтр поиска"
+        );
         let page_str = page.to_string();
         let r = self
             .get(
@@ -851,7 +875,9 @@ impl Api {
     /// Плейлисты пользователя (собственные + лайкнутые).
     pub async fn user_playlists(&self, uid: u64) -> Result<Vec<PlaylistCard>> {
         let own_res = self.get(&format!("/users/{uid}/playlists/list"), &[]).await;
-        let liked_res = self.get(&format!("/users/{uid}/likes/playlists"), &[]).await;
+        let liked_res = self
+            .get(&format!("/users/{uid}/likes/playlists"), &[])
+            .await;
         let mut out = Vec::new();
         if let Ok(v) = own_res
             && let Some(arr) = v.as_array()
@@ -861,9 +887,10 @@ impl Api {
         if let Ok(v) = liked_res
             && let Some(arr) = v.as_array()
         {
-            out.extend(arr.iter().filter_map(|item| {
-                parse_playlist(item.get("playlist").unwrap_or(item))
-            }));
+            out.extend(
+                arr.iter()
+                    .filter_map(|item| parse_playlist(item.get("playlist").unwrap_or(item))),
+            );
         }
         Ok(out)
     }
@@ -938,7 +965,9 @@ impl Api {
 
     pub async fn delete_playlist_track(&self, uid: u64, kind: u64, track_id: &str) -> Result<()> {
         let clean_target = normalize_track_id(track_id);
-        let playlist = self.get(&format!("/users/{uid}/playlists/{kind}"), &[]).await?;
+        let playlist = self
+            .get(&format!("/users/{uid}/playlists/{kind}"), &[])
+            .await?;
         anyhow::ensure!(
             id_str(&playlist["owner"]["uid"]).as_deref() == Some(&uid.to_string()),
             "плейлист принадлежит другому пользователю"
@@ -959,8 +988,8 @@ impl Api {
             .ok_or_else(|| anyhow!("трек не найден в плейлисте"))?;
         let item_val = &items[idx];
         let mut track_obj = json!({ "id": clean_target });
-        if let Some(aid) = id_str(&item_val["albumId"])
-            .or_else(|| id_str(&item_val["track"]["albums"][0]["id"]))
+        if let Some(aid) =
+            id_str(&item_val["albumId"]).or_else(|| id_str(&item_val["track"]["albums"][0]["id"]))
         {
             track_obj["albumId"] = json!(aid);
         }
@@ -985,7 +1014,10 @@ impl Api {
 
     pub async fn playlist_recommendations(&self, uid: u64, kind: u64) -> Result<Vec<Track>> {
         let r = self
-            .get(&format!("/users/{uid}/playlists/{kind}/recommendations"), &[])
+            .get(
+                &format!("/users/{uid}/playlists/{kind}/recommendations"),
+                &[],
+            )
             .await?;
         Ok(r["tracks"]
             .as_array()
@@ -1082,6 +1114,7 @@ impl Api {
             .unwrap_or_default())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn play_audio(
         &self,
         uid: u64,
@@ -1110,7 +1143,11 @@ impl Api {
         } else {
             play_id
         };
-        let effective_from = if from.is_empty() { "desktop_win-home-playlist_of_the_day-playlist-default" } else { from };
+        let effective_from = if from.is_empty() {
+            "desktop_win-home-playlist_of_the_day-playlist-default"
+        } else {
+            from
+        };
 
         let mut form = vec![
             ("track-id", track.id.as_str()),
@@ -1182,7 +1219,10 @@ impl Api {
             .query(&[("fullModelsCount", "40")]);
         let r = match Self::result(rb).await {
             Ok(v) => v,
-            Err(_) => self.get("/music-history", &[("fullModelsCount", "40")]).await?,
+            Err(_) => {
+                self.get("/music-history", &[("fullModelsCount", "40")])
+                    .await?
+            }
         };
 
         let mut tracks = Vec::new();
@@ -1210,10 +1250,9 @@ impl Api {
             if let Some(id) = id_str(&item["data"]["itemId"]["trackId"])
                 .or_else(|| id_str(&item["itemId"]["trackId"]))
                 .or_else(|| id_str(&item["trackId"]))
+                && seen.insert(id.clone())
             {
-                if seen.insert(id.clone()) {
-                    missing_ids.push(id);
-                }
+                missing_ids.push(id);
             }
         };
 
@@ -1251,37 +1290,79 @@ impl Api {
     }
 
     pub async fn own_playlists(&self, uid: u64) -> Result<Vec<PlaylistCard>> {
-        let result = self.get(&format!("/users/{uid}/playlists/list"), &[]).await?;
-        let items = result.as_array().ok_or_else(|| anyhow!("некорректный список плейлистов"))?;
-        Ok(items.iter().filter_map(parse_playlist).filter(|p| p.uid == uid).collect())
+        let result = self
+            .get(&format!("/users/{uid}/playlists/list"), &[])
+            .await?;
+        let items = result
+            .as_array()
+            .ok_or_else(|| anyhow!("некорректный список плейлистов"))?;
+        Ok(items
+            .iter()
+            .filter_map(parse_playlist)
+            .filter(|p| p.uid == uid)
+            .collect())
     }
 
-    pub async fn create_playlist(&self, uid: u64, title: &str, private: bool) -> Result<PlaylistCard> {
+    pub async fn create_playlist(
+        &self,
+        uid: u64,
+        title: &str,
+        private: bool,
+    ) -> Result<PlaylistCard> {
         let title = title.trim();
-        anyhow::ensure!(!title.is_empty() && title.chars().count() <= 100, "Название должно содержать от 1 до 100 символов");
-        let result = self.post_form(&format!("/users/{uid}/playlists/create"),
-            &[("title", title), ("visibility", if private { "private" } else { "public" })]).await?;
+        anyhow::ensure!(
+            !title.is_empty() && title.chars().count() <= 100,
+            "Название должно содержать от 1 до 100 символов"
+        );
+        let result = self
+            .post_form(
+                &format!("/users/{uid}/playlists/create"),
+                &[
+                    ("title", title),
+                    ("visibility", if private { "private" } else { "public" }),
+                ],
+            )
+            .await?;
         parse_playlist(&result).ok_or_else(|| anyhow!("Сервер не вернул созданный плейлист"))
     }
 
     pub async fn insert_playlist_track(&self, uid: u64, kind: u64, track: &Track) -> Result<()> {
-        let album = track.album_id.as_ref().ok_or_else(|| anyhow!("у трека нет идентификатора альбома"))?;
-        let playlist = self.get(&format!("/users/{uid}/playlists/{kind}"), &[]).await?;
-        anyhow::ensure!(id_str(&playlist["owner"]["uid"]).as_deref() == Some(&uid.to_string()), "плейлист принадлежит другому пользователю");
-        let revision = playlist["revision"].as_u64().ok_or_else(|| anyhow!("сервер не вернул ревизию плейлиста"))?.to_string();
-        let at = playlist["trackCount"].as_u64().ok_or_else(|| anyhow!("сервер не вернул размер плейлиста"))?;
-        let diff = json!([{"op": "insert", "at": at, "tracks": [{"id": track.id, "albumId": album}]}]).to_string();
-        self.post_form(&format!("/users/{uid}/playlists/{kind}/change"),
-            &[("kind", &kind.to_string()), ("revision", &revision), ("diff", &diff)]).await?;
+        let album = track
+            .album_id
+            .as_ref()
+            .ok_or_else(|| anyhow!("у трека нет идентификатора альбома"))?;
+        let playlist = self
+            .get(&format!("/users/{uid}/playlists/{kind}"), &[])
+            .await?;
+        anyhow::ensure!(
+            id_str(&playlist["owner"]["uid"]).as_deref() == Some(&uid.to_string()),
+            "плейлист принадлежит другому пользователю"
+        );
+        let revision = playlist["revision"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("сервер не вернул ревизию плейлиста"))?
+            .to_string();
+        let at = playlist["trackCount"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("сервер не вернул размер плейлиста"))?;
+        let diff =
+            json!([{"op": "insert", "at": at, "tracks": [{"id": track.id, "albumId": album}]}])
+                .to_string();
+        self.post_form(
+            &format!("/users/{uid}/playlists/{kind}/change"),
+            &[
+                ("kind", &kind.to_string()),
+                ("revision", &revision),
+                ("diff", &diff),
+            ],
+        )
+        .await?;
         Ok(())
     }
 
     pub async fn liked_albums(&self, uid: u64) -> Result<Vec<AlbumCard>> {
         let r = self
-            .get(
-                &format!("/users/{uid}/likes/albums"),
-                &[("rich", "true")],
-            )
+            .get(&format!("/users/{uid}/likes/albums"), &[("rich", "true")])
             .await?;
         Ok(r.as_array()
             .map(|arr| {
@@ -1370,7 +1451,7 @@ impl Api {
                     .filter(|a| !existing.contains(&a.id)),
             );
         }
-        albums.sort_by(|a, b| b.year.unwrap_or(0).cmp(&a.year.unwrap_or(0)));
+        albums.sort_by_key(|a| std::cmp::Reverse(a.year.unwrap_or(0)));
         let similar_artists: Vec<ArtistCard> = r["similarArtists"]
             .as_array()
             .map(|arr| arr.iter().filter_map(parse_artist).take(12).collect())
@@ -1404,7 +1485,8 @@ impl Api {
     }
 
     pub async fn wave_settings(&self) -> Result<Value> {
-        self.get("/rotor/wave/settings", &[("seeds", "user:onyourwave")]).await
+        self.get("/rotor/wave/settings", &[("seeds", "user:onyourwave")])
+            .await
     }
 
     /// Догружает следующую партию треков для активной сессии волны.
@@ -1452,7 +1534,11 @@ impl Api {
 
     /// Получает прямую подписанную ссылку и метаданные потока через `/get-file-info` (с поддержкой Lossless FLAC, AAC, MP3)
     /// и автоматическим резервным переходом на `/tracks/{id}/download-info`.
-    pub async fn track_stream_info(&self, track_id: &str, preferred_quality: &str) -> Result<StreamInfo> {
+    pub async fn track_stream_info(
+        &self,
+        track_id: &str,
+        preferred_quality: &str,
+    ) -> Result<StreamInfo> {
         let clean_id = normalize_track_id(track_id);
         let quality = match preferred_quality {
             "lossless" | "hq" | "nq" => preferred_quality,
@@ -1491,16 +1577,13 @@ impl Api {
             let di = &r["downloadInfo"];
             let resp_transport = di["transport"].as_str().unwrap_or("raw");
             if resp_transport == "raw" {
-                let url = di["url"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| {
-                        di["urls"]
-                            .as_array()
-                            .and_then(|a| a.first())
-                            .and_then(|v| v.as_str())
-                            .filter(|s| !s.is_empty())
-                    });
+                let url = di["url"].as_str().filter(|s| !s.is_empty()).or_else(|| {
+                    di["urls"]
+                        .as_array()
+                        .and_then(|a| a.first())
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                });
                 if let Some(url) = url {
                     let codec = di["codec"].as_str().unwrap_or("mp3").to_string();
                     let actual_quality = di["quality"].as_str().unwrap_or(quality).to_string();
@@ -1530,8 +1613,12 @@ impl Api {
     }
 
     async fn track_direct_url_legacy(&self, clean_id: &str) -> Result<(String, u64)> {
-        let r = self.get(&format!("/tracks/{clean_id}/download-info"), &[]).await?;
-        let infos = r.as_array().ok_or_else(|| anyhow!("нет вариантов загрузки"))?;
+        let r = self
+            .get(&format!("/tracks/{clean_id}/download-info"), &[])
+            .await?;
+        let infos = r
+            .as_array()
+            .ok_or_else(|| anyhow!("нет вариантов загрузки"))?;
         let bitrate = |i: &&Value| i["bitrateInKbps"].as_u64().unwrap_or(0);
         let mp3 = || infos.iter().filter(|i| i["codec"] == "mp3");
         let best = mp3()
@@ -1565,47 +1652,49 @@ impl Api {
     ) -> Result<TrackLyrics> {
         let clean_id = normalize_track_id(track_id);
         let lrclib_base = normalize_lrclib_base_url(&options.lrclib_base_url);
-        let has_meta = meta.is_some_and(|m| !m.title.trim().is_empty() && !m.artist.trim().is_empty());
+        let has_meta =
+            meta.is_some_and(|m| !m.title.trim().is_empty() && !m.artist.trim().is_empty());
 
         match options.source_mode {
             LyricsSourceMode::LrclibOnly => {
-                if has_meta {
-                    if let Some(m) = meta {
-                        match self.lrclib_lyrics(m, &lrclib_base).await {
-                            Ok(Some(found)) => return Ok(found),
-                            Ok(None) => {}
-                            Err(e) => {
-                                eprintln!("[lyrics] lrclib lookup failed for {} - {}: {e}", m.artist, m.title);
-                            }
+                if has_meta && let Some(m) = meta {
+                    match self.lrclib_lyrics(m, &lrclib_base).await {
+                        Ok(Some(found)) => return Ok(found),
+                        Ok(None) => {}
+                        Err(e) => {
+                            eprintln!(
+                                "[lyrics] lrclib lookup failed for {} - {}: {e}",
+                                m.artist, m.title
+                            );
                         }
                     }
                 }
-                return Ok(TrackLyrics {
+                Ok(TrackLyrics {
                     synced: false,
                     word_synced: false,
                     source: String::new(),
                     lines: Vec::new(),
                     writers: String::new(),
                     major: String::new(),
-                });
+                })
             }
             LyricsSourceMode::YandexOnly => {
-                let (sync_res, writers, major) = self.fetch_yandex_sync_lyrics(&clean_id, meta).await;
+                let (sync_res, writers, major) =
+                    self.fetch_yandex_sync_lyrics(clean_id, meta).await;
                 if let Some(lyrics) = sync_res {
                     return Ok(lyrics);
                 }
-                return Ok(
-                    self.fetch_yandex_plain_lyrics(&clean_id, meta, writers, major)
-                        .await
-                        .unwrap_or(TrackLyrics {
-                            synced: false,
-                            word_synced: false,
-                            source: String::new(),
-                            lines: Vec::new(),
-                            writers: String::new(),
-                            major: String::new(),
-                        }),
-                );
+                return Ok(self
+                    .fetch_yandex_plain_lyrics(clean_id, meta, writers, major)
+                    .await
+                    .unwrap_or(TrackLyrics {
+                        synced: false,
+                        word_synced: false,
+                        source: String::new(),
+                        lines: Vec::new(),
+                        writers: String::new(),
+                        major: String::new(),
+                    }));
             }
             LyricsSourceMode::LrclibFirst => {
                 if let Some(m) = meta.filter(|_| has_meta) {
@@ -1613,37 +1702,40 @@ impl Api {
                         Ok(Some(found)) => return Ok(found),
                         Ok(None) => {}
                         Err(e) => {
-                            eprintln!("[lyrics] lrclib lookup failed for {} - {}: {e}", m.artist, m.title);
+                            eprintln!(
+                                "[lyrics] lrclib lookup failed for {} - {}: {e}",
+                                m.artist, m.title
+                            );
                         }
                     }
                 }
-                let (sync_res, writers, major) = self.fetch_yandex_sync_lyrics(&clean_id, meta).await;
+                let (sync_res, writers, major) =
+                    self.fetch_yandex_sync_lyrics(clean_id, meta).await;
                 if let Some(lyrics) = sync_res {
                     return Ok(lyrics);
                 }
-                return Ok(
-                    self.fetch_yandex_plain_lyrics(&clean_id, meta, writers, major)
-                        .await
-                        .unwrap_or(TrackLyrics {
-                            synced: false,
-                            word_synced: false,
-                            source: String::new(),
-                            lines: Vec::new(),
-                            writers: String::new(),
-                            major: String::new(),
-                        }),
-                );
+                return Ok(self
+                    .fetch_yandex_plain_lyrics(clean_id, meta, writers, major)
+                    .await
+                    .unwrap_or(TrackLyrics {
+                        synced: false,
+                        word_synced: false,
+                        source: String::new(),
+                        lines: Vec::new(),
+                        writers: String::new(),
+                        major: String::new(),
+                    }));
             }
             LyricsSourceMode::YandexFirst => {
                 let (yandex_tuple, lrclib_res) = if options.prefer_word_sync && has_meta {
                     let m = meta.unwrap();
                     let (y, l) = tokio::join!(
-                        self.fetch_yandex_sync_lyrics(&clean_id, meta),
+                        self.fetch_yandex_sync_lyrics(clean_id, meta),
                         self.lrclib_lyrics(m, &lrclib_base)
                     );
                     (y, Some(l))
                 } else {
-                    (self.fetch_yandex_sync_lyrics(&clean_id, meta).await, None)
+                    (self.fetch_yandex_sync_lyrics(clean_id, meta).await, None)
                 };
 
                 let (yandex_sync, mut writers, mut major) = yandex_tuple;
@@ -1653,7 +1745,10 @@ impl Api {
                     Some(Ok(opt)) => opt,
                     Some(Err(e)) => {
                         if let Some(m) = meta {
-                            eprintln!("[lyrics] lrclib lookup failed for {} - {}: {e}", m.artist, m.title);
+                            eprintln!(
+                                "[lyrics] lrclib lookup failed for {} - {}: {e}",
+                                m.artist, m.title
+                            );
                         }
                         None
                     }
@@ -1661,16 +1756,16 @@ impl Api {
                 };
 
                 // If LRCLIB returned true word-level timestamps and preference is enabled, use it!
-                if options.prefer_word_sync {
-                    if let Some(mut lrc) = lrclib_found.clone().filter(|l| l.word_synced) {
-                        if lrc.writers.is_empty() {
-                            lrc.writers = writers;
-                        }
-                        if lrc.major.is_empty() {
-                            lrc.major = major;
-                        }
-                        return Ok(lrc);
+                if options.prefer_word_sync
+                    && let Some(mut lrc) = lrclib_found.clone().filter(|l| l.word_synced)
+                {
+                    if lrc.writers.is_empty() {
+                        lrc.writers = writers;
                     }
+                    if lrc.major.is_empty() {
+                        lrc.major = major;
+                    }
+                    return Ok(lrc);
                 }
 
                 if let Some(lyrics) = yandex_sync {
@@ -1683,7 +1778,10 @@ impl Api {
                     match self.lrclib_lyrics(m, &lrclib_base).await {
                         Ok(opt) => opt,
                         Err(e) => {
-                            eprintln!("[lyrics] lrclib lookup failed for {} - {}: {e}", m.artist, m.title);
+                            eprintln!(
+                                "[lyrics] lrclib lookup failed for {} - {}: {e}",
+                                m.artist, m.title
+                            );
                             None
                         }
                     }
@@ -1701,7 +1799,10 @@ impl Api {
                     return Ok(lrc);
                 }
 
-                if let Some(plain) = self.fetch_yandex_plain_lyrics(&clean_id, meta, writers.clone(), major.clone()).await {
+                if let Some(plain) = self
+                    .fetch_yandex_plain_lyrics(clean_id, meta, writers.clone(), major.clone())
+                    .await
+                {
                     return Ok(plain);
                 }
 
@@ -1753,25 +1854,24 @@ impl Api {
         {
             Ok(r) => {
                 extract_lyrics_credits(&r, &mut writers, &mut major);
-                if let Some(url) = r["downloadUrl"].as_str().filter(|s| !s.is_empty()) {
-                    if let Ok((status, lrc_text)) = Self::send_with_retry(self.http.get(url)).await {
-                        if status.is_success() {
-                            let (word_synced, lines) = parse_lrc_with_words(&lrc_text);
-                            if !lines.is_empty() {
-                                return (
-                                    Some(TrackLyrics {
-                                        synced: true,
-                                        word_synced,
-                                        source: "yandex".to_string(),
-                                        lines,
-                                        writers: writers.clone(),
-                                        major: major.clone(),
-                                    }),
-                                    writers,
-                                    major,
-                                );
-                            }
-                        }
+                if let Some(url) = r["downloadUrl"].as_str().filter(|s| !s.is_empty())
+                    && let Ok((status, lrc_text)) = Self::send_with_retry(self.http.get(url)).await
+                    && status.is_success()
+                {
+                    let (word_synced, lines) = parse_lrc_with_words(&lrc_text);
+                    if !lines.is_empty() {
+                        return (
+                            Some(TrackLyrics {
+                                synced: true,
+                                word_synced,
+                                source: "yandex".to_string(),
+                                lines,
+                                writers: writers.clone(),
+                                major: major.clone(),
+                            }),
+                            writers,
+                            major,
+                        );
                     }
                 }
             }
@@ -1807,45 +1907,51 @@ impl Api {
                 .await
             {
                 extract_lyrics_credits(&r, &mut writers, &mut major);
-                if let Some(url) = r["downloadUrl"].as_str().filter(|s| !s.is_empty()) {
-                    if let Ok((status, plain_text)) = Self::send_with_retry(self.http.get(url)).await {
-                        if status.is_success() {
-                            let lines = plain_lyrics_lines(&plain_text);
-                            if lines.iter().any(|l| !l.text.is_empty()) {
-                                return Some(TrackLyrics {
-                                    synced: false,
-                                    word_synced: false,
-                                    source: "yandex".to_string(),
-                                    lines,
-                                    writers,
-                                    major,
-                                });
-                            }
-                        }
+                if let Some(url) = r["downloadUrl"].as_str().filter(|s| !s.is_empty())
+                    && let Ok((status, plain_text)) =
+                        Self::send_with_retry(self.http.get(url)).await
+                    && status.is_success()
+                {
+                    let lines = plain_lyrics_lines(&plain_text);
+                    if lines.iter().any(|l| !l.text.is_empty()) {
+                        return Some(TrackLyrics {
+                            synced: false,
+                            word_synced: false,
+                            source: "yandex".to_string(),
+                            lines,
+                            writers,
+                            major,
+                        });
                     }
                 }
             }
         }
 
-        if let Ok(sup) = self.get(&format!("/tracks/{clean_id}/supplement"), &[]).await {
-            if let Some(full) = sup["lyrics"]["fullLyrics"].as_str() {
-                let lines = plain_lyrics_lines(full);
-                if lines.iter().any(|l| !l.text.is_empty()) {
-                    return Some(TrackLyrics {
-                        synced: false,
-                        word_synced: false,
-                        source: "yandex".to_string(),
-                        lines,
-                        writers,
-                        major,
-                    });
-                }
+        if let Ok(sup) = self
+            .get(&format!("/tracks/{clean_id}/supplement"), &[])
+            .await
+            && let Some(full) = sup["lyrics"]["fullLyrics"].as_str()
+        {
+            let lines = plain_lyrics_lines(full);
+            if lines.iter().any(|l| !l.text.is_empty()) {
+                return Some(TrackLyrics {
+                    synced: false,
+                    word_synced: false,
+                    source: "yandex".to_string(),
+                    lines,
+                    writers,
+                    major,
+                });
             }
         }
         None
     }
 
-    async fn lrclib_lyrics(&self, meta: &LyricsQueryMeta, base_url: &str) -> Result<Option<TrackLyrics>> {
+    async fn lrclib_lyrics(
+        &self,
+        meta: &LyricsQueryMeta,
+        base_url: &str,
+    ) -> Result<Option<TrackLyrics>> {
         let mut get_params: Vec<(&str, String)> = vec![
             ("track_name", meta.title.trim().to_string()),
             ("artist_name", meta.artist.trim().to_string()),
@@ -1857,7 +1963,10 @@ impl Api {
             get_params.push(("duration", format!("{}", meta.duration_secs.round() as u64)));
         }
 
-        let ua = format!("ymusic/{} (https://github.com/ethermawe/ymusic)", env!("CARGO_PKG_VERSION"));
+        let ua = format!(
+            "ymusic/{} (https://github.com/ethermawe/ymusic)",
+            env!("CARGO_PKG_VERSION")
+        );
         let get_url = format!("{base_url}/api/get");
         if let Ok(resp) = self
             .http
@@ -1867,16 +1976,12 @@ impl Api {
             .timeout(Duration::from_secs(6))
             .send()
             .await
+            && resp.status().is_success()
+            && let Ok(val) = resp.json::<Value>().await
+            && let Some(res) = extract_lrclib_entry(&val)
+            && res.synced
         {
-            if resp.status().is_success() {
-                if let Ok(val) = resp.json::<Value>().await {
-                    if let Some(res) = extract_lrclib_entry(&val) {
-                        if res.synced {
-                            return Ok(Some(res));
-                        }
-                    }
-                }
-            }
+            return Ok(Some(res));
         }
 
         // Fallback search (also handles Yandex titles with "(feat. ...)" / "(Remaster)" suffixes).
@@ -1901,12 +2006,11 @@ impl Api {
         let mut best_synced: Option<TrackLyrics> = None;
         let mut best_plain: Option<TrackLyrics> = None;
         for entry in &arr {
-            if meta.duration_secs > 1.0 {
-                if let Some(d) = entry["duration"].as_f64() {
-                    if (d - meta.duration_secs).abs() > 6.0 {
-                        continue;
-                    }
-                }
+            if meta.duration_secs > 1.0
+                && let Some(d) = entry["duration"].as_f64()
+                && (d - meta.duration_secs).abs() > 6.0
+            {
+                continue;
             }
             if let Some(parsed) = extract_lrclib_entry(entry) {
                 if parsed.word_synced {
@@ -1948,7 +2052,9 @@ pub async fn request_device_code(http: &Client) -> Result<DeviceCode> {
         }),
         _ => bail!(
             "не удалось получить код: {}",
-            v["error_description"].as_str().unwrap_or("неизвестная ошибка")
+            v["error_description"]
+                .as_str()
+                .unwrap_or("неизвестная ошибка")
         ),
     }
 }
@@ -1987,7 +2093,7 @@ fn parse_rotor_sequence(seq: &Value) -> Vec<Track> {
         .unwrap_or_default()
 }
 
-fn non_empty_str<'a>(v: &'a Value) -> Option<&'a str> {
+fn non_empty_str(v: &Value) -> Option<&str> {
     v.as_str().map(str::trim).filter(|s| !s.is_empty())
 }
 
@@ -2013,12 +2119,24 @@ fn parse_track(v: &Value) -> Option<Track> {
     let artist_links: Vec<(String, String)> = artists_arr
         .map(|a| {
             a.iter()
-                .filter_map(|x| Some((id_str(&x["id"]).unwrap_or_default(), x["name"].as_str()?.to_string())))
+                .filter_map(|x| {
+                    Some((
+                        id_str(&x["id"]).unwrap_or_default(),
+                        x["name"].as_str()?.to_string(),
+                    ))
+                })
                 .collect()
         })
         .unwrap_or_default();
-    let artist_id = artist_links.iter().find(|(id, _)| !id.is_empty()).map(|(id, _)| id.clone())
-        .or_else(|| artists_arr.and_then(|a| a.first()).and_then(|x| id_str(&x["id"])));
+    let artist_id = artist_links
+        .iter()
+        .find(|(id, _)| !id.is_empty())
+        .map(|(id, _)| id.clone())
+        .or_else(|| {
+            artists_arr
+                .and_then(|a| a.first())
+                .and_then(|x| id_str(&x["id"]))
+        });
     let artists = artists_arr
         .map(|a| {
             a.iter()
@@ -2030,7 +2148,9 @@ fn parse_track(v: &Value) -> Option<Track> {
     let album = &v["albums"][0];
     let album_id = id_str(&album["id"]);
     let album_title = album["title"].as_str().unwrap_or_default().to_string();
-    let has_sync_lyrics = v["lyricsInfo"]["hasAvailableSyncLyrics"].as_bool().unwrap_or(false);
+    let has_sync_lyrics = v["lyricsInfo"]["hasAvailableSyncLyrics"]
+        .as_bool()
+        .unwrap_or(false);
     let has_text_lyrics = v["lyricsInfo"]["hasAvailableTextLyrics"]
         .as_bool()
         .or_else(|| v["lyricsAvailable"].as_bool())
@@ -2293,18 +2413,20 @@ fn build_rotor_feedback_body(
 
 fn sha256(data: &[u8]) -> [u8; 32] {
     const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
     ];
     let mut h: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
     ];
 
     let bit_len = (data.len() as u64) * 8;
@@ -2315,7 +2437,7 @@ fn sha256(data: &[u8]) -> [u8; 32] {
     }
     padded.extend_from_slice(&bit_len.to_be_bytes());
 
-    for chunk in padded.chunks_exact(64) {
+    for chunk in padded.as_chunks::<64>().0 {
         let mut w = [0u32; 64];
         for i in 0..16 {
             w[i] = u32::from_be_bytes([
@@ -2328,13 +2450,20 @@ fn sha256(data: &[u8]) -> [u8; 32] {
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
             let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
         }
         let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = h;
         for i in 0..64 {
             let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let ch = (e & f) ^ ((!e) & g);
-            let temp1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
+            let temp1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K[i])
+                .wrapping_add(w[i]);
             let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
             let maj = (a & b) ^ (a & c) ^ (b & c);
             let temp2 = s0.wrapping_add(maj);
@@ -2446,22 +2575,25 @@ fn build_file_info_sign(
 }
 
 fn extract_lyrics_credits(r: &Value, writers: &mut String, major: &mut String) {
-    if writers.is_empty() {
-        if let Some(arr) = r["writers"].as_array() {
-            let joined: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).filter(|s| !s.is_empty()).collect();
-            if !joined.is_empty() {
-                *writers = joined.join(", ");
-            }
+    if writers.is_empty()
+        && let Some(arr) = r["writers"].as_array()
+    {
+        let joined: Vec<&str> = arr
+            .iter()
+            .filter_map(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !joined.is_empty() {
+            *writers = joined.join(", ");
         }
     }
-    if major.is_empty() {
-        if let Some(m) = r["major"]["prettyName"]
+    if major.is_empty()
+        && let Some(m) = r["major"]["prettyName"]
             .as_str()
             .or_else(|| r["major"]["name"].as_str())
             .filter(|s| !s.is_empty())
-        {
-            *major = m.to_string();
-        }
+    {
+        *major = m.to_string();
     }
 }
 
@@ -2526,18 +2658,19 @@ fn parse_lyricsfile_yaml(raw: &str) -> Option<(bool, Vec<LyricsLine>)> {
     let mut line_indent: usize = 0;
 
     let flush_word = |cw: &mut Option<DraftWord>, cl: &mut Option<DraftLine>| {
-        if let Some(w) = cw.take() {
-            if let Some(l) = cl.as_mut() {
-                l.words.push(w);
+        if let Some(w) = cw.take()
+            && let Some(l) = cl.as_mut()
+        {
+            l.words.push(w);
+        }
+    };
+    let flush_line =
+        |cw: &mut Option<DraftWord>, cl: &mut Option<DraftLine>, out: &mut Vec<DraftLine>| {
+            flush_word(cw, cl);
+            if let Some(l) = cl.take() {
+                out.push(l);
             }
-        }
-    };
-    let flush_line = |cw: &mut Option<DraftWord>, cl: &mut Option<DraftLine>, out: &mut Vec<DraftLine>| {
-        flush_word(cw, cl);
-        if let Some(l) = cl.take() {
-            out.push(l);
-        }
-    };
+        };
 
     for raw_line in raw.lines() {
         let indent = raw_line.chars().take_while(|c| *c == ' ').count();
@@ -2671,12 +2804,9 @@ fn parse_lyricsfile_yaml(raw: &str) -> Option<(bool, Vec<LyricsLine>)> {
             .start_ms
             .map(|ms| ms as f64 / 1000.0)
             .or_else(|| words.first().map(|w| w.start));
-        let text = dl.text.unwrap_or_else(|| {
-            words
-                .iter()
-                .map(|w| w.text.as_str())
-                .collect::<String>()
-        });
+        let text = dl
+            .text
+            .unwrap_or_else(|| words.iter().map(|w| w.text.as_str()).collect::<String>());
         if line_start.is_none() && text.trim().is_empty() {
             continue;
         }
@@ -2716,30 +2846,34 @@ fn normalize_word_timings(words: &mut [LyricsWord]) {
 }
 
 fn extract_lrclib_entry(v: &Value) -> Option<TrackLyrics> {
-    if let Some(yaml) = v["lyricsfile"].as_str().filter(|s| !s.trim().is_empty()) {
-        if let Some((word_synced, lines)) = parse_lyricsfile_yaml(yaml) {
-            let synced = word_synced || lines.iter().any(|l| l.time.is_some());
-            if word_synced {
-                return Some(TrackLyrics {
-                    synced,
-                    word_synced: true,
-                    source: "lrclib".to_string(),
-                    lines,
-                    writers: String::new(),
-                    major: String::new(),
-                });
-            }
-            // Fall through to syncedLyrics check if lyricsfile had no word timings
-            if synced && v["syncedLyrics"].as_str().is_none_or(|s| s.trim().is_empty()) {
-                return Some(TrackLyrics {
-                    synced: true,
-                    word_synced: false,
-                    source: "lrclib".to_string(),
-                    lines,
-                    writers: String::new(),
-                    major: String::new(),
-                });
-            }
+    if let Some(yaml) = v["lyricsfile"].as_str().filter(|s| !s.trim().is_empty())
+        && let Some((word_synced, lines)) = parse_lyricsfile_yaml(yaml)
+    {
+        let synced = word_synced || lines.iter().any(|l| l.time.is_some());
+        if word_synced {
+            return Some(TrackLyrics {
+                synced,
+                word_synced: true,
+                source: "lrclib".to_string(),
+                lines,
+                writers: String::new(),
+                major: String::new(),
+            });
+        }
+        // Fall through to syncedLyrics check if lyricsfile had no word timings
+        if synced
+            && v["syncedLyrics"]
+                .as_str()
+                .is_none_or(|s| s.trim().is_empty())
+        {
+            return Some(TrackLyrics {
+                synced: true,
+                word_synced: false,
+                source: "lrclib".to_string(),
+                lines,
+                writers: String::new(),
+                major: String::new(),
+            });
         }
     }
     if let Some(synced) = v["syncedLyrics"].as_str().filter(|s| !s.trim().is_empty()) {
@@ -2860,7 +2994,11 @@ fn parse_enhanced_lrc_words(raw: &str, line_start: f64) -> (String, Vec<LyricsWo
             .map(|(t, _)| *t)
             .or(end_time)
             .unwrap_or(start + 0.35);
-        let end = if next_start > start { next_start } else { start + 0.15 };
+        let end = if next_start > start {
+            next_start
+        } else {
+            start + 0.15
+        };
         words.push(LyricsWord {
             start,
             end,
@@ -2935,13 +3073,7 @@ mod tests {
     #[test]
     fn builds_rotor_feedback_payload_with_iso_timestamp() {
         let t = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        let skip = build_rotor_feedback_body(
-            "batch-42",
-            "skip",
-            Some("123:456"),
-            Some(12.5),
-            t,
-        );
+        let skip = build_rotor_feedback_body("batch-42", "skip", Some("123:456"), Some(12.5), t);
         assert_eq!(skip["batchId"], "batch-42");
         assert_eq!(skip["event"]["type"], "skip");
         assert_eq!(skip["event"]["trackId"], "123:456");
@@ -2968,7 +3100,8 @@ mod tests {
 
     #[test]
     fn parses_lrc_with_multiple_tags_and_sorts() {
-        let lrc = "[ti:Test]\n[00:25.50][00:05.00]Строка 1\n[00:12.345]Строка 2\n[01:02:25]Строка 3\n";
+        let lrc =
+            "[ti:Test]\n[00:25.50][00:05.00]Строка 1\n[00:12.345]Строка 2\n[01:02:25]Строка 3\n";
         let parsed = parse_lrc(lrc);
         assert_eq!(parsed.len(), 4);
         assert_eq!(parsed[0].time, Some(5.0));
@@ -3018,7 +3151,8 @@ mod tests {
         assert_eq!(ws.lines[0].words[0].start, 1.0);
         assert_eq!(ws.lines[0].words[0].end, 1.7);
 
-        let (enh_ws, enh_lines) = parse_lrc_with_words("[00:10.00] <00:10.00> Hello <00:10.50> world <00:11.20>");
+        let (enh_ws, enh_lines) =
+            parse_lrc_with_words("[00:10.00] <00:10.00> Hello <00:10.50> world <00:11.20>");
         assert!(enh_ws);
         assert_eq!(enh_lines[0].text, "Hello  world");
         assert_eq!(enh_lines[0].words.len(), 2);
@@ -3103,7 +3237,11 @@ mod tests {
             Some("https://avatars.yandex.net/get-music-content/1/2/200x200")
         );
         assert_eq!(
-            cover_url(Some("https://avatars.yandex.net/get-music-content/1/2/%%"), 400).as_deref(),
+            cover_url(
+                Some("https://avatars.yandex.net/get-music-content/1/2/%%"),
+                400
+            )
+            .as_deref(),
             Some("https://avatars.yandex.net/get-music-content/1/2/400x400")
         );
         assert_eq!(
@@ -3121,7 +3259,10 @@ mod tests {
             ]
         }))
         .unwrap();
-        assert_eq!(track.cover_uri.as_deref(), Some("avatars.yandex.net/get-music-content/a/b/%%"));
+        assert_eq!(
+            track.cover_uri.as_deref(),
+            Some("avatars.yandex.net/get-music-content/a/b/%%")
+        );
 
         let best = parse_search_best(&serde_json::json!({
             "type": "track",
@@ -3131,7 +3272,9 @@ mod tests {
                 "albums": [{ "id": 5, "title": "LP", "coverUri": "avatars.yandex.net/x/y/%%" }]
             }
         }));
-        assert!(matches!(best, Some(SearchBest::Track(t)) if t.id == "77" && t.cover_uri.is_some()));
+        assert!(
+            matches!(best, Some(SearchBest::Track(t)) if t.id == "77" && t.cover_uri.is_some())
+        );
     }
 
     async fn spawn_mock_http(response: &'static str) -> String {

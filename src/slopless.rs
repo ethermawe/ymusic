@@ -1,6 +1,6 @@
+use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
-use parking_lot::Mutex;
 use std::time::Duration;
 
 use reqwest::Client;
@@ -180,14 +180,16 @@ async fn fetch_artist(http: &Client, artist_id: u32) -> Option<bool> {
         .await
         .ok()?;
     if !res.status().is_success() {
-        { let mut guard = cache().lock();
+        {
+            let mut guard = cache().lock();
             guard.artists.insert(artist_id, None);
         }
         return None;
     }
     let data: ArtistData = res.json().await.ok()?;
     let is_ai = data.is_ai() || is_builtin_ai_artist(artist_id);
-    { let mut guard = cache().lock();
+    {
+        let mut guard = cache().lock();
         guard.artists.insert(artist_id, Some(is_ai));
         for yt in &data.yandex_ai_track_list {
             if (1..=3).contains(&yt.status) {
@@ -215,24 +217,22 @@ async fn fetch_track(http: &Client, track_id: u64) -> Option<TrackData> {
         .await
         .ok()?;
     if !res.status().is_success() {
-        { let mut guard = cache().lock();
+        {
+            let mut guard = cache().lock();
             guard.tracks.insert(track_id, None);
         }
         return None;
     }
     let data: TrackData = res.json().await.ok()?;
-    { let mut guard = cache().lock();
+    {
+        let mut guard = cache().lock();
         guard.tracks.insert(track_id, Some(data.clone()));
     }
     Some(data)
 }
 
 /// Онлайн проверка одного трека через `slopless.art` (возвращает `(is_ai_label, should_take_action)`).
-pub async fn check_track_online(
-    http: &Client,
-    track: &Track,
-    strict_tracks: bool,
-) -> (bool, bool) {
+pub async fn check_track_online(http: &Client, track: &Track, strict_tracks: bool) -> (bool, bool) {
     let artist_ids = track_artist_ids(track);
     let mut any_artist_ai = artist_ids.iter().copied().any(is_builtin_ai_artist);
 
@@ -251,9 +251,7 @@ pub async fn check_track_online(
             None => None,
         }
     } else {
-        tid.and_then(|id| {
-            cache().lock().tracks.get(&id).cloned().flatten()
-        })
+        tid.and_then(|id| cache().lock().tracks.get(&id).cloned().flatten())
     };
 
     let track_ai = track_data.as_ref().is_some_and(TrackData::is_ai);
@@ -291,7 +289,12 @@ pub async fn check_tracks_batch(http: &Client, tracks: &[Track]) -> HashSet<Stri
     }
 
     // Ограничиваем количество новых сетевых запросов за один батч, чтобы не перегружать API
-    for chunk in unknown_artists.into_iter().take(24).collect::<Vec<_>>().chunks(6) {
+    for chunk in unknown_artists
+        .into_iter()
+        .take(24)
+        .collect::<Vec<_>>()
+        .chunks(6)
+    {
         let mut set = tokio::task::JoinSet::new();
         for &aid in chunk {
             let client = http.clone();

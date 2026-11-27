@@ -1,6 +1,6 @@
-use std::fs;
-use parking_lot::Mutex;
 use crate::api::Track;
+use parking_lot::Mutex;
+use std::fs;
 
 const LIMIT: usize = 100;
 const SEARCH_HISTORY_LIMIT: usize = 15;
@@ -46,7 +46,10 @@ fn load_search_history_unlocked() -> Vec<String> {
                     continue;
                 }
                 let lower = trimmed.to_lowercase();
-                if !deduped.iter().any(|existing: &String| existing.to_lowercase() == lower) {
+                if !deduped
+                    .iter()
+                    .any(|existing: &String| existing.to_lowercase() == lower)
+                {
                     deduped.push(trimmed.to_string());
                     if deduped.len() >= SEARCH_HISTORY_LIMIT {
                         break;
@@ -109,9 +112,14 @@ pub fn clear_search_history() -> Vec<String> {
 }
 
 pub fn load() -> Vec<Track> {
-    path().and_then(|p| fs::read(p).ok())
+    path()
+        .and_then(|p| fs::read(p).ok())
         .and_then(|b| serde_json::from_slice::<Vec<Track>>(&b).ok())
-        .map(|mut tracks| { tracks.truncate(LIMIT); tracks }).unwrap_or_default()
+        .map(|mut tracks| {
+            tracks.truncate(LIMIT);
+            tracks
+        })
+        .unwrap_or_default()
 }
 
 fn record_in(tracks: &mut Vec<Track>, track: Track) {
@@ -137,7 +145,7 @@ pub fn merge_remote(remote: Vec<Track>) -> std::io::Result<Vec<Track>> {
     let mut merged = Vec::with_capacity(LIMIT);
     let mut seen = std::collections::HashSet::new();
     // Remote server history is authoritative for cross-device recency, followed by local-only entries
-    for t in remote.into_iter().chain(local.into_iter()) {
+    for t in remote.into_iter().chain(local) {
         if seen.insert(t.id.clone()) {
             merged.push(t);
             if merged.len() >= LIMIT {
@@ -165,15 +173,31 @@ pub fn clear() -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn track(id: &str) -> Track { Track {
-        id: id.into(), title: id.into(), artists: String::new(), album_id: None,
-        album_title: String::new(), artist_id: None, artist_links: Vec::new(), duration_ms: 1000, cover_uri: None, available: true,
-        has_sync_lyrics: false, has_text_lyrics: false, r128_i: None, r128_tp: None, is_ai: false,
-    } }
+    fn track(id: &str) -> Track {
+        Track {
+            id: id.into(),
+            title: id.into(),
+            artists: String::new(),
+            album_id: None,
+            album_title: String::new(),
+            artist_id: None,
+            artist_links: Vec::new(),
+            duration_ms: 1000,
+            cover_uri: None,
+            available: true,
+            has_sync_lyrics: false,
+            has_text_lyrics: false,
+            r128_i: None,
+            r128_tp: None,
+            is_ai: false,
+        }
+    }
     #[test]
     fn history_is_recent_unique_and_bounded() {
         let mut tracks = Vec::new();
-        for i in 0..120 { record_in(&mut tracks, track(&i.to_string())); }
+        for i in 0..120 {
+            record_in(&mut tracks, track(&i.to_string()));
+        }
         assert_eq!(tracks.len(), LIMIT);
         record_in(&mut tracks, track("90"));
         assert_eq!(tracks[0].id, "90");
@@ -192,7 +216,10 @@ mod tests {
         record_search_in(&mut items, "  запрос 12 ");
         assert_eq!(items[0], "запрос 12");
         assert_eq!(
-            items.iter().filter(|s| s.to_lowercase() == "запрос 12").count(),
+            items
+                .iter()
+                .filter(|s| s.to_lowercase() == "запрос 12")
+                .count(),
             1
         );
 

@@ -64,7 +64,9 @@ pub enum HookOutcome {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 enum HookResponseMsg {
-    Continue { payload: serde_json::Value },
+    Continue {
+        payload: serde_json::Value,
+    },
     Cancel {
         #[serde(default)]
         reason: String,
@@ -226,7 +228,10 @@ mod tests {
             )
             .await;
         assert!(!emitted);
-        assert_eq!(out, HookOutcome::Continue(serde_json::json!({"tracks": [1, 2]})));
+        assert_eq!(
+            out,
+            HookOutcome::Continue(serde_json::json!({"tracks": [1, 2]}))
+        );
     }
 
     #[tokio::test]
@@ -257,7 +262,10 @@ mod tests {
             )
             .await;
 
-        assert_eq!(out, HookOutcome::Continue(serde_json::json!({"tracks": [2, 3]})));
+        assert_eq!(
+            out,
+            HookOutcome::Continue(serde_json::json!({"tracks": [2, 3]}))
+        );
     }
 
     #[tokio::test]
@@ -272,13 +280,21 @@ mod tests {
                 serde_json::json!({"trackId": "42"}),
                 move |req| {
                     let id = req["id"].as_u64().unwrap();
-                    p.respond(id, r#"{"action":"cancel","reason":"duplicate"}"#.to_string());
+                    p.respond(
+                        id,
+                        r#"{"action":"cancel","reason":"duplicate"}"#.to_string(),
+                    );
                 },
                 |w| panic!("unexpected warning: {w}"),
             )
             .await;
 
-        assert_eq!(out, HookOutcome::Cancel { reason: "duplicate".into() });
+        assert_eq!(
+            out,
+            HookOutcome::Cancel {
+                reason: "duplicate".into()
+            }
+        );
     }
 
     #[tokio::test]

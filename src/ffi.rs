@@ -14,7 +14,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::core::{EventSink, YMusicCore};
 
-pub type EventCallback = extern "C" fn(event_type: i32, json_data: *const c_char, user_data: *mut c_void);
+pub type EventCallback =
+    extern "C" fn(event_type: i32, json_data: *const c_char, user_data: *mut c_void);
 
 thread_local! {
     static IN_FFI_CALLBACK: Cell<usize> = const { Cell::new(0) };
@@ -145,7 +146,10 @@ pub struct CoreHandle {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn ymusic_core_new(callback: EventCallback, user_data: *mut c_void) -> *mut CoreHandle {
+pub extern "C" fn ymusic_core_new(
+    callback: EventCallback,
+    user_data: *mut c_void,
+) -> *mut CoreHandle {
     install_panic_hook();
     ffi_guard!("ymusic_core_new", std::ptr::null_mut(), {
         let sink = Arc::new(FfiSink::new(callback, user_data));
@@ -177,10 +181,11 @@ pub unsafe extern "C" fn ymusic_core_login_device(handle: *mut CoreHandle) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_login_token(handle: *mut CoreHandle, token: *const c_char) {
     ffi_guard!("ymusic_core_login_token", (), {
-        if let Some(h) = unsafe { handle.as_ref() } && !token.is_null() {
-            if let Ok(t) = unsafe { CStr::from_ptr(token) }.to_str() {
-                h.core.clone().login(t.trim().to_string());
-            }
+        if let Some(h) = unsafe { handle.as_ref() }
+            && !token.is_null()
+            && let Ok(t) = unsafe { CStr::from_ptr(token) }.to_str()
+        {
+            h.core.clone().login(t.trim().to_string());
         }
     })
 }
@@ -233,7 +238,8 @@ pub unsafe extern "C" fn ymusic_core_load_downloads(handle: *mut CoreHandle) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_feature(handle: *mut CoreHandle, json: *const c_char) {
     ffi_guard!("ymusic_core_feature", (), {
-        if let Some(h) = unsafe { handle.as_ref() } && !json.is_null()
+        if let Some(h) = unsafe { handle.as_ref() }
+            && !json.is_null()
             && let Ok(json) = unsafe { CStr::from_ptr(json) }.to_str()
             && let Ok(cmd) = serde_json::from_str(json)
         {
@@ -245,7 +251,8 @@ pub unsafe extern "C" fn ymusic_core_feature(handle: *mut CoreHandle, json: *con
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_playlist_choices(handle: *mut CoreHandle, id: *const c_char) {
     ffi_guard!("ymusic_core_playlist_choices", (), {
-        if let Some(h) = unsafe { handle.as_ref() } && !id.is_null()
+        if let Some(h) = unsafe { handle.as_ref() }
+            && !id.is_null()
             && let Ok(id) = unsafe { CStr::from_ptr(id) }.to_str()
         {
             h.core.clone().playlist_choices(id.into());
@@ -254,9 +261,14 @@ pub unsafe extern "C" fn ymusic_core_playlist_choices(handle: *mut CoreHandle, i
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ymusic_core_add_to_playlist(handle: *mut CoreHandle, id: *const c_char, kind: u64) {
+pub unsafe extern "C" fn ymusic_core_add_to_playlist(
+    handle: *mut CoreHandle,
+    id: *const c_char,
+    kind: u64,
+) {
     ffi_guard!("ymusic_core_add_to_playlist", (), {
-        if let Some(h) = unsafe { handle.as_ref() } && !id.is_null()
+        if let Some(h) = unsafe { handle.as_ref() }
+            && !id.is_null()
             && let Ok(id) = unsafe { CStr::from_ptr(id) }.to_str()
         {
             h.core.clone().add_to_playlist(id.into(), kind);
@@ -267,7 +279,8 @@ pub unsafe extern "C" fn ymusic_core_add_to_playlist(handle: *mut CoreHandle, id
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_remove_download(handle: *mut CoreHandle, id: *const c_char) {
     ffi_guard!("ymusic_core_remove_download", (), {
-        if let Some(h) = unsafe { handle.as_ref() } && !id.is_null()
+        if let Some(h) = unsafe { handle.as_ref() }
+            && !id.is_null()
             && let Ok(id) = unsafe { CStr::from_ptr(id) }.to_str()
         {
             h.core.clone().remove_download(id.to_string());
@@ -306,7 +319,9 @@ pub unsafe extern "C" fn ymusic_core_load_artists(handle: *mut CoreHandle) {
 pub unsafe extern "C" fn ymusic_core_start_wave(handle: *mut CoreHandle) {
     ffi_guard!("ymusic_core_start_wave", (), {
         if let Some(h) = unsafe { handle.as_ref() } {
-            h.core.clone().open_or_start_wave("user:onyourwave".into(), "Моя волна".into());
+            h.core
+                .clone()
+                .open_or_start_wave("user:onyourwave".into(), "Моя волна".into());
         }
     })
 }
@@ -317,7 +332,9 @@ pub unsafe extern "C" fn ymusic_core_start_artist_wave(handle: *mut CoreHandle) 
         if let Some(h) = unsafe { handle.as_ref() } {
             let artist = h.core.state.lock().viewed_artist_id.clone();
             if let Some((id, name)) = artist {
-                h.core.clone().start_wave(format!("artist:{id}"), format!("Волна: {name}"));
+                h.core
+                    .clone()
+                    .start_wave(format!("artist:{id}"), format!("Волна: {name}"));
             }
         }
     })
@@ -326,10 +343,11 @@ pub unsafe extern "C" fn ymusic_core_start_artist_wave(handle: *mut CoreHandle) 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ymusic_core_search(handle: *mut CoreHandle, query: *const c_char) {
     ffi_guard!("ymusic_core_search", (), {
-        if let Some(h) = unsafe { handle.as_ref() } && !query.is_null() {
-            if let Ok(q) = unsafe { CStr::from_ptr(query) }.to_str() {
-                h.core.clone().search(q.trim().to_string());
-            }
+        if let Some(h) = unsafe { handle.as_ref() }
+            && !query.is_null()
+            && let Ok(q) = unsafe { CStr::from_ptr(query) }.to_str()
+        {
+            h.core.clone().search(q.trim().to_string());
         }
     })
 }
@@ -347,7 +365,13 @@ pub unsafe extern "C" fn ymusic_core_open_card(handle: *mut CoreHandle, index: u
 pub unsafe extern "C" fn ymusic_core_open_track_artist(handle: *mut CoreHandle, index: usize) {
     ffi_guard!("ymusic_core_open_track_artist", (), {
         if let Some(h) = unsafe { handle.as_ref() } {
-            let id = h.core.state.lock().list.get(index).and_then(|t| t.artist_id.clone());
+            let id = h
+                .core
+                .state
+                .lock()
+                .list
+                .get(index)
+                .and_then(|t| t.artist_id.clone());
             if let Some(id) = id {
                 h.core.clone().open_artist(id);
             }
@@ -359,7 +383,13 @@ pub unsafe extern "C" fn ymusic_core_open_track_artist(handle: *mut CoreHandle, 
 pub unsafe extern "C" fn ymusic_core_open_track_album(handle: *mut CoreHandle, index: usize) {
     ffi_guard!("ymusic_core_open_track_album", (), {
         if let Some(h) = unsafe { handle.as_ref() } {
-            let id = h.core.state.lock().list.get(index).and_then(|t| t.album_id.clone());
+            let id = h
+                .core
+                .state
+                .lock()
+                .list
+                .get(index)
+                .and_then(|t| t.album_id.clone());
             if let Some(id) = id {
                 h.core.clone().open_album(id);
             }
@@ -373,7 +403,9 @@ pub unsafe extern "C" fn ymusic_core_open_now_artist(handle: *mut CoreHandle) {
         if let Some(h) = unsafe { handle.as_ref() } {
             let id = {
                 let st = h.core.state.lock();
-                st.current.and_then(|i| st.queue.get(i)).and_then(|t| t.artist_id.clone())
+                st.current
+                    .and_then(|i| st.queue.get(i))
+                    .and_then(|t| t.artist_id.clone())
             };
             if let Some(id) = id {
                 h.core.clone().open_artist(id);
@@ -383,9 +415,13 @@ pub unsafe extern "C" fn ymusic_core_open_now_artist(handle: *mut CoreHandle) {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ymusic_core_open_artist(handle: *mut CoreHandle, artist_id: *const c_char) {
+pub unsafe extern "C" fn ymusic_core_open_artist(
+    handle: *mut CoreHandle,
+    artist_id: *const c_char,
+) {
     ffi_guard!("ymusic_core_open_artist", (), {
-        if let Some(h) = unsafe { handle.as_ref() } && !artist_id.is_null()
+        if let Some(h) = unsafe { handle.as_ref() }
+            && !artist_id.is_null()
             && let Ok(id) = unsafe { CStr::from_ptr(artist_id) }.to_str()
             && !id.is_empty()
         {
@@ -400,7 +436,9 @@ pub unsafe extern "C" fn ymusic_core_open_now_album(handle: *mut CoreHandle) {
         if let Some(h) = unsafe { handle.as_ref() } {
             let id = {
                 let st = h.core.state.lock();
-                st.current.and_then(|i| st.queue.get(i)).and_then(|t| t.album_id.clone())
+                st.current
+                    .and_then(|i| st.queue.get(i))
+                    .and_then(|t| t.album_id.clone())
             };
             if let Some(id) = id {
                 h.core.clone().open_album(id);
@@ -440,37 +478,63 @@ pub unsafe extern "C" fn ymusic_core_play(handle: *mut CoreHandle, index: usize)
 
 /// action: 0 = play next, 1 = append, 2 = play on repeat.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ymusic_core_track_action(handle: *mut CoreHandle, id: *const c_char, action: i32) {
+pub unsafe extern "C" fn ymusic_core_track_action(
+    handle: *mut CoreHandle,
+    id: *const c_char,
+    action: i32,
+) {
     ffi_guard!("ymusic_core_track_action", (), {
-        if let Some(h) = unsafe { handle.as_ref() } && !id.is_null()
+        if let Some(h) = unsafe { handle.as_ref() }
+            && !id.is_null()
             && let Ok(id) = unsafe { CStr::from_ptr(id) }.to_str()
             && let Some(track) = h.core.find_track(id)
         {
             let core = h.core.clone();
             h.core.rt_handle.spawn(async move {
                 if action == 3 {
-                    let index = core.state.lock().queue.iter().position(|t| t.id == track.id);
-                    if let Some(index) = index { core.play_index(index, true); }
+                    let index = core
+                        .state
+                        .lock()
+                        .queue
+                        .iter()
+                        .position(|t| t.id == track.id);
+                    if let Some(index) = index {
+                        core.play_index(index, true);
+                    }
+                } else if action == 4 {
+                    core.toggle_like_track(track);
+                } else if action == 5 {
+                    if let Some(id) = track.artist_id {
+                        core.open_artist(id);
+                    }
+                } else if action == 6 {
+                    if let Some(id) = track.album_id {
+                        core.open_album(id);
+                    }
+                } else if action == 2 {
+                    core.repeat_track(track);
+                } else if action == 0 || action == 1 {
+                    core.enqueue_track(track, action == 0);
                 }
-                else if action == 4 { core.toggle_like_track(track); }
-                else if action == 5 {
-                    if let Some(id) = track.artist_id { core.open_artist(id); }
-                }
-                else if action == 6 {
-                    if let Some(id) = track.album_id { core.open_album(id); }
-                }
-                else if action == 2 { core.repeat_track(track); }
-                else if action == 0 || action == 1 { core.enqueue_track(track, action == 0); }
             });
         }
     })
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ymusic_core_download_track(handle: *mut CoreHandle, id: *const c_char, path: *const c_char) {
+pub unsafe extern "C" fn ymusic_core_download_track(
+    handle: *mut CoreHandle,
+    id: *const c_char,
+    path: *const c_char,
+) {
     ffi_guard!("ymusic_core_download_track", (), {
-        if let Some(h) = unsafe { handle.as_ref() } && !id.is_null() && !path.is_null()
-            && let (Ok(id), Ok(path)) = (unsafe { CStr::from_ptr(id) }.to_str(), unsafe { CStr::from_ptr(path) }.to_str())
+        if let Some(h) = unsafe { handle.as_ref() }
+            && !id.is_null()
+            && !path.is_null()
+            && let (Ok(id), Ok(path)) = (
+                unsafe { CStr::from_ptr(id) }.to_str(),
+                unsafe { CStr::from_ptr(path) }.to_str(),
+            )
             && let Some(track) = h.core.find_track(id)
         {
             let destination = (!path.is_empty()).then(|| std::path::PathBuf::from(path));
@@ -657,7 +721,11 @@ pub unsafe extern "C" fn ymusic_core_save_session(handle: *mut CoreHandle) {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ymusic_core_spectrum_levels(handle: *mut CoreHandle, out: *mut f32, capacity: u32) -> u32 {
+pub unsafe extern "C" fn ymusic_core_spectrum_levels(
+    handle: *mut CoreHandle,
+    out: *mut f32,
+    capacity: u32,
+) -> u32 {
     ffi_guard!("ymusic_core_spectrum_levels", 0, {
         if out.is_null() || capacity == 0 {
             return 0;
@@ -756,10 +824,7 @@ mod ffi_tests {
     #[test]
     fn create_and_free_handle_safely() {
         let hits = AtomicUsize::new(0);
-        let handle = ymusic_core_new(
-            count_callback,
-            (&hits as *const AtomicUsize) as *mut c_void,
-        );
+        let handle = ymusic_core_new(count_callback, (&hits as *const AtomicUsize) as *mut c_void);
         assert!(!handle.is_null());
         unsafe {
             let mut buf = [0.0f32; 8];

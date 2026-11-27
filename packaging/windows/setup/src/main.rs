@@ -1,4 +1,7 @@
-#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
 
 use ymusic_setup::payload;
 
@@ -154,7 +157,11 @@ where
 
     on_progress(
         1.0,
-        if is_ru { "Установка завершена" } else { "Installation complete" },
+        if is_ru {
+            "Установка завершена"
+        } else {
+            "Installation complete"
+        },
     );
     Ok(())
 }
@@ -291,7 +298,8 @@ fn main() {
         return;
     }
 
-    let preview_mode = cli.preview || (embedded.is_none() && cfg!(debug_assertions) && !cli.uninstall);
+    let preview_mode =
+        cli.preview || (embedded.is_none() && cfg!(debug_assertions) && !cli.uninstall);
     let missing_payload_error = !cli.uninstall && embedded.is_none() && !preview_mode;
 
     let ui = InstallerWindow::new().expect("Failed to create installer window");

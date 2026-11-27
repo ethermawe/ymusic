@@ -1,8 +1,8 @@
+use parking_lot::Mutex;
 #[cfg(target_os = "linux")]
 use std::collections::HashMap;
 #[cfg(target_os = "linux")]
 use std::sync::Arc;
-use parking_lot::Mutex;
 
 use tokio::runtime::Handle;
 #[cfg(target_os = "linux")]
@@ -173,7 +173,10 @@ async fn serve(
         .build()
         .await?;
 
-    let iface_ref = conn.object_server().interface::<_, PlayerIface>(PATH).await?;
+    let iface_ref = conn
+        .object_server()
+        .interface::<_, PlayerIface>(PATH)
+        .await?;
 
     while let Some(note) = rx.recv().await {
         let iface = iface_ref.get().await;
@@ -283,11 +286,7 @@ impl PlayerIface {
         (self.on_action)(Action::Play);
     }
 
-    async fn seek(
-        &self,
-        offset_us: i64,
-        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
-    ) {
+    async fn seek(&self, offset_us: i64, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
         let new_pos_us = {
             let mut s = self.shared.lock();
             s.position_us = (s.position_us + offset_us).max(0);
