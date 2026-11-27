@@ -1,3 +1,4 @@
+#[cfg(target_os = "linux")]
 use parking_lot::Mutex;
 #[cfg(target_os = "linux")]
 use std::collections::HashMap;

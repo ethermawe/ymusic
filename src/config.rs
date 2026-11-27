@@ -24,10 +24,12 @@ pub enum TokenSaveOutcome {
     FileFallback { reason: String },
 }
 
+#[cfg(not(target_os = "windows"))]
 const KEYRING_SERVICE: &str = "ymusic";
 
 #[derive(Clone, Copy)]
 struct SecretSlot {
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     user: &'static str,
     #[cfg(target_os = "linux")]
     label: &'static str,
@@ -170,10 +172,12 @@ fn encode_utf16_le(text: &str) -> Vec<u8> {
 #[cfg(any(target_os = "windows", test))]
 fn decode_utf16_blob(bytes: &[u8]) -> Option<String> {
     // Windows Credential Manager stores generic secrets as UTF-16LE blobs without a trailing NUL.
-    if bytes.len() % 2 == 0 {
+    if bytes.len().is_multiple_of(2) {
         let units: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| u16::from_le_bytes(c))
             .collect();
         if let Ok(s) = String::from_utf16(&units) {
             return Some(s);
