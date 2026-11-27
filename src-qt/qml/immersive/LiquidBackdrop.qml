@@ -25,13 +25,20 @@ Item {
     id: root
 
     property bool shown: true
-    readonly property real bass: flows ? clock.energy.y : 0
+    readonly property real bass: flows ? smoothEnergy.y : 0
 
     readonly property bool flows: AppSettings.livingBackdrop && !Appearance.reduceMotion
     readonly property real sigma: AppSettings.backdropBlur
-    readonly property real renderScale: sigma > 2 ? Math.max(1 / 8, 2 / sigma) : 1
+    // Keep at least 1/4 resolution so downsampled fluid gradients never crawl or shimmer.
+    readonly property real renderScale: sigma > 4 ? Math.max(0.25, 4.0 / sigma) : 1
     readonly property size textureSize: Qt.size(Math.max(1, Math.ceil(width * renderScale)),
                                                 Math.max(1, Math.ceil(height * renderScale)))
+
+    // Heavily smoothed audio envelope + monotonic flow phase (prevents frame-to-frame UV jitter).
+    property vector4d smoothEnergy: Qt.vector4d(0, 0, 0, 0)
+    property real smoothLead: 0
+    property real flowPhase: 0
+    property real lastClockTime: 0
 
     function shade(index: int): color {
         const palette = PlayerStyle.palette;
@@ -43,11 +50,40 @@ Item {
         running: root.flows && root.shown && root.visible
         playing: Backend.playing
         reactivity: AppSettings.backdropReactivity
+
+        onFrame: {
+            const dt = Math.max(0, Math.min(0.1, clock.time - root.lastClockTime));
+            root.lastClockTime = clock.time;
+
+            if (!root.flows || !Backend.playing) {
+                root.smoothEnergy = Qt.vector4d(
+                    root.smoothEnergy.x * 0.90,
+                    root.smoothEnergy.y * 0.90,
+                    root.smoothEnergy.z * 0.90,
+                    root.smoothEnergy.w * 0.90
+                );
+                root.smoothLead *= 0.90;
+                return;
+            }
+
+            const a = 0.08;
+            root.smoothEnergy = Qt.vector4d(
+                root.smoothEnergy.x + (clock.energy.x - root.smoothEnergy.x) * a,
+                root.smoothEnergy.y + (clock.energy.y - root.smoothEnergy.y) * a,
+                root.smoothEnergy.z + (clock.energy.z - root.smoothEnergy.z) * a,
+                root.smoothEnergy.w + (clock.energy.w - root.smoothEnergy.w) * a
+            );
+            root.smoothLead += (clock.lead - root.smoothLead) * a;
+
+            // Music gently accelerates forward liquid drift instead of oscillating UV back and forth.
+            const boost = Math.min(1.2, (root.smoothEnergy.x + root.smoothEnergy.y) * 0.35 + root.smoothLead * 0.25);
+            root.flowPhase += dt * (1.0 + boost);
+        }
     }
 
     Rectangle {
         anchors.fill: parent
-        color: "#020203"
+        color: "#030304"
     }
 
     ShaderEffect {
@@ -55,9 +91,9 @@ Item {
         anchors.fill: parent
 
         property size itemSize: Qt.size(width, height)
-        property real time: root.flows ? (37 + clock.time) : 37
-        property vector4d energy: root.flows ? clock.energy : Qt.vector4d(0, 0, 0, 0)
-        property real lead: root.flows ? clock.lead : 0
+        property real time: root.flows ? (37 + root.flowPhase) : 37
+        property vector4d energy: root.flows ? root.smoothEnergy : Qt.vector4d(0, 0, 0, 0)
+        property real lead: root.flows ? root.smoothLead : 0
         property color c0: root.shade(0)
         property color c1: root.shade(1)
         property color c2: root.shade(2)
@@ -83,7 +119,7 @@ Item {
 
         property variant source: fieldTexture
         property vector2d texelStep: Qt.vector2d(1 / root.textureSize.width, 0)
-        property real sigma: root.sigma * root.renderScale
+        property real sigma: Math.min(4.0, root.sigma * root.renderScale)
 
         fragmentShader: "qrc:/shaders/backdrop_blur.frag.qsb"
     }
@@ -104,7 +140,7 @@ Item {
 
         property variant source: acrossTexture
         property vector2d texelStep: Qt.vector2d(0, 1 / root.textureSize.height)
-        property real sigma: root.sigma * root.renderScale
+        property real sigma: Math.min(4.0, root.sigma * root.renderScale)
 
         fragmentShader: "qrc:/shaders/backdrop_blur.frag.qsb"
     }

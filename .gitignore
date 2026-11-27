@@ -9,3 +9,4 @@ build-makepkg/
 *.pkg.tar.zst
 *.pkg.tar.xz
 examples/mods/dist/
+AGENTS.md

@@ -29,13 +29,41 @@ QtObject {
     property bool showingLyrics: false
     property bool showingQueue: false
     property string activeModPageId: ""
+    property bool playerBarHiddenByScroll: false
+    property real _scrollAccum: 0
+
+    function reportScroll(deltaY: real, atTop: bool) {
+        if (atTop) {
+            playerBarHiddenByScroll = false
+            _scrollAccum = 0
+            return
+        }
+        if ((deltaY > 0 && _scrollAccum < 0) || (deltaY < 0 && _scrollAccum > 0)) {
+            _scrollAccum = 0
+        }
+        _scrollAccum += deltaY
+        if (_scrollAccum >= 24) {
+            playerBarHiddenByScroll = true
+            _scrollAccum = 0
+        } else if (_scrollAccum <= -16) {
+            playerBarHiddenByScroll = false
+            _scrollAccum = 0
+        }
+    }
+
+    function showPlayerBar() {
+        playerBarHiddenByScroll = false
+        _scrollAccum = 0
+    }
 
     function openModPage(modId: string) {
         activeModPageId = modId
+        showPlayerBar()
     }
 
     function closeModPage() {
         activeModPageId = ""
+        showPlayerBar()
     }
 
     readonly property Connections modPageAutoClose: Connections {
@@ -44,6 +72,10 @@ QtObject {
             if (root.activeModPageId.length > 0) {
                 root.activeModPageId = ""
             }
+            root.showPlayerBar()
+        }
+        function onPageChanged() {
+            root.showPlayerBar()
         }
     }
 

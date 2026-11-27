@@ -57,6 +57,27 @@ Item {
         Behavior on opacity {
             NumberAnimation { duration: Appearance.duration(260); easing.type: Easing.InOutQuad }
         }
+
+        readonly property bool lineShaderActive: !root.wordKaraokeActive && root.isCurrent && root.synced && !Appearance.performanceMode
+        layer.enabled: lineShaderActive
+        layer.smooth: true
+        layer.effect: ShaderEffect {
+            property variant source
+            property color accentColor: root.accentColor
+            property color sungColor: root.textColor
+            property size itemSize: Qt.size(plainText.width, plainText.height)
+            property real progress: UiState.activeLyricProgress
+            property real lineCount: Math.max(1, plainText.lineCount)
+            property real textWidthFrac: plainText.width > 0
+                ? Math.min(1.0, Math.max(0.06, plainText.contentWidth / plainText.width))
+                : 1.0
+            property real dimAlpha: Math.max(root.dimAlpha, 0.48)
+            property real glowAmount: root.glowAmount
+            property real zoomAmount: Appearance.reduceMotion ? 0.0 : 0.075
+            property real padTop: plainText.topPadding
+            property real padBottom: plainText.bottomPadding
+            fragmentShader: "qrc:/shaders/lyric_karaoke.frag.qsb"
+        }
     }
 
     Flow {
@@ -83,8 +104,12 @@ Item {
                 font.weight: root.fontWeight
                 color: wordProg >= 1.0 ? root.sungLitColor : root.textColor
                 opacity: isSinging ? 1.0 : (wordProg >= 1.0 ? 1.0 : root.dimAlpha)
+                z: isSinging ? 1 : 0
+                // Room inside the layer texture for glyphs lifted by the shader wave.
+                topPadding: 4
+                bottomPadding: 2
 
-                layer.enabled: isSinging
+                layer.enabled: isSinging && !Appearance.performanceMode
                 layer.smooth: true
                 layer.effect: ShaderEffect {
                     property variant source
@@ -98,6 +123,9 @@ Item {
                         : 1.0
                     property real dimAlpha: root.dimAlpha
                     property real glowAmount: root.glowAmount
+                    property real zoomAmount: Appearance.reduceMotion ? 0.0 : 0.075
+                    property real padTop: wordItem.topPadding
+                    property real padBottom: wordItem.bottomPadding
                     fragmentShader: "qrc:/shaders/lyric_karaoke.frag.qsb"
                 }
             }
