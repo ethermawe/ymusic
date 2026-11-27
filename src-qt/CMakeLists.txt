@@ -34,7 +34,8 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core CorePrivate Gui GuiPrivate Widgets Quick Qml QuickControls2 Network ShaderTools Svg Concurrent)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Quick Qml QuickControls2 Network ShaderTools Svg Concurrent)
+find_package(Qt6 6.5 QUIET COMPONENTS CorePrivate GuiPrivate)
 
 if(Qt6_VERSION VERSION_GREATER_EQUAL "6.8")
     qt_policy(SET QTP0004 NEW)
@@ -443,9 +444,9 @@ endif()
 target_link_directories(ymusic-qml PRIVATE ${RUST_LIB_DIR})
 target_link_libraries(ymusic-qml PRIVATE
     Qt6::Core
-    Qt6::CorePrivate
+    $<$<TARGET_EXISTS:Qt6::CorePrivate>:Qt6::CorePrivate>
     Qt6::Gui
-    Qt6::GuiPrivate
+    $<$<TARGET_EXISTS:Qt6::GuiPrivate>:Qt6::GuiPrivate>
     Qt6::Widgets
     Qt6::Quick
     Qt6::Qml
@@ -584,9 +585,9 @@ if(BUILD_TESTING)
     target_compile_definitions(mod_manager_test PRIVATE YMUSIC_MOD_TEST_NO_BACKEND=1)
     target_link_libraries(mod_manager_test PRIVATE
         Qt6::Core
-        Qt6::CorePrivate
+        $<$<TARGET_EXISTS:Qt6::CorePrivate>:Qt6::CorePrivate>
         Qt6::Gui
-        Qt6::GuiPrivate
+        $<$<TARGET_EXISTS:Qt6::GuiPrivate>:Qt6::GuiPrivate>
         Qt6::Qml
         Qt6::Quick
         Qt6::QuickControls2
