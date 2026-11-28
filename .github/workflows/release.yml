@@ -284,3 +284,85 @@ jobs:
           tag_name: ${{ needs.meta.outputs.tag }}
           generate_release_notes: true
           files: release-assets/*
+
+  publish-aur:
+    needs: [meta, release]
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check AUR secret
+        id: check
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -n "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "AUR_SSH_PRIVATE_KEY is not set; skipping AUR publish."
+          fi
+
+      - name: Download Arch package artifact
+        if: steps.check.outputs.enabled == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-arch
+          path: aur-assets
+
+      - name: Update ymusic-bin in AUR
+        if: steps.check.outputs.enabled == 'true'
+        env:
+          TAG: ${{ needs.meta.outputs.tag }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+        run: |
+          PKGVER="${TAG#v}"
+          PKGVER="${PKGVER//-/_}"
+          PKG_FILE="aur-assets/ymusic-${PKGVER}-1-x86_64.pkg.tar.zst"
+          if [ ! -f "$PKG_FILE" ]; then
+            echo "Expected Arch package not found: $PKG_FILE"
+            exit 1
+          fi
+          SHA256="$(sha256sum "$PKG_FILE" | awk '{print $1}')"
+          GIT_NAME="${AUR_USERNAME:-ethermawe}"
+          GIT_EMAIL="${AUR_EMAIL:-ethermawe@users.noreply.github.com}"
+
+          cat > aur-publish.sh <<'EOF'
+          set -euo pipefail
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/id_aur -o IdentitiesOnly=yes"
+          git config --global user.name "$GIT_NAME"
+          git config --global user.email "$GIT_EMAIL"
+          git clone ssh://aur@aur.archlinux.org/ymusic-bin.git ~/ymusic-bin
+          cd ~/ymusic-bin
+          sed -i "s/^pkgver=.*/pkgver=${PKGVER}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          sed -i "s/^sha256sums=.*/sha256sums=('${SHA256}')/" PKGBUILD
+          makepkg --printsrcinfo > .SRCINFO
+          if git diff --quiet PKGBUILD .SRCINFO; then
+            echo "AUR package ymusic-bin is already up to date (${PKGVER})."
+            exit 0
+          fi
+          git add PKGBUILD .SRCINFO
+          git commit -m "Update to v${PKGVER}"
+          git push origin master
+          EOF
+
+          docker run --rm \
+            -e PKGVER="$PKGVER" \
+            -e SHA256="$SHA256" \
+            -e AUR_SSH_PRIVATE_KEY \
+            -e GIT_NAME="$GIT_NAME" \
+            -e GIT_EMAIL="$GIT_EMAIL" \
+            -v "$PWD/aur-publish.sh:/aur-publish.sh:ro" \
+            archlinux:latest bash -euo pipefail -c '
+              pacman -Sy --noconfirm --needed git openssh
+              useradd -m builder
+              install -d -m 700 -o builder -g builder /home/builder/.ssh
+              printf "%s\n" "$AUR_SSH_PRIVATE_KEY" > /home/builder/.ssh/id_aur
+              chmod 600 /home/builder/.ssh/id_aur
+              chown builder:builder /home/builder/.ssh/id_aur
+              ssh-keyscan -t ed25519,rsa aur.archlinux.org >> /home/builder/.ssh/known_hosts
+              chown builder:builder /home/builder/.ssh/known_hosts
+              su -w PKGVER,SHA256,GIT_NAME,GIT_EMAIL - builder -c "bash /aur-publish.sh"
+            '
