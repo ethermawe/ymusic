@@ -137,7 +137,7 @@ FocusScope {
     }
 
     readonly property bool usesPanelLayout: panel.length > 0
-    readonly property bool showsSpectrum: appSettings.visualizersEnabled && appSettings.immersiveVisualizer && !appSettings.circularVisualizer
+    readonly property bool showsSpectrum: AppSettings.visualizersEnabled && AppSettings.immersiveVisualizer && !AppSettings.circularVisualizer
     readonly property bool effectiveUsesPanelLayout: distractionFree && controlsHidden ? panelRetainedInDistractionFree : usesPanelLayout
 
     readonly property real metadataWidth: Math.max(300, Math.min(400, width * 0.32))
@@ -192,7 +192,7 @@ FocusScope {
 
     function commitPanel() {
         if (pendingRemembers) {
-            appSettings.immersivePlayerPanel = pendingPanel.length > 0 ? pendingPanel : "artwork";
+            AppSettings.immersivePlayerPanel = pendingPanel.length > 0 ? pendingPanel : "artwork";
         }
         if (pendingPanel.length > 0 !== usesPanelLayout) {
             layoutMoving = true;
@@ -246,7 +246,7 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        panel = resolvedPanel(appSettings.immersivePlayerPanel);
+        panel = resolvedPanel(AppSettings.immersivePlayerPanel);
         shownPanel = panel;
         if (panel === "lyrics") UiState.ensureLyrics(true);
         forceActiveFocus();
@@ -256,25 +256,25 @@ FocusScope {
         root.registerActivity();
         switch (event.key) {
         case Qt.Key_Space:
-            backend.toggle();
+            Backend.toggle();
             break;
         case Qt.Key_Escape:
             if (root.distractionFree) root.setDistractionFree(false);
             else root.closeRequested();
             break;
         case Qt.Key_Left:
-            if (backend.durationSecs > 0)
-                backend.seek(Math.max(0, (backend.positionSecs - 10) / backend.durationSecs));
+            if (Backend.durationSecs > 0)
+                Backend.seek(Math.max(0, (Backend.positionSecs - 10) / Backend.durationSecs));
             break;
         case Qt.Key_Right:
-            if (backend.durationSecs > 0)
-                backend.seek(Math.min(1, (backend.positionSecs + 10) / backend.durationSecs));
+            if (Backend.durationSecs > 0)
+                Backend.seek(Math.min(1, (Backend.positionSecs + 10) / Backend.durationSecs));
             break;
         case Qt.Key_Up:
-            backend.setVolume(Math.min(backend.volume + 0.05, 1));
+            Backend.setVolume(Math.min(Backend.volume + 0.05, 1));
             break;
         case Qt.Key_Down:
-            backend.setVolume(Math.max(backend.volume - 0.05, 0));
+            Backend.setVolume(Math.max(Backend.volume - 0.05, 0));
             break;
         default:
             return;
@@ -288,7 +288,7 @@ FocusScope {
         windowHeight: root.height - Math.max(0, topBar.height - 70)
         showsSpectrum: root.showsSpectrum
         showsPanel: root.sideBySide
-        circular: appSettings.visualizersEnabled && appSettings.immersiveVisualizer && appSettings.circularVisualizer
+        circular: AppSettings.visualizersEnabled && AppSettings.immersiveVisualizer && AppSettings.circularVisualizer
     }
 
     LiquidBackdrop {
@@ -299,7 +299,7 @@ FocusScope {
 
     Stickers {
         anchors.fill: parent
-        key: (backend.nowId || "immersive") + "-" + backend.nowAlbum
+        key: (Backend.nowId || "immersive") + "-" + Backend.nowAlbum
         count: 6
         minimumSize: Math.max(150, Math.round(Math.min(root.width, root.height) * 0.24))
         maximumSize: Math.max(280, Math.round(Math.min(root.width, root.height) * 0.46))
@@ -361,7 +361,7 @@ FocusScope {
                 return;
             }
             root.registerActivity();
-            backend.setVolume(Math.max(0, Math.min(1, backend.volume + (deltaUnits / 120.0) * 0.05)));
+            Backend.setVolume(Math.max(0, Math.min(1, Backend.volume + (deltaUnits / 120.0) * 0.05)));
             event.accepted = true;
         }
     }
@@ -395,7 +395,7 @@ FocusScope {
             id: immersiveClose
             anchors.left: parent.left
             anchors.leftMargin: 24
-            y: Math.max(18, (appSettings.windowControlsOnRight ? 0 : root.windowControlsTopInset) + 6)
+            y: Math.max(18, (AppSettings.windowControlsOnRight ? 0 : root.windowControlsTopInset) + 6)
             scheme: root.scheme
             symbol: "close"
             size: 34
@@ -466,7 +466,7 @@ FocusScope {
             id: switcher
             anchors.right: parent.right
             anchors.rightMargin: 24
-            y: Math.max(18, (appSettings.windowControlsOnRight ? root.windowControlsTopInset : 0) + 6)
+            y: Math.max(18, (AppSettings.windowControlsOnRight ? root.windowControlsTopInset : 0) + 6)
             scheme: root.scheme
             segmentHeight: 30
             horizontalPadding: 12
@@ -510,7 +510,7 @@ FocusScope {
 
         ImmersiveNowPlaying {
             id: nowPlaying
-            Reveal.shown: backend.hasTrack && !root.panelOnly
+            Reveal.shown: Backend.hasTrack && !root.panelOnly
             layout: immersiveLayout
             metadataWidth: Math.min(root.metadataWidth, root.nowPlayingWidth)
             animateLayout: root.layoutMoving
@@ -533,13 +533,13 @@ FocusScope {
 
         Loader {
             id: panelHost
-            visible: backend.hasTrack && root.shownPanel.length > 0 && opacity > 0
+            visible: Backend.hasTrack && root.shownPanel.length > 0 && opacity > 0
             x: root.panelX + root.panelShift * root.panelSlide
             width: root.panelWidth
             height: root.panelHeight
             anchors.verticalCenter: parent.verticalCenter
             opacity: root.panelOpacity * root.panelDistractionFreeOpacity
-            active: backend.hasTrack && root.shownPanel.length > 0
+            active: Backend.hasTrack && root.shownPanel.length > 0
             sourceComponent: {
                 if (root.shownPanel.startsWith("mod:")) return modPanelComponent;
                 switch (root.shownPanel) {
@@ -554,7 +554,7 @@ FocusScope {
 
         EmptyState {
             anchors.centerIn: parent
-            Reveal.shown: !backend.hasTrack
+            Reveal.shown: !Backend.hasTrack
             scheme: root.scheme
             symbol: "music_note"
             title: "Ничего не играет"
@@ -598,10 +598,10 @@ FocusScope {
         width: parent.width - 84
         height: immersiveLayout.spectrumHeight
         kind: SpectrumView.Immersive
-        wave: appSettings.visualizerShape === "wave"
-        continuous: appSettings.continuousVisualizer
-        sensitivity: appSettings.visualizerSensitivity
-        active: backend.playing && root.showsSpectrum
+        wave: AppSettings.visualizerShape === "wave"
+        continuous: AppSettings.continuousVisualizer
+        sensitivity: AppSettings.visualizerSensitivity
+        active: Backend.playing && root.showsSpectrum
         opacity: !root.showsSpectrum ? 0 : (root.usesPanelLayout ? 0.74 : 1)
 
         Behavior on opacity {

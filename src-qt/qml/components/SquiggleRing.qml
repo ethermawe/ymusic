@@ -34,7 +34,7 @@ ShaderEffect {
 
     property size itemSize: Qt.size(width, height)
     property real radius: Math.max(1, Math.min(width, height) / 2 - amplitude - thickness / 2 - 0.5)
-    property real waves: appSettings.noShapes ? 0 : Math.max(5, Math.round(2 * Math.PI * radius / wavelength))
+    property real waves: AppSettings.noShapes ? 0 : Math.max(5, Math.round(2 * Math.PI * radius / wavelength))
     property real phase: visible ? (waves * speed * UiState.spin) % (2 * Math.PI) : 0
 
     fragmentShader: "qrc:/shaders/squiggle_ring.frag.qsb"

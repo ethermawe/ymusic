@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(ymusic_qt LANGUAGES CXX)
 include(GNUInstallDirs)
 
-set(YMUSIC_VERSION "0.3.0" CACHE STRING "Application version")
+set(YMUSIC_VERSION "0.3.1" CACHE STRING "Application version")
 string(REGEX REPLACE "^v" "" YMUSIC_VERSION_CLEAN "${YMUSIC_VERSION}")
 string(REGEX MATCHALL "[0-9]+" YMUSIC_VERSION_PARTS "${YMUSIC_VERSION_CLEAN}")
 list(LENGTH YMUSIC_VERSION_PARTS _ymusic_ver_len)
@@ -35,6 +35,7 @@ if(MSVC)
 endif()
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Quick Qml QuickControls2 Network ShaderTools Svg Concurrent)
+find_package(Qt6 6.5 QUIET COMPONENTS CorePrivate GuiPrivate)
 
 if(Qt6_VERSION VERSION_GREATER_EQUAL "6.8")
     qt_policy(SET QTP0004 NEW)
@@ -160,6 +161,12 @@ set(YMUSIC_CPP_SOURCES
     mods/ModManager.cpp
     mods/ModManifest.h
     mods/ModManifest.cpp
+    mods/ModNetworkAccessManager.h
+    mods/ModNetworkAccessManager.cpp
+    mods/ModScriptHost.h
+    mods/ModScriptHost.cpp
+    mods/ModSlotItem.h
+    mods/ModSlotItem.cpp
     mods/ModUrlInterceptor.h
     mods/ModUrlInterceptor.cpp
     theme/ColorMath.h
@@ -247,6 +254,7 @@ set(QML_FILES
     qml/components/TransportButton.qml
     qml/components/WavyClip.qml
     qml/components/WavyPill.qml
+    qml/components/WhatsNewDialog.qml
     qml/shell/NavigationItem.qml
     qml/shell/PlaybackMenu.qml
     qml/shell/SectionLabel.qml
@@ -303,6 +311,53 @@ qt_add_qml_module(ymusic-qml
     RESOURCE_PREFIX /qt/qml
     VERSION 1.0
     QML_FILES ${QML_FILES}
+)
+
+set(YMUSIC_SDK_QML_FILES
+    sdk/qml/Badge.qml
+    sdk/qml/Card.qml
+    sdk/qml/Chip.qml
+    sdk/qml/ConfigSwitch.qml
+    sdk/qml/ContentSection.qml
+    sdk/qml/IconButton.qml
+    sdk/qml/MaterialSymbol.qml
+    sdk/qml/NoteText.qml
+    sdk/qml/OutlinedTextField.qml
+    sdk/qml/RoundedImage.qml
+    sdk/qml/SpectrumBars.qml
+    sdk/qml/StyledMenu.qml
+    sdk/qml/StyledMenuItem.qml
+    sdk/qml/StyledMenuSeparator.qml
+    sdk/qml/StyledSlider.qml
+    sdk/qml/StyledText.qml
+    sdk/qml/TextButton.qml
+    sdk/qml/TitleText.qml
+)
+
+qt_add_qml_module(ymusic_sdk
+    URI ymusic.sdk
+    RESOURCE_PREFIX /qt/qml
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ymusic/sdk"
+    VERSION 1.0
+    STATIC
+    SOURCES
+        sdk/ModTheme.h
+        sdk/ModTheme.cpp
+    QML_FILES ${YMUSIC_SDK_QML_FILES}
+)
+target_include_directories(ymusic_sdk PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app"
+    "${CMAKE_CURRENT_SOURCE_DIR}/artwork"
+    "${CMAKE_CURRENT_SOURCE_DIR}/sdk"
+    "${CMAKE_CURRENT_SOURCE_DIR}/theme"
+)
+target_link_libraries(ymusic_sdk PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
+    Qt6::QuickControls2
 )
 
 qt_add_shaders(ymusic-qml "ymusic_shaders"
@@ -389,7 +444,9 @@ endif()
 target_link_directories(ymusic-qml PRIVATE ${RUST_LIB_DIR})
 target_link_libraries(ymusic-qml PRIVATE
     Qt6::Core
+    $<$<TARGET_EXISTS:Qt6::CorePrivate>:Qt6::CorePrivate>
     Qt6::Gui
+    $<$<TARGET_EXISTS:Qt6::GuiPrivate>:Qt6::GuiPrivate>
     Qt6::Widgets
     Qt6::Quick
     Qt6::Qml
@@ -398,6 +455,8 @@ target_link_libraries(ymusic-qml PRIVATE
     Qt6::Concurrent
     Qt6::Svg
     material_color_utilities
+    ymusic_sdk
+    ymusic_sdkplugin
 )
 
 if(WIN32)
@@ -494,20 +553,49 @@ if(BUILD_TESTING)
     add_executable(mod_manager_test
         tests/ModManagerTest.cpp
         AppSettings.h
+        app/Fonts.h
+        app/Fonts.cpp
         app/Paths.h
         app/Paths.cpp
+        artwork/ArtworkPalette.h
+        artwork/ArtworkPalette.cpp
+        theme/ColorMath.h
+        theme/MaterialScheme.h
+        theme/MaterialScheme.cpp
+        theme/Theme.h
+        theme/Theme.cpp
+        theme/Themes.h
+        theme/Themes.cpp
         mods/ModApi.h
         mods/ModApi.cpp
         mods/ModManager.h
         mods/ModManager.cpp
         mods/ModManifest.h
         mods/ModManifest.cpp
+        mods/ModNetworkAccessManager.h
+        mods/ModNetworkAccessManager.cpp
+        mods/ModScriptHost.h
+        mods/ModScriptHost.cpp
+        mods/ModSlotItem.h
+        mods/ModSlotItem.cpp
         mods/ModUrlInterceptor.h
         mods/ModUrlInterceptor.cpp
     )
     target_include_directories(mod_manager_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_definitions(mod_manager_test PRIVATE YMUSIC_MOD_TEST_NO_BACKEND=1)
-    target_link_libraries(mod_manager_test PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Network)
+    target_link_libraries(mod_manager_test PRIVATE
+        Qt6::Core
+        $<$<TARGET_EXISTS:Qt6::CorePrivate>:Qt6::CorePrivate>
+        Qt6::Gui
+        $<$<TARGET_EXISTS:Qt6::GuiPrivate>:Qt6::GuiPrivate>
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
+        Qt6::Network
+        material_color_utilities
+        ymusic_sdk
+        ymusic_sdkplugin
+    )
     add_test(NAME mod_manager_test COMMAND mod_manager_test)
     set_tests_properties(mod_manager_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

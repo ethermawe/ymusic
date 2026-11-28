@@ -27,9 +27,9 @@ Item {
     property MaterialScheme scheme: Appearance.colors
     property color activeColor: scheme.primary
     property color trackColor: scheme.secondaryContainer
-    property real positionMs: backend.positionSecs * 1000
-    property real durationMs: backend.durationSecs * 1000
-    property bool playing: backend.playing
+    property real positionMs: Backend.positionSecs * 1000
+    property real durationMs: Backend.durationSecs * 1000
+    property bool playing: Backend.playing
     property bool externalHover: false
     property bool expanded: hover.hovered || externalHover || scrub.editing
     property real restThickness: 4
@@ -49,7 +49,7 @@ Item {
     readonly property real shownFraction: fraction + (handoverFrom - fraction) * handover
 
     implicitHeight: 24
-    enabled: backend.hasTrack && durationMs > 0
+    enabled: Backend.hasTrack && durationMs > 0
 
     onPositionMsChanged: {
         positionAnchorMs = positionMs
@@ -70,7 +70,7 @@ Item {
     }
 
     Connections {
-        target: backend
+        target: Backend
         function onTrackInstanceIdChanged() {
             scrub.cancel()
             root.scrubPosition = -1
@@ -94,7 +94,7 @@ Item {
         anchors.fill: parent
         property size itemSize: Qt.size(width, height)
         property real progress: root.shownFraction
-        property real amplitude: root.playing && !Appearance.reduceMotion && !appSettings.noShapes
+        property real amplitude: root.playing && !Appearance.reduceMotion && !AppSettings.noShapes
                                  ? (root.expanded ? 2.4 : 1.6) : 0
         property real wavelength: 34
         property real phase: root.visible ? -(UiState.spin * 4.36) % (2 * Math.PI) : 0
@@ -106,7 +106,7 @@ Item {
         property color trackColor: root.trackColor
         property color handleColor: root.activeColor
         fragmentShader: "qrc:/shaders/wavy_progress.frag.qsb"
-        opacity: backend.hasTrack ? 1 : 0.45
+        opacity: Backend.hasTrack ? 1 : 0.45
 
         Behavior on amplitude {
             NumberAnimation { duration: Appearance.motion(400); easing.type: Easing.OutCubic }
@@ -134,18 +134,18 @@ Item {
         }
 
         onPressed: (mouse) => {
-            scrub.begin(backend.trackInstanceId)
+            scrub.begin(Backend.trackInstanceId)
             root.scrubPosition = positionAt(mouse.x)
         }
         onPositionChanged: (mouse) => {
-            if (scrub.acceptsChanges(backend.trackInstanceId)) {
+            if (scrub.acceptsChanges(Backend.trackInstanceId)) {
                 root.scrubPosition = positionAt(mouse.x)
             }
         }
         onReleased: {
-            const target = scrub.finish(backend.trackInstanceId, root.scrubPosition)
+            const target = scrub.finish(Backend.trackInstanceId, root.scrubPosition)
             if (target >= 0 && root.durationMs > 0) {
-                backend.seek(target / root.durationMs)
+                Backend.seek(target / root.durationMs)
             }
             root.scrubPosition = -1
         }

@@ -25,6 +25,18 @@ enum YMusicEventType {
 typedef struct CoreHandle CoreHandle;
 typedef void (*EventCallback)(int32_t event_type, const char *json_data, void *user_data);
 
+/*
+ * Lifetime & thread-safety contract:
+ * - `callback` may be invoked from background worker threads with `user_data`.
+ * - `callback` is invoked without holding internal Rust locks.
+ * - `ymusic_core_free(handle)` marks the sink closed, waits for any in-flight
+ *   callbacks on other threads to finish (re-entrant calls from inside the
+ *   callback itself will not deadlock), and shuts down the core runtime.
+ * - After `ymusic_core_free` returns, `callback` is guaranteed not to be called
+ *   again for that handle, so `user_data` may be destroyed safely.
+ * - Passing NULL to any function is a safe no-op. Panics are caught at the FFI
+ *   boundary and logged to crash.log instead of unwinding into C++.
+ */
 CoreHandle *ymusic_core_new(EventCallback callback, void *user_data);
 void ymusic_core_free(CoreHandle *handle);
 
@@ -73,6 +85,9 @@ void ymusic_core_toggle_now_like(CoreHandle *handle);
 void ymusic_core_dislike_now(CoreHandle *handle);
 void ymusic_core_save_session(CoreHandle *handle);
 uint32_t ymusic_core_spectrum_levels(CoreHandle *handle, float *out, uint32_t capacity);
+
+void ymusic_hook_subscribe(CoreHandle *handle, const char *point, bool enabled);
+void ymusic_hook_response(CoreHandle *handle, uint64_t id, const char *json);
 
 #ifdef __cplusplus
 }

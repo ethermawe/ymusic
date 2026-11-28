@@ -29,7 +29,7 @@ Item {
     property bool wavy: false
     property real depth: 3.5
     property real wavelength: 22
-    property real waviness: wavy && !appSettings.noShapes ? depth : 0
+    property real waviness: wavy && !AppSettings.noShapes ? depth : 0
     readonly property real phase: drift.value
     readonly property bool waving: Math.abs(waviness) > 0.01
 
@@ -40,7 +40,7 @@ Item {
 
     Drift {
         id: drift
-        active: root.wavy && root.visible && !appSettings.noShapes
+        active: root.wavy && root.visible && !AppSettings.noShapes
         speed: 2 * Math.PI / 2.4
     }
 

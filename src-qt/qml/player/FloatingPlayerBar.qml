@@ -15,15 +15,15 @@ Item {
     readonly property real buttonSize: tiny ? 28 : (compact ? 30 : 32)
     readonly property real innerGap: tiny ? 6 : (compact ? 10 : 14)
     readonly property bool titleFits: twoRow || (nowPlaying.width - artwork.width - 8 >= 48)
-    readonly property bool showsMeter: !compact && appSettings.visualizersEnabled && appSettings.playerBarVisualizer && backend.hasTrack
+    readonly property bool showsMeter: !compact && AppSettings.visualizersEnabled && AppSettings.playerBarVisualizer && Backend.hasTrack
     property bool progressExpanded: seek.expanded || seekTwoRow.expanded
 
     function openTrackMenuAt(item, lx, ly) {
-        if (!backend.hasTrack) return
+        if (!Backend.hasTrack) return
         const appWindow = root.Window.window
         if (!appWindow) return
         const pt = item.mapToItem(appWindow.contentItem, lx, ly)
-        backend.requestTrackMenu(backend.nowId, backend.nowTitle, true, pt.x, pt.y)
+        Backend.requestTrackMenu(Backend.nowId, Backend.nowTitle, true, pt.x, pt.y)
     }
 
     implicitHeight: twoRow ? 98 : 66
@@ -62,7 +62,7 @@ Item {
 
         MouseArea {
             anchors.fill: parent
-            acceptedButtons: Qt.RightButton
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
             hoverEnabled: true
             onClicked: (mouse) => {
                 if (mouse.button === Qt.RightButton) {
@@ -70,11 +70,11 @@ Item {
                 }
             }
             onWheel: (wheel) => {
-                const step = appSettings.volumeStep
+                const step = AppSettings.volumeStep
                 if (wheel.angleDelta.y > 0) {
-                    backend.setVolume(Math.min(1.0, backend.volume + step))
+                    Backend.setVolume(Math.min(1.0, Backend.volume + step))
                 } else if (wheel.angleDelta.y < 0) {
-                    backend.setVolume(Math.max(0.0, backend.volume - step))
+                    Backend.setVolume(Math.max(0.0, Backend.volume - step))
                 }
                 wheel.accepted = true
             }
@@ -98,10 +98,10 @@ Item {
 
             ModSlotHost {
                 layoutMode: "row"
-                spacing: root.tiny ? 2 : 4
+                spacing: 6
                 height: root.buttonSize
                 anchors.verticalCenter: parent.verticalCenter
-                visible: implicitWidth > 0
+                visible: entries.length > 0
                 slotName: "playerBar.left"
                 slotContext: ({
                     scheme: root.scheme,
@@ -120,10 +120,10 @@ Item {
                 toggledShape: "clover4"
                 size: root.buttonSize
                 iconSize: 19
-                toggled: backend.shuffle
+                toggled: Backend.shuffle
                 fillWhenToggled: false
-                tooltip: backend.shuffle ? qsTr("Выключить перемешивание") : qsTr("Перемешивать")
-                onClicked: backend.toggleShuffle()
+                tooltip: Backend.shuffle ? qsTr("Выключить перемешивание") : qsTr("Перемешивать")
+                onClicked: Backend.toggleShuffle()
             }
 
             TransportButton {
@@ -137,20 +137,20 @@ Item {
                 iconSize: root.tiny ? 20 : 22
                 fillWhenToggled: false
                 alwaysFilled: true
-                enabled: backend.hasTrack
+                enabled: Backend.hasTrack
                 tooltip: qsTr("Предыдущий трек")
-                onClicked: backend.prev()
+                onClicked: Backend.prev()
             }
 
             PlayButton {
                 anchors.verticalCenter: parent.verticalCenter
                 size: root.tiny ? 36 : (root.compact ? 40 : 44)
-                enabled: backend.hasTrack
-                playing: backend.playing
+                enabled: Backend.hasTrack
+                playing: Backend.playing
                 color: root.scheme.primary
                 hoverColor: root.scheme.primaryHover
                 iconColor: root.scheme.onPrimary
-                onClicked: backend.toggle()
+                onClicked: Backend.toggle()
             }
 
             TransportButton {
@@ -163,9 +163,9 @@ Item {
                 size: root.buttonSize
                 iconSize: root.tiny ? 20 : 22
                 alwaysFilled: true
-                enabled: backend.hasTrack
+                enabled: Backend.hasTrack
                 tooltip: qsTr("Следующий трек")
-                onClicked: backend.next()
+                onClicked: Backend.next()
             }
 
             TransportButton {
@@ -173,15 +173,15 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 scheme: root.scheme
                 effect: TransportButton.Bounce
-                symbol: backend.repeatMode === 2 ? "repeat_one" : "repeat"
-                toggledShape: backend.repeatMode === 2 ? "cookie4" : "cookie6"
+                symbol: Backend.repeatMode === 2 ? "repeat_one" : "repeat"
+                toggledShape: Backend.repeatMode === 2 ? "cookie4" : "cookie6"
                 size: root.buttonSize
                 iconSize: 19
-                toggled: backend.repeatMode !== 0
+                toggled: Backend.repeatMode !== 0
                 fillWhenToggled: false
-                enabled: backend.hasTrack
-                tooltip: backend.repeatMode === 2 ? qsTr("Повтор: трек") : (backend.repeatMode === 1 ? qsTr("Повтор: всё") : qsTr("Повтор выкл."))
-                onClicked: backend.toggleRepeat()
+                enabled: Backend.hasTrack
+                tooltip: Backend.repeatMode === 2 ? qsTr("Повтор: трек") : (Backend.repeatMode === 1 ? qsTr("Повтор: всё") : qsTr("Повтор выкл."))
+                onClicked: Backend.toggleRepeat()
             }
         }
 
@@ -211,7 +211,7 @@ Item {
                 }
 
                 Connections {
-                    target: backend
+                    target: Backend
                     function onTrackInstanceIdChanged() {
                         if (!Appearance.performanceMode) popIn.restart()
                     }
@@ -244,15 +244,15 @@ Item {
                 ArtworkImage {
                     anchors.fill: parent
                     radius: Appearance.sizes.smallArtworkRadius
-                    source: backend.hasCover ? backend.nowCover : ""
+                    source: Backend.hasCover ? Backend.nowCover : ""
                     crossfade: true
-                    fallbackKey: backend.nowId.length > 0 ? backend.nowId : backend.nowTitle
+                    fallbackKey: Backend.nowId.length > 0 ? Backend.nowId : Backend.nowTitle
                 }
 
                 Rectangle {
                     anchors.fill: parent
                     radius: Appearance.sizes.smallArtworkRadius
-                    color: Qt.rgba(0, 0, 0, artHover.hovered && backend.hasTrack ? 0.28 : 0)
+                    color: Qt.rgba(0, 0, 0, artHover.hovered && Backend.hasTrack ? 0.28 : 0)
 
                     Behavior on color {
                         ColorAnimation { duration: Appearance.duration(160) }
@@ -264,17 +264,17 @@ Item {
                         iconSize: 16
                         weight: 600
                         color: "white"
-                        opacity: artHover.hovered && backend.hasTrack ? 1 : 0
+                        opacity: artHover.hovered && Backend.hasTrack ? 1 : 0
                     }
                 }
 
                 HoverHandler {
                     id: artHover
-                    cursorShape: backend.hasTrack ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    cursorShape: Backend.hasTrack ? Qt.PointingHandCursor : Qt.ArrowCursor
                 }
                 TapHandler {
                     acceptedButtons: Qt.LeftButton
-                    onTapped: if (backend.hasTrack) root.immersiveRequested()
+                    onTapped: if (Backend.hasTrack) root.immersiveRequested()
                 }
             }
 
@@ -314,29 +314,31 @@ Item {
                         width: parent.width
                         height: Math.max(nowTitleItem.implicitHeight, 18)
 
-                        readonly property bool showAiBadge: backend.hasTrack && backend.showAiLabels && backend.nowIsAi
+                        readonly property bool showAiBadge: Backend.hasTrack && Backend.showAiLabels && Backend.nowIsAi
 
                         TitleText {
                             id: nowTitleItem
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Math.min(implicitWidth, Math.max(0, parent.width - (playerAiBadge.visible ? playerAiBadge.width + 6 : 0)))
-                            text: backend.hasTrack ? backend.nowTitle : qsTr("Ничего не играет")
+                            readonly property real badgesWidth: (playerAiBadge.visible ? playerAiBadge.width + 6 : 0)
+                                + (playerTrackBadges.visible ? playerTrackBadges.width + 6 : 0)
+                            width: Math.min(implicitWidth, Math.max(0, parent.width - badgesWidth))
+                            text: Backend.hasTrack ? Backend.nowTitle : qsTr("Ничего не играет")
                             elide: Text.ElideRight
                             animateChange: true
                             changeDistanceX: 6
                             changeDistanceY: 0
                             font.pixelSize: Appearance.fontSize.small
                             color: root.scheme.onSurface
-                            font.underline: titleHover.hovered && backend.nowHasAlbum
+                            font.underline: titleHover.hovered && Backend.nowHasAlbum
 
                             HoverHandler {
                                 id: titleHover
-                                cursorShape: backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                cursorShape: Backend.nowHasAlbum ? Qt.PointingHandCursor : Qt.ArrowCursor
                             }
                             TapHandler {
-                                enabled: backend.nowHasAlbum
-                                onTapped: backend.openNowAlbum()
+                                enabled: Backend.nowHasAlbum
+                                onTapped: Backend.openNowAlbum()
                             }
 
                             ShaderEffect {
@@ -351,7 +353,7 @@ Item {
                                 anchors.topMargin: 1
                                 width: parent.width
                                 height: 2
-                                opacity: backend.buffering ? 1 : 0
+                                opacity: Backend.buffering ? 1 : 0
                                 visible: opacity > 0
                                 fragmentShader: "qrc:/shaders/gleam.frag.qsb"
 
@@ -377,14 +379,76 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             scheme: root.scheme
                         }
+
+                        Row {
+                            id: playerTrackBadges
+                            readonly property var modBadges: {
+                                const _rev = ModManager.trackBadgesRevision;
+                                const tid = Backend.hasTrack ? String(Backend.nowId || "") : "";
+                                return tid.length > 0 ? ModManager.trackBadgesFor(tid) : [];
+                            }
+                            spacing: 4
+                            height: 18
+                            visible: Backend.hasTrack && modBadges.length > 0
+                            anchors.left: playerAiBadge.visible ? playerAiBadge.right : nowTitleItem.right
+                            anchors.leftMargin: 6
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            Repeater {
+                                model: playerTrackBadges.modBadges
+                                delegate: Rectangle {
+                                    id: badgePill
+                                    required property var modelData
+                                    readonly property string tone: String(modelData?.tone || "")
+                                    readonly property string tipText: String(modelData?.tooltip || "")
+                                    readonly property color bg: tone === "primary" ? root.scheme.primaryContainer
+                                        : tone === "secondary" ? root.scheme.secondaryContainer
+                                        : tone === "tertiary" ? root.scheme.tertiaryContainer
+                                        : tone === "error" ? root.scheme.errorContainer
+                                        : root.scheme.surfaceContainerHigh
+                                    readonly property color fg: tone === "primary" ? root.scheme.onPrimaryContainer
+                                        : tone === "secondary" ? root.scheme.onSecondaryContainer
+                                        : tone === "tertiary" ? root.scheme.onTertiaryContainer
+                                        : tone === "error" ? root.scheme.onErrorContainer
+                                        : root.scheme.onSurfaceVariant
+
+                                    height: 18
+                                    radius: 9
+                                    implicitWidth: badgeLbl.implicitWidth + 10
+                                    color: bg
+                                    border.width: 1
+                                    border.color: Qt.alpha(fg, 0.18)
+
+                                    StyledText {
+                                        id: badgeLbl
+                                        anchors.centerIn: parent
+                                        text: String(badgePill.modelData?.text || "")
+                                        font.pixelSize: 10
+                                        font.weight: Font.Bold
+                                        font.letterSpacing: 0.4
+                                        color: badgePill.fg
+                                    }
+
+                                    HoverHandler {
+                                        id: badgeHover
+                                        enabled: badgePill.tipText.length > 0
+                                    }
+
+                                    StyledToolTip {
+                                        visible: badgeHover.hovered && badgePill.tipText.length > 0
+                                        text: badgePill.tipText
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     ArtistLinks {
                         width: parent.width
-                        links: backend.nowArtistLinks
-                        fallbackText: backend.hasTrack ? backend.nowArtists : qsTr("Выберите трек")
-                        fallbackClickable: backend.hasTrack && backend.nowHasArtist
-                        clickable: backend.hasTrack
+                        links: Backend.nowArtistLinks
+                        fallbackText: Backend.hasTrack ? Backend.nowArtists : qsTr("Выберите трек")
+                        fallbackClickable: Backend.hasTrack && Backend.nowHasArtist
+                        clickable: Backend.hasTrack
                         color: root.scheme.onSurfaceVariant
                         font.pixelSize: Appearance.fontSize.smaller
                     }
@@ -398,7 +462,7 @@ Item {
                 width: 30
                 height: 34
                 Reveal.shown: root.showsMeter
-                active: backend.playing
+                active: Backend.playing
             }
 
             Item {
@@ -478,14 +542,14 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 scheme: root.scheme
                 symbol: "favorite"
-                toggled: backend.nowLiked
+                toggled: Backend.nowLiked
                 fillWhenToggled: true
-                burst: backend.nowLiked ? "" : "hearts"
+                burst: Backend.nowLiked ? "" : "hearts"
                 size: root.buttonSize
                 iconSize: 20
-                tooltip: backend.nowLiked ? qsTr("Убрать из «Мне нравится»") : qsTr("Добавить в «Мне нравится»")
-                enabled: backend.hasTrack
-                onClicked: backend.toggleNowLike()
+                tooltip: Backend.nowLiked ? qsTr("Убрать из «Мне нравится»") : qsTr("Добавить в «Мне нравится»")
+                enabled: Backend.hasTrack
+                onClicked: Backend.toggleNowLike()
             }
 
             IconButton {
@@ -496,7 +560,7 @@ Item {
                 size: root.buttonSize
                 iconSize: 20
                 tooltip: qsTr("Действия с треком")
-                enabled: backend.hasTrack
+                enabled: Backend.hasTrack
                 onClicked: root.openTrackMenuAt(moreButton, moreButton.width, 0)
             }
 

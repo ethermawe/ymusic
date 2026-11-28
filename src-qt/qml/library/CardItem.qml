@@ -39,7 +39,7 @@ T.AbstractButton {
         Bounce {}
     }
 
-    onClicked: backend.openCard(root.effectiveCardIndex)
+    onClicked: Backend.openCard(root.effectiveCardIndex)
 
     contentItem: Column {
         id: column
@@ -181,7 +181,7 @@ T.AbstractButton {
         colBackgroundToggledHover: Appearance.colors.primaryContainer
         iconColor: root.isPinned ? Appearance.colors.onPrimaryContainer : "white"
         tooltip: root.isPinned ? qsTr("Открепить плейлист") : qsTr("Закрепить в сайдбаре")
-        onClicked: backend.feature({action: "toggle_pin_playlist", card_index: root.effectiveCardIndex})
+        onClicked: Backend.feature({action: "toggle_pin_playlist", card_index: root.effectiveCardIndex})
     }
 
     StyledMenu {
@@ -189,7 +189,7 @@ T.AbstractButton {
         StyledMenuItem {
             symbol: "push_pin"
             text: root.isPinned ? qsTr("Открепить из сайдбара") : qsTr("Закрепить в сайдбаре")
-            onTriggered: backend.feature({action: "toggle_pin_playlist", card_index: root.effectiveCardIndex})
+            onTriggered: Backend.feature({action: "toggle_pin_playlist", card_index: root.effectiveCardIndex})
         }
     }
 }

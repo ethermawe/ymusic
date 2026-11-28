@@ -91,11 +91,11 @@ Item {
             shape: "arrow"
             shapeAngle: -90
             turnsOnHover: false
-            Reveal.shown: backend.canGoBack
+            Reveal.shown: Backend.canGoBack
             Reveal.scaleFrom: 0.72
             Reveal.overshoot: 1.9
-            enabled: backend.canGoBack
-            onClicked: backend.goBack()
+            enabled: Backend.canGoBack
+            onClicked: Backend.goBack()
             tooltip: qsTr("Назад")
         }
 
@@ -125,6 +125,16 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: implicitWidth > 0
                 slotName: "topbar.right"
+                slotContext: ({ buttonSize: root.buttonSize, compact: root.compact })
+            }
+
+            ModSlotHost {
+                layoutMode: "row"
+                spacing: 6
+                height: root.buttonSize
+                anchors.verticalCenter: parent.verticalCenter
+                visible: entries.length > 0
+                slotName: "topBar.actions"
                 slotContext: ({ buttonSize: root.buttonSize, compact: root.compact })
             }
 
@@ -196,8 +206,8 @@ Item {
         id: suggestTimer
         interval: 220
         onTriggered: {
-            if (search.editing && search.text.trim().length > 0 && backend.loggedIn) {
-                backend.feature({action: "search_suggest", part: search.text.trim()})
+            if (search.editing && search.text.trim().length > 0 && Backend.loggedIn) {
+                Backend.feature({action: "search_suggest", part: search.text.trim()})
             }
         }
     }
@@ -217,22 +227,22 @@ Item {
                 suggestTimer.restart()
             } else {
                 suggestTimer.stop()
-                if (editing && backend.loggedIn) {
-                    backend.feature({action: "search_suggest", part: ""})
+                if (editing && Backend.loggedIn) {
+                    Backend.feature({action: "search_suggest", part: ""})
                 }
             }
         }
         onEditingChanged: {
-            if (editing && backend.loggedIn) {
+            if (editing && Backend.loggedIn) {
                 if (text.trim().length > 0) suggestTimer.restart()
-                else backend.feature({action: "search_suggest", part: ""})
+                else Backend.feature({action: "search_suggest", part: ""})
             }
         }
         onAccepted: {
             const query = text.trim()
             root.dismissSearch()
             if (query.length > 0) {
-                backend.search(query)
+                Backend.search(query)
             }
         }
 
@@ -244,9 +254,22 @@ Item {
     Rectangle {
         id: suggestionsPopup
         readonly property string trimmedPart: search.text.trim()
-        readonly property bool hasBest: Boolean(backend.searchSuggestBest && backend.searchSuggestBest.title)
-        readonly property bool hasSuggestData: backend.searchQuickTracks.length > 0 || hasBest || backend.searchSuggestions.length > 0
-        readonly property bool showingHistory: search.editing && trimmedPart.length === 0 && backend.searchHistory.length > 0
+        readonly property bool hasBest: Boolean(Backend.searchSuggestBest && Backend.searchSuggestBest.title)
+        readonly property bool hasSuggestData: Backend.searchQuickTracks.length > 0 || hasBest || Backend.searchSuggestions.length > 0
+        readonly property var matchedHistory: {
+            if (trimmedPart.length === 0) return Backend.searchHistory
+            const needle = trimmedPart.toLowerCase()
+            const out = []
+            for (let i = 0; i < Backend.searchHistory.length; ++i) {
+                const entry = String(Backend.searchHistory[i] || "")
+                if (entry.toLowerCase().indexOf(needle) >= 0) {
+                    out.push(entry)
+                    if (out.length >= 4) break
+                }
+            }
+            return out
+        }
+        readonly property bool showingHistory: search.editing && matchedHistory.length > 0 && (trimmedPart.length === 0 || !hasSuggestData)
         readonly property bool suggestionsOpen: search.editing && ((trimmedPart.length > 0 && hasSuggestData) || showingHistory)
 
         x: Math.max(12, Math.min(search.x, root.width - width - 12))
@@ -312,26 +335,43 @@ Item {
                         color: clearHistHover.hovered ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
 
                         HoverHandler { id: clearHistHover; cursorShape: Qt.PointingHandCursor }
-                        TapHandler { onTapped: backend.feature({action: "clear_search_history"}) }
+                        TapHandler { onTapped: Backend.feature({action: "clear_search_history"}) }
                     }
                 }
 
                 Repeater {
-                    model: suggestionsPopup.showingHistory ? backend.searchHistory : []
+                    model: suggestionsPopup.showingHistory ? suggestionsPopup.matchedHistory : []
                     delegate: Rectangle {
                         id: histItem
                         required property string modelData
                         width: suggestColumn.width
                         height: 34
                         radius: Appearance.rounding.small
-                        color: histHover.hovered ? Appearance.colors.surfaceContainerHighest : "transparent"
+                        color: (histHover.hovered || removeHistHover.hovered) ? Appearance.colors.surfaceContainerHighest : "transparent"
 
                         Behavior on color { ElementMoveFastColor {} }
 
+                        HoverHandler { id: histHover }
+
+                        MouseArea {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.right: removeHistBtn.left
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                search.text = histItem.modelData
+                                root.dismissSearch()
+                                Backend.search(histItem.modelData)
+                            }
+                        }
+
                         Row {
-                            anchors.fill: parent
+                            anchors.left: parent.left
                             anchors.leftMargin: 10
-                            anchors.rightMargin: 10
+                            anchors.right: removeHistBtn.left
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
                             spacing: 8
 
                             MaterialSymbol {
@@ -342,19 +382,42 @@ Item {
                             }
                             StyledText {
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: parent.width - 28
+                                width: Math.max(0, parent.width - 24)
                                 text: histItem.modelData
                                 elide: Text.ElideRight
                                 font.pixelSize: Appearance.fontSize.small
                             }
                         }
 
-                        HoverHandler { id: histHover; cursorShape: Qt.PointingHandCursor }
-                        TapHandler {
-                            onTapped: {
-                                search.text = histItem.modelData
-                                root.dismissSearch()
-                                backend.search(histItem.modelData)
+                        Item {
+                            id: removeHistBtn
+                            anchors.right: parent.right
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 26
+                            height: 26
+                            opacity: (histHover.hovered || removeHistHover.hovered) ? 1 : 0.45
+
+                            Behavior on opacity { NumberAnimation { duration: 120 } }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 13
+                                color: removeHistHover.hovered ? Qt.alpha(Appearance.colors.onSurface, 0.12) : "transparent"
+                            }
+
+                            MaterialSymbol {
+                                anchors.centerIn: parent
+                                text: "close"
+                                iconSize: 15
+                                color: removeHistHover.hovered ? Appearance.colors.onSurface : Appearance.colors.onSurfaceVariant
+                            }
+
+                            HoverHandler { id: removeHistHover; cursorShape: Qt.PointingHandCursor }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Backend.feature({action: "remove_search_history_item", query: histItem.modelData})
                             }
                         }
                     }
@@ -381,11 +444,11 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             width: 38
                             height: 38
-                            radius: (backend.searchSuggestBest?.circular ?? false) ? 19 : 7
-                            circular: Boolean(backend.searchSuggestBest?.circular ?? false)
-                            source: (backend.searchSuggestBest?.has_cover ?? false) ? (backend.searchSuggestBest?.cover_url ?? "") : ""
-                            placeholderSymbol: (backend.searchSuggestBest?.kind ?? "") === "artist" ? "artists" : "album"
-                            fallbackKey: backend.searchSuggestBest?.title ?? ""
+                            radius: (Backend.searchSuggestBest?.circular ?? false) ? 19 : 7
+                            circular: Boolean(Backend.searchSuggestBest?.circular ?? false)
+                            source: (Backend.searchSuggestBest?.has_cover ?? false) ? (Backend.searchSuggestBest?.cover_url ?? "") : ""
+                            placeholderSymbol: (Backend.searchSuggestBest?.kind ?? "") === "artist" ? "artists" : "album"
+                            fallbackKey: Backend.searchSuggestBest?.title ?? ""
                         }
 
                         Column {
@@ -395,7 +458,7 @@ Item {
 
                             StyledText {
                                 width: parent.width
-                                text: backend.searchSuggestBest?.title ?? ""
+                                text: Backend.searchSuggestBest?.title ?? ""
                                 elide: Text.ElideRight
                                 font.pixelSize: Appearance.fontSize.small
                                 font.weight: Font.DemiBold
@@ -403,9 +466,9 @@ Item {
                             StyledText {
                                 width: parent.width
                                 text: {
-                                    const k = backend.searchSuggestBest?.kind ?? ""
+                                    const k = Backend.searchSuggestBest?.kind ?? ""
                                     const prefix = k === "artist" ? qsTr("Исполнитель") : (k === "album" ? qsTr("Альбом") : qsTr("Плейлист"))
-                                    const sub = backend.searchSuggestBest?.subtitle ?? ""
+                                    const sub = Backend.searchSuggestBest?.subtitle ?? ""
                                     return sub.length > 0 ? (prefix + " • " + sub) : prefix
                                 }
                                 elide: Text.ElideRight
@@ -425,15 +488,16 @@ Item {
                     HoverHandler { id: bestSuggestHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler {
                         onTapped: {
+                            const q = suggestionsPopup.trimmedPart
                             root.dismissSearch()
-                            backend.feature({action: "open_search_best", source: "suggest"})
+                            Backend.feature({action: "open_search_best", source: "suggest", query: q})
                         }
                     }
                 }
 
                 // Быстрые треки с обложками прямо в поиске
                 StyledText {
-                    visible: suggestionsPopup.trimmedPart.length > 0 && backend.searchQuickTracks.length > 0
+                    visible: suggestionsPopup.trimmedPart.length > 0 && Backend.searchQuickTracks.length > 0
                     leftPadding: 8
                     topPadding: 2
                     text: qsTr("Треки")
@@ -443,7 +507,7 @@ Item {
                 }
 
                 Repeater {
-                    model: suggestionsPopup.trimmedPart.length > 0 ? backend.searchQuickTracks : []
+                    model: suggestionsPopup.trimmedPart.length > 0 ? Backend.searchQuickTracks : []
                     delegate: Rectangle {
                         id: quickTrackItem
                         required property var modelData
@@ -525,8 +589,9 @@ Item {
                         HoverHandler { id: quickHover; cursorShape: Qt.PointingHandCursor }
                         TapHandler {
                             onTapped: {
+                                const q = suggestionsPopup.trimmedPart
                                 root.dismissSearch()
-                                backend.feature({action: "play_quick_track", id: quickTrackItem.modelData.id})
+                                Backend.feature({action: "play_quick_track", id: quickTrackItem.modelData.id, query: q})
                             }
                         }
                     }
@@ -534,7 +599,7 @@ Item {
 
                 // Текстовые подсказки
                 StyledText {
-                    visible: suggestionsPopup.trimmedPart.length > 0 && backend.searchSuggestions.length > 0 && (backend.searchQuickTracks.length > 0 || suggestionsPopup.hasBest)
+                    visible: suggestionsPopup.trimmedPart.length > 0 && Backend.searchSuggestions.length > 0 && (Backend.searchQuickTracks.length > 0 || suggestionsPopup.hasBest)
                     leftPadding: 8
                     topPadding: 2
                     text: qsTr("Запросы")
@@ -544,7 +609,7 @@ Item {
                 }
 
                 Repeater {
-                    model: suggestionsPopup.trimmedPart.length > 0 ? backend.searchSuggestions.slice(0, 5) : []
+                    model: suggestionsPopup.trimmedPart.length > 0 ? Backend.searchSuggestions.slice(0, 5) : []
                     delegate: Rectangle {
                         id: suggestItem
                         required property string modelData
@@ -595,7 +660,7 @@ Item {
                             onTapped: {
                                 search.text = suggestItem.modelData
                                 root.dismissSearch()
-                                backend.search(suggestItem.modelData)
+                                Backend.search(suggestItem.modelData)
                             }
                         }
                     }

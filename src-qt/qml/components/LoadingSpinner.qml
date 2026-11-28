@@ -34,8 +34,8 @@ Item {
     property real morph: 0
     property real turn: 0
     property real kick: 0
-    readonly property bool animating: running && visible && !Appearance.reduceMotion && !appSettings.noShapes
-    readonly property bool pulsing: running && visible && (Appearance.reduceMotion || appSettings.noShapes)
+    readonly property bool animating: running && visible && !Appearance.reduceMotion && !AppSettings.noShapes
+    readonly property bool pulsing: running && visible && (Appearance.reduceMotion || AppSettings.noShapes)
                                     && !Appearance.performanceMode
 
     implicitWidth: 40

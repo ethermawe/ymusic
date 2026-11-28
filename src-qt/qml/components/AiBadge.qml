@@ -48,7 +48,7 @@ Item {
 
                 MaterialShape {
                     anchors.fill: parent
-                    visible: !appSettings.noShapes
+                    visible: !AppSettings.noShapes
                     shape: root.hovered ? "sunny" : "cookie6"
                     color: Qt.alpha(root.scheme.onTertiaryContainer, 0.16)
                     spinAngle: root.hovered ? 35 : 0

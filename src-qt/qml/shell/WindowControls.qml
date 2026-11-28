@@ -28,7 +28,7 @@ Row {
     required property Window window
     property bool compact: false
     property MaterialScheme scheme: Appearance.colors
-    layoutDirection: appSettings.windowControlsOnRight ? Qt.RightToLeft : Qt.LeftToRight
+    layoutDirection: AppSettings.windowControlsOnRight ? Qt.RightToLeft : Qt.LeftToRight
 
     spacing: 4
 

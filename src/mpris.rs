@@ -1,7 +1,9 @@
 #[cfg(target_os = "linux")]
+use parking_lot::Mutex;
+#[cfg(target_os = "linux")]
 use std::collections::HashMap;
 #[cfg(target_os = "linux")]
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tokio::runtime::Handle;
 #[cfg(target_os = "linux")]
@@ -119,7 +121,7 @@ impl Mpris {
     }
 
     pub fn set_track(&self, meta: Meta, status: Status) {
-        let mut s = self.shared.lock().unwrap();
+        let mut s = self.shared.lock();
         s.meta = Some(meta);
         s.status = status;
         s.position_us = 0;
@@ -128,7 +130,7 @@ impl Mpris {
     }
 
     pub fn set_status(&self, status: Status, position_secs: f64) {
-        let mut s = self.shared.lock().unwrap();
+        let mut s = self.shared.lock();
         s.position_us = (position_secs * 1_000_000.0) as i64;
         if s.status != status {
             s.status = status;
@@ -138,7 +140,7 @@ impl Mpris {
     }
 
     pub fn set_stopped(&self) {
-        let mut s = self.shared.lock().unwrap();
+        let mut s = self.shared.lock();
         s.meta = None;
         s.status = Status::Stopped;
         s.position_us = 0;
@@ -147,7 +149,7 @@ impl Mpris {
     }
 
     pub fn set_volume(&self, volume: f32) {
-        let mut s = self.shared.lock().unwrap();
+        let mut s = self.shared.lock();
         s.volume = f64::from(volume.clamp(0.0, 1.0));
         drop(s);
         let _ = self.tx.send(Notify::Volume);
@@ -172,7 +174,10 @@ async fn serve(
         .build()
         .await?;
 
-    let iface_ref = conn.object_server().interface::<_, PlayerIface>(PATH).await?;
+    let iface_ref = conn
+        .object_server()
+        .interface::<_, PlayerIface>(PATH)
+        .await?;
 
     while let Some(note) = rx.recv().await {
         let iface = iface_ref.get().await;
@@ -282,13 +287,9 @@ impl PlayerIface {
         (self.on_action)(Action::Play);
     }
 
-    async fn seek(
-        &self,
-        offset_us: i64,
-        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
-    ) {
+    async fn seek(&self, offset_us: i64, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
         let new_pos_us = {
-            let mut s = self.shared.lock().unwrap();
+            let mut s = self.shared.lock();
             s.position_us = (s.position_us + offset_us).max(0);
             s.position_us
         };
@@ -303,7 +304,7 @@ impl PlayerIface {
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) {
         let pos_us = position_us.max(0);
-        self.shared.lock().unwrap().position_us = pos_us;
+        self.shared.lock().position_us = pos_us;
         (self.on_action)(Action::SeekAbsolute(pos_us as f64 / 1_000_000.0));
         let _ = Self::seeked(&emitter, pos_us).await;
     }
@@ -315,7 +316,7 @@ impl PlayerIface {
 
     #[zbus(property)]
     fn playback_status(&self) -> &'static str {
-        self.shared.lock().unwrap().status.as_str()
+        self.shared.lock().status.as_str()
     }
 
     #[zbus(property)]
@@ -335,44 +336,44 @@ impl PlayerIface {
 
     #[zbus(property)]
     fn volume(&self) -> f64 {
-        self.shared.lock().unwrap().volume
+        self.shared.lock().volume
     }
 
     #[zbus(property)]
     fn set_volume(&self, value: f64) {
         let v = value.clamp(0.0, 1.0);
-        self.shared.lock().unwrap().volume = v;
+        self.shared.lock().volume = v;
         (self.on_action)(Action::SetVolume(v as f32));
     }
 
     #[zbus(property(emits_changed_signal = "false"))]
     fn position(&self) -> i64 {
-        self.shared.lock().unwrap().position_us
+        self.shared.lock().position_us
     }
 
     #[zbus(property)]
     fn can_go_next(&self) -> bool {
-        self.shared.lock().unwrap().meta.is_some()
+        self.shared.lock().meta.is_some()
     }
 
     #[zbus(property)]
     fn can_go_previous(&self) -> bool {
-        self.shared.lock().unwrap().meta.is_some()
+        self.shared.lock().meta.is_some()
     }
 
     #[zbus(property)]
     fn can_play(&self) -> bool {
-        self.shared.lock().unwrap().meta.is_some()
+        self.shared.lock().meta.is_some()
     }
 
     #[zbus(property)]
     fn can_pause(&self) -> bool {
-        self.shared.lock().unwrap().meta.is_some()
+        self.shared.lock().meta.is_some()
     }
 
     #[zbus(property)]
     fn can_seek(&self) -> bool {
-        self.shared.lock().unwrap().meta.is_some()
+        self.shared.lock().meta.is_some()
     }
 
     #[zbus(property)]
@@ -382,7 +383,7 @@ impl PlayerIface {
 
     #[zbus(property)]
     fn metadata(&self) -> HashMap<&'static str, Value<'static>> {
-        let s = self.shared.lock().unwrap();
+        let s = self.shared.lock();
         let mut map = HashMap::new();
         let Some(meta) = &s.meta else {
             return map;

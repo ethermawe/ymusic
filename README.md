@@ -64,7 +64,7 @@
 
 | Платформа | Формат |
 |---|---|
-| **Arch Linux** | `ymusic-*.pkg.tar.zst` (`sudo pacman -U ...`) или локальный `makepkg -si` |
+| **Arch Linux** | AUR: `yay -S ymusic-bin` *(или `paru -S ymusic-bin`)*, либо `ymusic-*.pkg.tar.zst` |
 | **Linux (x86_64)** | `ymusic-*-linux-x86_64.tar.zst` / `.tar.gz` |
 | **Windows (x86_64)** | Установщик `ymusic-*-windows-x86_64-setup.exe`, портативный `.exe` или `.zip` |
 

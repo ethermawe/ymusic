@@ -20,16 +20,48 @@ bool isKnownPermission(const QString &perm)
         QStringLiteral("playback:read"),
         QStringLiteral("playback:control"),
         QStringLiteral("library:read"),
+        QStringLiteral("library:write"),
+        QStringLiteral("catalog:override"),
+        QStringLiteral("audio:override"),
         QStringLiteral("lyrics:read"),
         QStringLiteral("lyrics:transform"),
         QStringLiteral("spectrum:read"),
         QStringLiteral("ui:slots"),
         QStringLiteral("ui:override"),
+        QStringLiteral("ui:pages"),
+        QStringLiteral("ui:layout"),
+        QStringLiteral("ui:window"),
+        QStringLiteral("player"),
+        QStringLiteral("library"),
         QStringLiteral("storage"),
         QStringLiteral("clipboard"),
+        QStringLiteral("external"),
     };
     if (kSimple.contains(perm)) {
         return true;
+    }
+    if (perm.startsWith(QLatin1StringView("hooks:"))) {
+        const QString point = perm.mid(6).trimmed();
+        static const QStringList kHooks {
+            QStringLiteral("*"),
+            QStringLiteral("search"),
+            QStringLiteral("search_results"),
+            QStringLiteral("wave"),
+            QStringLiteral("wave_next_batch"),
+            QStringLiteral("queue"),
+            QStringLiteral("queue_before_add"),
+            QStringLiteral("track_before_play"),
+            QStringLiteral("track_after_play"),
+            QStringLiteral("lyrics"),
+            QStringLiteral("lyrics_loaded"),
+            QStringLiteral("playlist"),
+            QStringLiteral("playlist_loaded"),
+            QStringLiteral("album"),
+            QStringLiteral("album_loaded"),
+            QStringLiteral("scrobble"),
+            QStringLiteral("scrobble_before"),
+        };
+        return kHooks.contains(point);
     }
     if (perm.startsWith(QLatin1StringView("network:"))) {
         const QString host = perm.mid(8).trimmed().toLower();
@@ -156,13 +188,51 @@ ModManifest parseManifest(const QString &modDirectory)
     m.author = root.value(QStringLiteral("author")).toString().trimmed();
     m.description = root.value(QStringLiteral("description")).toString().trimmed();
     m.minAppVersion = root.value(QStringLiteral("minAppVersion")).toString().trimmed();
-    m.apiVersion = root.value(QStringLiteral("apiVersion")).toInt(1);
 
-    if (m.apiVersion != kSupportedApiVersion) {
-        m.error = QStringLiteral("Неподдерживаемая версия API мода: %1 (поддерживается %2)")
-            .arg(m.apiVersion)
-            .arg(kSupportedApiVersion);
-        return m;
+    if (!root.contains(QStringLiteral("apiVersion")) || root.value(QStringLiteral("apiVersion")).isNull()) {
+        m.apiVersion = QStringLiteral("1.0");
+        m.warnings.append(QStringLiteral("В manifest.json не указано поле apiVersion (рекомендуется \"1.0\")"));
+    } else {
+        const QJsonValue apiVal = root.value(QStringLiteral("apiVersion"));
+        if (apiVal.isDouble()) {
+            const int major = apiVal.toInt(-1);
+            if (major != kSupportedApiMajor) {
+                m.error = QStringLiteral("Несовместимая версия API мода: %1 (поддерживается %2.x)")
+                    .arg(major)
+                    .arg(kSupportedApiMajor);
+                return m;
+            }
+            m.apiVersion = QStringLiteral("%1.0").arg(major);
+        } else if (apiVal.isString()) {
+            const QString rawApi = apiVal.toString().trimmed();
+            if (rawApi.isEmpty()) {
+                m.apiVersion = QStringLiteral("1.0");
+                m.warnings.append(QStringLiteral("В manifest.json пустое поле apiVersion (рекомендуется \"1.0\")"));
+            } else {
+                qsizetype suffixIdx = -1;
+                const QVersionNumber parsedApi = QVersionNumber::fromString(rawApi, &suffixIdx);
+                if (parsedApi.isNull() || suffixIdx != rawApi.size()) {
+                    m.error = QStringLiteral("Некорректный формат apiVersion: '%1' (ожидается semver, например \"1.0\")").arg(rawApi);
+                    return m;
+                }
+                if (parsedApi.majorVersion() != kSupportedApiMajor) {
+                    m.error = QStringLiteral("Несовместимая версия API мода: %1 (поддерживается %2.x)")
+                        .arg(rawApi)
+                        .arg(kSupportedApiMajor);
+                    return m;
+                }
+                if (parsedApi.minorVersion() > kSupportedApiMinor) {
+                    m.warnings.append(QStringLiteral("Мод запрашивает apiVersion %1 (текущая: %2.%3)")
+                                          .arg(rawApi)
+                                          .arg(kSupportedApiMajor)
+                                          .arg(kSupportedApiMinor));
+                }
+                m.apiVersion = rawApi;
+            }
+        } else {
+            m.error = QStringLiteral("Некорректный тип apiVersion в manifest.json (ожидается строка semver, например \"1.0\")");
+            return m;
+        }
     }
 
     // Real minAppVersion check against running application version
@@ -190,6 +260,29 @@ ModManifest parseManifest(const QString &modDirectory)
         if (!m.permissions.contains(p)) {
             m.permissions.append(p);
         }
+    }
+
+    if (root.contains(QStringLiteral("main"))) {
+        const QString rel = root.value(QStringLiteral("main")).toString().trimmed();
+        if (!rel.isEmpty()) {
+            const QString resolved = resolveModPath(m.directory, rel, true);
+            if (resolved.isEmpty()) {
+                m.error = QStringLiteral("Некорректный или отсутствующий main: %1").arg(rel);
+                return m;
+            }
+            m.mainScript = resolved;
+        }
+    }
+
+    const QJsonObject depsObj = root.value(QStringLiteral("dependencies")).toObject();
+    for (auto it = depsObj.constBegin(); it != depsObj.constEnd(); ++it) {
+        const QString depId = it.key().trimmed();
+        const QString constraint = it.value().toString().trimmed();
+        if (!isValidModId(depId)) {
+            m.error = QStringLiteral("Некорректный id зависимости в manifest.json: %1").arg(depId);
+            return m;
+        }
+        m.dependencies.insert(depId, constraint);
     }
 
     const QJsonObject entry = root.value(QStringLiteral("entry")).toObject();
@@ -332,6 +425,11 @@ ModManifest parseManifest(const QString &modDirectory)
 
     if (!m.overridesMap.isEmpty() && !m.hasPermission(QStringLiteral("ui:override"))) {
         m.error = QStringLiteral("Для overrides требуется разрешение 'ui:override'");
+        return m;
+    }
+
+    if (m.slotsMap.contains(QStringLiteral("window.floating")) && !m.hasPermission(QStringLiteral("ui:window"))) {
+        m.error = QStringLiteral("Для слота 'window.floating' требуется разрешение 'ui:window'");
         return m;
     }
 

@@ -21,7 +21,9 @@ pub fn default_install_dir() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    home.join(".local").join("share").join("ymusic-setup-preview")
+    home.join(".local")
+        .join("share")
+        .join("ymusic-setup-preview")
 }
 
 pub fn apply_window_chrome() {}

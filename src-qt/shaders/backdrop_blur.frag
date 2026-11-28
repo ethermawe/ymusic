@@ -35,8 +35,8 @@ layout(std140, binding = 0) uniform buf {
 
 layout(binding = 1) uniform sampler2D source;
 
-const vec4 ground = vec4(0.009, 0.009, 0.012, 1.0);
-const int reach = 6;
+const vec4 ground = vec4(0.012, 0.012, 0.016, 1.0);
+const int reach = 9;
 
 vec4 tap(vec2 uv)
 {

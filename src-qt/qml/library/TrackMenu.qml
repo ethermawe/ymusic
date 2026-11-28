@@ -16,7 +16,7 @@ StyledMenu {
         trackId = id;
         trackTitle = title;
         trackAvailable = available;
-        downloaded = backend.isDownloaded(id);
+        downloaded = Backend.isDownloaded(id);
     }
 
     function showFor(id, title, available) {
@@ -28,19 +28,19 @@ StyledMenu {
         text: "Играть следующим"
         symbol: "queue_play_next"
         enabled: root.trackAvailable
-        onTriggered: backend.trackAction(root.trackId, 0)
+        onTriggered: Backend.trackAction(root.trackId, 0)
     }
     StyledMenuItem {
         text: "Добавить в конец очереди"
         symbol: "add_to_queue"
         enabled: root.trackAvailable
-        onTriggered: backend.trackAction(root.trackId, 1)
+        onTriggered: Backend.trackAction(root.trackId, 1)
     }
     StyledMenuItem {
         text: "Играть на повторе"
         symbol: "repeat_one"
         enabled: root.trackAvailable
-        onTriggered: backend.trackAction(root.trackId, 2)
+        onTriggered: Backend.trackAction(root.trackId, 2)
     }
 
     StyledMenuSeparator {}
@@ -48,40 +48,40 @@ StyledMenu {
     StyledMenuItem {
         text: "Волна по треку"
         symbol: "my_wave"
-        enabled: backend.loggedIn && root.trackId !== ""
-        onTriggered: backend.feature({action: "track_wave", id: root.trackId, title: root.trackTitle})
+        enabled: Backend.loggedIn && root.trackId !== ""
+        onTriggered: Backend.feature({action: "track_wave", id: root.trackId, title: root.trackTitle})
     }
     StyledMenuItem {
         text: "Похожие треки"
         symbol: "auto_awesome"
-        enabled: backend.loggedIn && root.trackId !== ""
-        onTriggered: backend.feature({action: "similar_tracks", id: root.trackId, title: root.trackTitle})
+        enabled: Backend.loggedIn && root.trackId !== ""
+        onTriggered: Backend.feature({action: "similar_tracks", id: root.trackId, title: root.trackTitle})
     }
     StyledMenuItem {
         text: "Не нравится"
         symbol: "thumb_down"
-        visible: !(backend.page === 6 && backend.listTitle === "Не нравится")
-        enabled: backend.loggedIn && root.trackId !== ""
-        onTriggered: backend.feature({action: "dislike_track", id: root.trackId})
+        visible: !(Backend.page === 6 && Backend.listTitle === "Не нравится")
+        enabled: Backend.loggedIn && root.trackId !== ""
+        onTriggered: Backend.feature({action: "dislike_track", id: root.trackId})
     }
     StyledMenuItem {
         text: "Убрать из «Не нравится»"
         symbol: "thumb_up"
-        visible: backend.page === 6 && backend.listTitle === "Не нравится"
-        enabled: backend.loggedIn && root.trackId !== ""
-        onTriggered: backend.feature({action: "undislike_track", id: root.trackId})
+        visible: Backend.page === 6 && Backend.listTitle === "Не нравится"
+        enabled: Backend.loggedIn && root.trackId !== ""
+        onTriggered: Backend.feature({action: "undislike_track", id: root.trackId})
     }
     StyledMenuItem {
         text: "Авторы и информация…"
         symbol: "info"
-        enabled: backend.loggedIn && root.trackId !== ""
-        onTriggered: backend.feature({action: "track_credits", id: root.trackId, title: root.trackTitle})
+        enabled: Backend.loggedIn && root.trackId !== ""
+        onTriggered: Backend.feature({action: "track_credits", id: root.trackId, title: root.trackTitle})
     }
     StyledMenuItem {
         text: "Скопировать ссылку на трек"
         symbol: "content_copy"
         enabled: root.trackId !== ""
-        onTriggered: backend.feature({action: "copy_track_link", id: root.trackId})
+        onTriggered: Backend.feature({action: "copy_track_link", id: root.trackId})
     }
 
     StyledMenuSeparator {}
@@ -89,28 +89,28 @@ StyledMenu {
     StyledMenuItem {
         text: "Добавить в плейлист…"
         symbol: "playlist_add"
-        enabled: backend.loggedIn
+        enabled: Backend.loggedIn
         onTriggered: playlistPicker.choose(root.trackId, root.trackTitle)
     }
     StyledMenuItem {
         text: "Удалить из плейлиста"
         symbol: "playlist_remove"
         destructive: true
-        visible: backend.page === 6 && backend.isOwnPlaylist
-        onTriggered: backend.feature({action: "remove_from_playlist", id: root.trackId})
+        visible: Backend.page === 6 && Backend.isOwnPlaylist
+        onTriggered: Backend.feature({action: "remove_from_playlist", id: root.trackId})
     }
     StyledMenuItem {
         text: "Скачать"
         symbol: "download"
-        enabled: root.trackAvailable && !root.downloaded && backend.loggedIn
-        onTriggered: backend.saveOffline(root.trackId)
+        enabled: root.trackAvailable && !root.downloaded && Backend.loggedIn
+        onTriggered: Backend.saveOffline(root.trackId)
     }
     StyledMenuItem {
         text: "Удалить трек с устройства"
         symbol: "delete"
         destructive: true
         visible: root.downloaded
-        onTriggered: backend.removeDownload(root.trackId)
+        onTriggered: Backend.removeDownload(root.trackId)
     }
     StyledMenuItem {
         text: "Скачать аудиофайл…"
@@ -120,8 +120,8 @@ StyledMenu {
             saveDialog.pendingTrackId = root.trackId;
             const rawName = (root.trackTitle || "track").replace(/[\\/:*?"<>|]/g, "_").trim();
             const safeName = rawName.length > 0 ? rawName : "track";
-            const useFlac = backend.downloadQuality === "flac"
-                || (backend.downloadQuality === "match" && backend.audioQuality === "lossless");
+            const useFlac = Backend.downloadQuality === "flac"
+                || (Backend.downloadQuality === "match" && Backend.audioQuality === "lossless");
             const ext = useFlac ? "flac" : "mp3";
             const folder = String(saveDialog.currentFolder || StandardPaths.writableLocation(StandardPaths.MusicLocation));
             const sep = folder.endsWith("/") ? "" : "/";
@@ -159,8 +159,8 @@ StyledMenu {
             title: "Сохранить аудиофайл"
             fileMode: FileDialog.SaveFile
             nameFilters: ["Аудиофайлы (*.mp3 *.flac *.m4a)"]
-            defaultSuffix: (backend.downloadQuality === "flac" || (backend.downloadQuality === "match" && backend.audioQuality === "lossless")) ? "flac" : "mp3"
-            onAccepted: backend.downloadTrack(pendingTrackId, selectedFile)
+            defaultSuffix: (Backend.downloadQuality === "flac" || (Backend.downloadQuality === "match" && Backend.audioQuality === "lossless")) ? "flac" : "mp3"
+            onAccepted: Backend.downloadTrack(pendingTrackId, selectedFile)
         },
         PlaylistPicker {
             id: playlistPicker
@@ -212,7 +212,7 @@ StyledMenu {
             ]
         },
         Connections {
-            target: backend
+            target: Backend
             function onFeatureResult(result) {
                 if (result.type === "track_credits" && result.credits && result.credits.length > 0) {
                     creditsDialog.creditsTitle = result.title || "";

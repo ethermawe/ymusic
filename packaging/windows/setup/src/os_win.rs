@@ -7,6 +7,7 @@ use std::process::Command;
 use std::ptr::{null, null_mut};
 use std::time::{Duration, Instant};
 
+use windows_sys::core::{BOOL, GUID};
 use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, MAX_PATH, S_OK, TRUE};
 use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
 use windows_sys::Win32::Graphics::Dwm::{
@@ -27,13 +28,12 @@ use windows_sys::Win32::System::Threading::{
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows_sys::Win32::UI::Shell::{
-    SHGetKnownFolderPath, FOLDERID_Desktop, FOLDERID_LocalAppData, FOLDERID_Programs,
-    FOLDERID_RoamingAppData, KF_FLAG_DEFAULT,
+    FOLDERID_Desktop, FOLDERID_LocalAppData, FOLDERID_Programs, FOLDERID_RoamingAppData,
+    SHGetKnownFolderPath, KF_FLAG_DEFAULT,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumThreadWindows, IsWindowVisible, SendMessageW, HTCAPTION, WM_NCLBUTTONDOWN,
 };
-use windows_sys::core::{BOOL, GUID};
 
 const UNINSTALL_REG_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\YMusic";
 const APP_DISPLAY_NAME: &str = "Yandex Music";
@@ -85,15 +85,7 @@ fn read_reg_install_location() -> Option<PathBuf> {
     let subkey = str_to_wide_null(UNINSTALL_REG_PATH);
     let val_name = str_to_wide_null("InstallLocation");
     let mut hkey: HKEY = null_mut();
-    let err = unsafe {
-        RegOpenKeyExW(
-            HKEY_CURRENT_USER,
-            subkey.as_ptr(),
-            0,
-            KEY_READ,
-            &mut hkey,
-        )
-    };
+    let err = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey) };
     if err != 0 || hkey.is_null() {
         return None;
     }
@@ -117,8 +109,13 @@ fn read_reg_install_location() -> Option<PathBuf> {
     }
     let u16_len = (byte_len as usize / 2).min(buf.len());
     let trimmed = &buf[..u16_len];
-    let nul_pos = trimmed.iter().position(|&c| c == 0).unwrap_or(trimmed.len());
-    let s = String::from_utf16_lossy(&trimmed[..nul_pos]).trim().to_string();
+    let nul_pos = trimmed
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(trimmed.len());
+    let s = String::from_utf16_lossy(&trimmed[..nul_pos])
+        .trim()
+        .to_string();
     if s.is_empty() {
         None
     } else {
@@ -157,7 +154,7 @@ pub fn apply_window_chrome() {
                 &dark as *const i32 as *const c_void,
                 std::mem::size_of::<i32>() as u32,
             );
-            let corner: i32 = DWMWCP_ROUND as i32;
+            let corner: i32 = DWMWCP_ROUND;
             let _ = DwmSetWindowAttribute(
                 hwnd,
                 DWMWA_WINDOW_CORNER_PREFERENCE as u32,
@@ -257,11 +254,19 @@ fn base64_utf16le(script: &str) -> String {
     for u in script.encode_utf16() {
         bytes.extend_from_slice(&u.to_le_bytes());
     }
-    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let b0 = chunk[0] as usize;
-        let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as usize } else { 0 };
+        let b1 = if chunk.len() > 1 {
+            chunk[1] as usize
+        } else {
+            0
+        };
+        let b2 = if chunk.len() > 2 {
+            chunk[2] as usize
+        } else {
+            0
+        };
         out.push(TABLE[(b0 >> 2) & 0x3f] as char);
         out.push(TABLE[((b0 << 4) | (b1 >> 4)) & 0x3f] as char);
         out.push(if chunk.len() > 1 {
@@ -514,10 +519,7 @@ pub fn schedule_self_delete_after_exit(install_dir: &Path) {
     let Ok(cur_exe) = std::env::current_exe() else {
         return;
     };
-    let in_install_dir = cur_exe
-        .parent()
-        .map(|p| p.eq(install_dir))
-        .unwrap_or(false);
+    let in_install_dir = cur_exe.parent().map(|p| p.eq(install_dir)).unwrap_or(false);
     if !in_install_dir {
         let _ = fs::remove_dir_all(install_dir);
         return;

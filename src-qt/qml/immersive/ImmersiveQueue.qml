@@ -42,14 +42,14 @@ Item {
         slotName: "immersive.queue.header"
         slotContext: ({
             scheme: root.scheme,
-            count: backend.queue.count
+            count: Backend.queue.count
         })
     }
 
     EmptyState {
         anchors.horizontalCenter: parent.horizontalCenter
         y: 80
-        Reveal.shown: !backend.hasTrack && backend.queue.count === 0
+        Reveal.shown: !Backend.hasTrack && Backend.queue.count === 0
         scheme: root.scheme
         symbol: "queue_music"
         title: "Очередь пуста"
@@ -59,8 +59,8 @@ Item {
     ListView {
         id: list
         anchors.fill: parent
-        Reveal.shown: backend.hasTrack || backend.queue.count > 0
-        model: backend.queue
+        Reveal.shown: Backend.hasTrack || Backend.queue.count > 0
+        model: Backend.queue
         spacing: 10
         topMargin: 30
         bottomMargin: 30
@@ -88,7 +88,7 @@ Item {
             current: model.isCurrent
             isAi: Boolean(model.isAi)
             scheme: root.scheme
-            onClicked: backend.trackAction(model.id, 3)
+            onClicked: Backend.trackAction(model.id, 3)
         }
 
         displaced: Transition {

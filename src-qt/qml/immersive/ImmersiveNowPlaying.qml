@@ -32,8 +32,8 @@ Item {
     property real controlsOpacity: 1
     readonly property real controlsShift: compactHorizontal ? 0 : Math.round((transport.implicitHeight + volume.implicitHeight + details.spacing * 2) / 2)
 
-    readonly property bool showsRing: appSettings.visualizersEnabled && appSettings.immersiveVisualizer && appSettings.circularVisualizer
-    readonly property bool roundCover: showsRing || ((!appSettings.visualizersEnabled || !appSettings.immersiveVisualizer) && appSettings.roundArtwork)
+    readonly property bool showsRing: AppSettings.visualizersEnabled && AppSettings.immersiveVisualizer && AppSettings.circularVisualizer
+    readonly property bool roundCover: showsRing || ((!AppSettings.visualizersEnabled || !AppSettings.immersiveVisualizer) && AppSettings.roundArtwork)
     readonly property bool compactHorizontal: layout.contentHeight < 460
     readonly property real targetArtworkSize: compactHorizontal ? Math.min(240, Math.max(0, layout.contentHeight - 16), width * 0.36)
                                                                : layout.artworkSize
@@ -92,7 +92,7 @@ Item {
             }
 
             Connections {
-                target: backend
+                target: Backend
                 function onNowPlayingChanged() {
                     if (!Appearance.performanceMode) {
                         popIn.restart();
@@ -127,9 +127,9 @@ Item {
                 anchors.fill: parent
                 Reveal.shown: root.showsRing
                 kind: SpectrumView.Ring
-                wave: appSettings.visualizerShape === "wave"
-                sensitivity: appSettings.visualizerSensitivity
-                active: backend.playing && root.showsRing
+                wave: AppSettings.visualizerShape === "wave"
+                sensitivity: AppSettings.visualizerSensitivity
+                active: Backend.playing && root.showsRing
                 cutWaves: cover.showsSquiggle ? cover.squiggleWaves : 0
                 cutRadius: cover.squiggleMiddle
                 cutAmplitude: cover.squiggleAmplitude
@@ -145,9 +145,9 @@ Item {
                 circular: root.roundCover
                 squiggleFollowsPlayback: true
                 squiggleColor: PlayerStyle.primary
-                source: backend.hasCover ? backend.nowCover : ""
+                source: Backend.hasCover ? Backend.nowCover : ""
                 placeholderSymbol: "music_note"
-                fallbackKey: backend.nowTitle
+                fallbackKey: Backend.nowTitle
                 crossfade: true
                 revealDuration: 360
             }
@@ -182,7 +182,7 @@ Item {
                     objectName: "immersiveTitle"
                     width: parent.width
                     height: root.compactHorizontal ? 48 : root.layout.titleHeight
-                    text: backend.nowTitle
+                    text: Backend.nowTitle
                     horizontalAlignment: Text.AlignHCenter
                     font.pixelSize: root.compactHorizontal ? 24 : root.layout.titleFontSize
                     font.weight: Font.Bold
@@ -193,7 +193,7 @@ Item {
 
                 AiBadge {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    visible: backend.hasTrack && backend.showAiLabels && backend.nowIsAi
+                    visible: Backend.hasTrack && Backend.showAiLabels && Backend.nowIsAi
                     scheme: root.scheme
                 }
 
@@ -209,10 +209,10 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         width: Math.min(implicitWidth + 2, parent.width - (more.width + likeBtn.width + 18))
                         horizontalAlignment: Text.AlignHCenter
-                        links: backend.nowArtistLinks
-                        fallbackText: backend.nowArtists
-                        clickable: backend.hasTrack
-                        fallbackClickable: backend.nowHasArtist
+                        links: Backend.nowArtistLinks
+                        fallbackText: Backend.nowArtists
+                        clickable: Backend.hasTrack
+                        fallbackClickable: Backend.nowHasArtist
                         font.pixelSize: Appearance.fontSize.larger
                         font.weight: Font.Medium
                         color: Qt.rgba(1, 1, 1, 0.72)
@@ -226,17 +226,17 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         scheme: root.scheme
                         symbol: "favorite"
-                        toggled: backend.nowLiked
+                        toggled: Backend.nowLiked
                         fillWhenToggled: true
-                        burst: backend.nowLiked ? "" : "hearts"
+                        burst: Backend.nowLiked ? "" : "hearts"
                         size: 28
                         iconSize: 18
-                        iconColor: backend.nowLiked ? root.scheme.primary : Qt.rgba(1, 1, 1, 0.62)
+                        iconColor: Backend.nowLiked ? root.scheme.primary : Qt.rgba(1, 1, 1, 0.62)
                         colBackgroundHover: Qt.rgba(1, 1, 1, 0.1)
-                        tooltip: backend.nowLiked ? "Убрать из Мне нравится" : "Мне нравится"
+                        tooltip: Backend.nowLiked ? "Убрать из Мне нравится" : "Мне нравится"
                         opacity: root.controlsOpacity
-                        enabled: root.controlsOpacity > 0 && backend.hasTrack
-                        onClicked: backend.toggleNowLike()
+                        enabled: root.controlsOpacity > 0 && Backend.hasTrack
+                        onClicked: Backend.toggleNowLike()
                     }
 
                     IconButton {
@@ -252,19 +252,19 @@ Item {
                         colBackgroundHover: Qt.rgba(1, 1, 1, 0.1)
                         tooltip: "Действия с треком"
                         opacity: root.controlsOpacity
-                        enabled: root.controlsOpacity > 0 && backend.hasTrack
+                        enabled: root.controlsOpacity > 0 && Backend.hasTrack
                         onClicked: {
                             const appWin = root.Window.window;
                             const pt = more.mapToItem(appWin ? appWin.contentItem : null, more.width, more.height);
-                            backend.requestTrackMenu(backend.nowId, backend.nowTitle, true, pt.x, pt.y);
+                            Backend.requestTrackMenu(Backend.nowId, Backend.nowTitle, true, pt.x, pt.y);
                         }
                     }
                 }
 
                 ScrollingText {
                     width: parent.width
-                    visible: backend.nowAlbum.length > 0
-                    text: backend.nowAlbum
+                    visible: Backend.nowAlbum.length > 0
+                    text: Backend.nowAlbum
                     horizontalAlignment: Text.AlignHCenter
                     font.pixelSize: Appearance.fontSize.smallie
                     color: Qt.rgba(1, 1, 1, 0.45)
@@ -321,10 +321,10 @@ Item {
                     effect: TransportButton.Bounce
                     symbol: "shuffle"
                     toggledShape: "clover4"
-                    toggled: backend.shuffle
-                    enabled: backend.hasTrack
+                    toggled: Backend.shuffle
+                    enabled: Backend.hasTrack
                     tooltip: "Перемешать"
-                    onClicked: backend.toggleShuffle()
+                    onClicked: Backend.toggleShuffle()
                 }
                 Control {
                     effect: TransportButton.NudgeLeft
@@ -333,9 +333,9 @@ Item {
                     hoverAngle: -90
                     iconSize: 30
                     alwaysFilled: true
-                    enabled: backend.hasTrack
+                    enabled: Backend.hasTrack
                     tooltip: "Предыдущий трек"
-                    onClicked: backend.prev()
+                    onClicked: Backend.prev()
                 }
 
                 Item {
@@ -352,13 +352,13 @@ Item {
                     }
                     PlayButton {
                         anchors.fill: parent
-                        enabled: backend.hasTrack
-                        playing: backend.playing
+                        enabled: Backend.hasTrack
+                        playing: Backend.playing
                         color: "white"
                         hoverColor: "#ececec"
                         iconColor: "black"
                         iconSize: 32
-                        onClicked: backend.toggle()
+                        onClicked: Backend.toggle()
                     }
                 }
 
@@ -369,18 +369,18 @@ Item {
                     hoverAngle: 90
                     iconSize: 30
                     alwaysFilled: true
-                    enabled: backend.hasTrack
+                    enabled: Backend.hasTrack
                     tooltip: "Следующий трек"
-                    onClicked: backend.next()
+                    onClicked: Backend.next()
                 }
                 Control {
                     effect: TransportButton.Bounce
-                    symbol: backend.repeatMode === 2 ? "repeat_one" : "repeat"
-                    toggledShape: backend.repeatMode === 2 ? "cookie4" : "cookie6"
-                    toggled: backend.repeatMode !== 0
-                    enabled: backend.hasTrack
-                    tooltip: backend.repeatMode === 2 ? "Повтор одного трека" : (backend.repeatMode === 1 ? "Повтор очереди" : "Повтор выкл")
-                    onClicked: backend.toggleRepeat()
+                    symbol: Backend.repeatMode === 2 ? "repeat_one" : "repeat"
+                    toggledShape: Backend.repeatMode === 2 ? "cookie4" : "cookie6"
+                    toggled: Backend.repeatMode !== 0
+                    enabled: Backend.hasTrack
+                    tooltip: Backend.repeatMode === 2 ? "Повтор одного трека" : (Backend.repeatMode === 1 ? "Повтор очереди" : "Повтор выкл")
+                    onClicked: Backend.toggleRepeat()
                 }
             }
 
@@ -396,13 +396,13 @@ Item {
                     id: muteButton
                     anchors.verticalCenter: parent.verticalCenter
                     scheme: root.scheme
-                    symbol: backend.volume <= 0.01 ? "volume_off" : (backend.volume <= 0.5 ? "volume_down" : "volume_up")
+                    symbol: Backend.volume <= 0.01 ? "volume_off" : (Backend.volume <= 0.5 ? "volume_down" : "volume_up")
                     size: 30
                     iconSize: 20
                     iconColor: Qt.rgba(1, 1, 1, 0.78)
                     colBackgroundHover: Qt.rgba(1, 1, 1, 0.1)
-                    tooltip: backend.volume <= 0.01 ? "Включить звук" : "Выключить звук"
-                    onClicked: backend.toggleMute()
+                    tooltip: Backend.volume <= 0.01 ? "Включить звук" : "Выключить звук"
+                    onClicked: Backend.toggleMute()
                 }
                 StyledSlider {
                     anchors.verticalCenter: parent.verticalCenter
@@ -414,8 +414,8 @@ Item {
                     showValueTip: true
                     activeColor: "white"
                     inactiveColor: Qt.rgba(1, 1, 1, 0.2)
-                    value: backend.volume
-                    onMoved: backend.setVolume(value)
+                    value: Backend.volume
+                    onMoved: Backend.setVolume(value)
                 }
             }
         }

@@ -8,12 +8,15 @@
 #include <QList>
 #include <QObject>
 #include <QPointer>
+#include <QSet>
 #include <QStringList>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
+
+#include <memory>
 
 class AppSettings;
 class QJSEngine;
@@ -27,6 +30,7 @@ class SpectrumSource;
 namespace ymusic::mods {
 
 class ModApi;
+class ModScriptHost;
 
 struct ModTrackMenuAction {
     QString modId;
@@ -50,6 +54,13 @@ struct ModLogEntry {
     QString message;
 };
 
+struct ModTrackBadge {
+    QString modId;
+    QString text;
+    QString tone;
+    QString tooltip;
+};
+
 class ModManager : public QObject {
     Q_OBJECT
     QML_ELEMENT
@@ -67,6 +78,12 @@ class ModManager : public QObject {
     Q_PROPERTY(QVariantList trackMenuActions READ trackMenuActionsVariantList NOTIFY trackMenuActionsChanged FINAL)
     Q_PROPERTY(QVariantList shortcuts READ shortcutsVariantList NOTIFY shortcutsChanged FINAL)
     Q_PROPERTY(int lyricSubtitlesRevision READ lyricSubtitlesRevision NOTIFY lyricSubtitlesChanged FINAL)
+    Q_PROPERTY(bool playerBarHidden READ playerBarHidden NOTIFY layoutStateChanged FINAL)
+    Q_PROPERTY(bool showingLyrics READ showingLyrics WRITE setShowingLyrics NOTIFY panelStateChanged FINAL)
+    Q_PROPERTY(bool showingQueue READ showingQueue WRITE setShowingQueue NOTIFY panelStateChanged FINAL)
+    Q_PROPERTY(QVariantList floatingWindowEntries READ floatingWindowEntries NOTIFY modsChanged FINAL)
+    Q_PROPERTY(int floatingWindowsRevision READ floatingWindowsRevision NOTIFY floatingWindowsChanged FINAL)
+    Q_PROPERTY(int trackBadgesRevision READ trackBadgesRevision NOTIFY trackBadgesChanged FINAL)
 
 public:
     explicit ModManager(AppSettings *settings,
@@ -81,6 +98,12 @@ public:
 
     void attachEngine(QQmlEngine *engine);
     ModUrlInterceptor *urlInterceptor() { return &m_interceptor; }
+    QQmlEngine *sandboxEngineForMod(const QString &modId);
+    QString modDirectoryForMod(const QString &modId) const;
+    QObject *createSandboxedObject(const QString &modId,
+                                   const QUrl &sourceUrl,
+                                   const QVariantMap &slotContext = {},
+                                   QString *errorOut = nullptr);
 
     bool safeMode() const { return m_safeMode; }
     bool modsEnabled() const;
@@ -91,6 +114,17 @@ public:
     bool pendingRestartPrompt() const { return m_pendingRestartPrompt; }
     bool restartRequested() const { return m_restartRequested; }
     int lyricSubtitlesRevision() const { return m_lyricSubtitlesRevision; }
+    bool playerBarHidden() const { return !m_playerBarHiddenBy.isEmpty(); }
+    bool showingLyrics() const { return m_showingLyrics; }
+    void setShowingLyrics(bool showing);
+    bool showingQueue() const { return m_showingQueue; }
+    void setShowingQueue(bool showing);
+    QVariantList floatingWindowEntries() const;
+    int floatingWindowsRevision() const { return m_floatingWindowsRevision; }
+    int trackBadgesRevision() const { return m_trackBadgesRevision; }
+    Q_INVOKABLE bool isFloatingWindowOpen(const QString &modId) const;
+    Q_INVOKABLE void setFloatingWindowOpen(const QString &modId, bool open);
+    Q_INVOKABLE QVariantList trackBadgesFor(const QString &trackId) const;
 
     QVariantList modsVariantList() const;
     QVariantList logsVariantList() const;
@@ -139,11 +173,30 @@ public:
     void unregisterShortcut(const QString &modId, const QString &actionId);
     void clearShortcutsForMod(const QString &modId);
 
+    void registerDynamicPage(const QString &modId,
+                             const QString &pageId,
+                             const QString &title,
+                             const QString &icon,
+                             const QString &resolvedQmlPath);
+    QVariant modExports(const QString &modId) const;
+    QVariant callModExposed(const QString &modId, const QString &name, const QVariantList &args);
+    ModScriptHost *scriptHostForMod(const QString &modId) const;
+    QVariantMap runHookChain(const QString &point, const QVariant &payload);
+    QStringList activationOrder() const { return m_scriptOrder; }
+
     QString lyricsTrackId() const { return m_lyricsTrackId; }
     bool lyricsSynced() const { return m_lyricsSynced; }
     QVariantList lyricsLines() const { return m_lyricsLines; }
     void setLyricSubtitles(const QString &modId, const QString &trackId, const QStringList &subtitles);
     void clearLyricSubtitlesForMod(const QString &modId);
+
+    void setTrackBadges(const QString &modId, const QHash<QString, ModTrackBadge> &badges);
+    void clearTrackBadgesForMod(const QString &modId);
+
+    void setModPlayerBarHidden(const QString &modId, bool hidden);
+    void clearModLayoutOverrides(const QString &modId);
+    void requestToggleLyrics();
+    void requestToggleQueue();
 
 signals:
     void modsChanged();
@@ -152,16 +205,34 @@ signals:
     void trackMenuActionsChanged();
     void shortcutsChanged();
     void lyricSubtitlesChanged();
+    void layoutStateChanged();
+    void panelStateChanged();
+    void floatingWindowsChanged();
+    void trackBadgesChanged();
+    void lyricsToggleRequested();
+    void queueToggleRequested();
     void toastRequested(const QString &message);
     void immersiveRequested(bool open);
     void settingsRequested();
     void createPlaylistRequested();
 
 private:
+    struct ModSandbox {
+        QPointer<QQmlEngine> engine;
+        std::shared_ptr<ModSandboxUrlInterceptor> urlInterceptor;
+    };
+
     void scanAndSync(bool initialStartup);
+    QVariantMap installModFromFolderInternal(const QString &folderPath, bool rescan);
+    QVariantMap installModFromArchiveInternal(const QString &archivePath, bool rescan);
     void rebuildApis();
     void rebuildWatcher();
     void destroyAllApis();
+    void destroyAllSandboxes();
+    void destroyAllScripts();
+    void syncHookSubscriptions();
+    void handleHookRequest(quint64 id, const QString &point, const QVariant &payload);
+    const ModManifest *manifestForMod(const QString &modId) const;
 
     AppSettings *m_settings = nullptr;
     YMusicBackend *m_backend = nullptr;
@@ -177,6 +248,11 @@ private:
     QHash<QString, QStringList> m_overrideConflicts;
     QHash<QString, QString> m_startupOverrides;
     QHash<QString, QPointer<ModApi>> m_apis;
+    QHash<QString, QPointer<ModScriptHost>> m_scriptHosts;
+    QStringList m_scriptOrder;
+    QStringList m_subscribedHookPoints;
+    QList<QPair<QString, ModSlotItem>> m_dynamicPages;
+    QHash<QString, ModSandbox> m_sandboxes;
     QList<ModTrackMenuAction> m_trackMenuActions;
     QList<ModShortcutEntry> m_shortcuts;
     QList<ModLogEntry> m_logs;
@@ -187,6 +263,14 @@ private:
     // modId -> (trackId -> subtitle lines)
     QHash<QString, QPair<QString, QStringList>> m_lyricSubtitles;
     int m_lyricSubtitlesRevision = 0;
+
+    QSet<QString> m_playerBarHiddenBy;
+    QSet<QString> m_openFloatingWindows;
+    int m_floatingWindowsRevision = 0;
+    QHash<QString, QHash<QString, ModTrackBadge>> m_trackBadges;
+    int m_trackBadgesRevision = 0;
+    bool m_showingLyrics = false;
+    bool m_showingQueue = false;
 
     ModUrlInterceptor m_interceptor;
     QFileSystemWatcher m_watcher;

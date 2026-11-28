@@ -76,7 +76,7 @@ Item {
     }
 
     Repeater {
-        model: appSettings.noShapes ? 0 : root.count
+        model: AppSettings.noShapes ? 0 : root.count
 
         MaterialShape {
             id: sticker

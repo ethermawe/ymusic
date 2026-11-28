@@ -6,7 +6,7 @@ import ymusic.ui
 Item {
     id: root
 
-    readonly property int activePage: UiState.activeModPageId.length > 0 ? -1 : backend.page
+    readonly property int activePage: UiState.activeModPageId.length > 0 ? -1 : Backend.page
     property bool compact: false
     property real expandedWidth: 220
     property bool resizing: false
@@ -79,7 +79,7 @@ Item {
                     Layout.alignment: root.isCompact ? Qt.AlignHCenter | Qt.AlignVCenter : Qt.AlignVCenter
                     circular: true
                     squiggly: false
-                    source: backend.userHasAvatar ? backend.userAvatar : ""
+                    source: Backend.userHasAvatar ? Backend.userAvatar : ""
                     placeholderSymbol: "person"
                     borderWidth: 1
                     borderColor: Appearance.colors.layer0Border
@@ -88,7 +88,7 @@ Item {
                 StyledText {
                     Layout.fillWidth: true
                     visible: !root.isCompact
-                    text: backend.loggedIn ? backend.userName : qsTr("Гость")
+                    text: Backend.loggedIn ? Backend.userName : qsTr("Гость")
                     font.pixelSize: Appearance.fontSize.small
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
@@ -99,8 +99,8 @@ Item {
                     size: 28
                     iconSize: 16
                     tooltip: qsTr("Выйти из аккаунта")
-                    visible: !root.isCompact && backend.loggedIn
-                    onClicked: backend.logout()
+                    visible: !root.isCompact && Backend.loggedIn
+                    onClicked: Backend.logout()
                 }
             }
         }
@@ -131,7 +131,7 @@ Item {
                     iconShape: "softBurst"
                     symbol: "waves"
                     selected: root.activePage === 1
-                    onClicked: { UiState.closeModPage(); backend.startWave(); }
+                    onClicked: { UiState.closeModPage(); Backend.startWave(); }
                 }
 
                 NavigationItem {
@@ -141,7 +141,7 @@ Item {
                     iconShape: "cookie9"
                     symbol: "home"
                     selected: root.activePage === 0
-                    onClicked: { UiState.closeModPage(); backend.loadHome(); }
+                    onClicked: { UiState.closeModPage(); Backend.loadHome(); }
                 }
 
                 SectionLabel {
@@ -158,7 +158,7 @@ Item {
                     keepsShape: true
                     symbol: "favorite"
                     selected: root.activePage === 2
-                    onClicked: { UiState.closeModPage(); backend.loadLikes(); }
+                    onClicked: { UiState.closeModPage(); Backend.loadLikes(); }
                 }
 
                 NavigationItem {
@@ -168,7 +168,7 @@ Item {
                     iconShape: "clamShell"
                     symbol: "download_done"
                     selected: root.activePage === 7
-                    onClicked: { UiState.closeModPage(); backend.loadDownloads(); }
+                    onClicked: { UiState.closeModPage(); Backend.loadDownloads(); }
                 }
 
                 SectionLabel {
@@ -197,20 +197,20 @@ Item {
                         symbol: "library_music"
                         selected: root.activePage === 3
                         trailing: IconButton {
-                            visible: !root.isCompact && backend.pinnedPlaylists.length > 0
+                            visible: !root.isCompact && Backend.pinnedPlaylists.length > 0
                             symbol: "expand_more"
-                            iconRotation: appSettings.pinnedPlaylistsExpanded ? 0 : -90
+                            iconRotation: AppSettings.pinnedPlaylistsExpanded ? 0 : -90
                             size: 26
                             iconSize: 18
-                            tooltip: appSettings.pinnedPlaylistsExpanded ? qsTr("Свернуть закреплённые") : qsTr("Развернуть закреплённые")
-                            onClicked: appSettings.pinnedPlaylistsExpanded = !appSettings.pinnedPlaylistsExpanded
+                            tooltip: AppSettings.pinnedPlaylistsExpanded ? qsTr("Свернуть закреплённые") : qsTr("Развернуть закреплённые")
+                            onClicked: AppSettings.pinnedPlaylistsExpanded = !AppSettings.pinnedPlaylistsExpanded
                         }
-                        onClicked: { UiState.closeModPage(); backend.loadPlaylists(); }
+                        onClicked: { UiState.closeModPage(); Backend.loadPlaylists(); }
                     }
 
                     Item {
                         id: pinnedSection
-                        readonly property bool expanded: appSettings.pinnedPlaylistsExpanded && backend.pinnedPlaylists.length > 0
+                        readonly property bool expanded: AppSettings.pinnedPlaylistsExpanded && Backend.pinnedPlaylists.length > 0
                         width: parent.width
                         height: expanded ? pinnedColumn.implicitHeight + 3 : 0
                         visible: height > 0
@@ -239,7 +239,7 @@ Item {
                             }
 
                             Repeater {
-                                model: backend.pinnedPlaylists
+                                model: Backend.pinnedPlaylists
 
                                 NavigationItem {
                                     id: pinnedItem
@@ -252,7 +252,7 @@ Item {
                                     showArtwork: true
                                     artworkUrl: (modelData.has_cover ?? false) ? (modelData.cover_url ?? "") : ""
                                     symbol: "library_music"
-                                    selected: root.activePage === 6 && backend.activePlaylistKey === (modelData.key ?? "")
+                                    selected: root.activePage === 6 && Backend.activePlaylistKey === (modelData.key ?? "")
                                     trailing: IconButton {
                                         symbol: "close"
                                         size: 24
@@ -260,13 +260,13 @@ Item {
                                         opacity: pinnedItem.hovered ? 0.85 : 0
                                         visible: opacity > 0
                                         tooltip: qsTr("Открепить плейлист")
-                                        onClicked: backend.feature({
+                                        onClicked: Backend.feature({
                                             action: "toggle_pin_playlist",
                                             uid: pinnedItem.modelData.uid,
                                             kind: pinnedItem.modelData.kind
                                         })
                                     }
-                                    onClicked: backend.feature({
+                                    onClicked: Backend.feature({
                                         action: "open_playlist",
                                         uid: pinnedItem.modelData.uid,
                                         kind: pinnedItem.modelData.kind,
@@ -274,7 +274,7 @@ Item {
                                     })
                                     TapHandler {
                                         acceptedButtons: Qt.RightButton
-                                        onTapped: backend.feature({
+                                        onTapped: Backend.feature({
                                             action: "toggle_pin_playlist",
                                             uid: pinnedItem.modelData.uid,
                                             kind: pinnedItem.modelData.kind
@@ -293,7 +293,7 @@ Item {
                     iconShape: "sunny"
                     symbol: "album"
                     selected: root.activePage === 4
-                    onClicked: { UiState.closeModPage(); backend.loadAlbums(); }
+                    onClicked: { UiState.closeModPage(); Backend.loadAlbums(); }
                 }
 
                 NavigationItem {
@@ -303,7 +303,7 @@ Item {
                     iconShape: "clover4"
                     symbol: "group"
                     selected: root.activePage === 5
-                    onClicked: { UiState.closeModPage(); backend.loadArtists(); }
+                    onClicked: { UiState.closeModPage(); Backend.loadArtists(); }
                 }
 
                 SectionLabel {
@@ -330,6 +330,16 @@ Item {
                     }
                 }
             }
+        }
+
+        ModSlotHost {
+            Layout.fillWidth: true
+            Layout.preferredHeight: implicitHeight
+            layoutMode: "column"
+            spacing: 8
+            visible: !root.isCompact && entries.length > 0
+            slotName: "sidebar.footer"
+            slotContext: ({ compact: root.isCompact, sidebarWidth: root.width })
         }
 
         NavigationItem {

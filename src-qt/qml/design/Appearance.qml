@@ -29,21 +29,21 @@ QtObject {
 
     readonly property MaterialScheme colors: Theme.colors
     /// Nothing moves of its own accord over and over when reduced motion or performance mode is on.
-    readonly property bool reduceMotion: appSettings.reduceMotion || appSettings.performanceMode || !appSettings.motionEnabled
+    readonly property bool reduceMotion: AppSettings.reduceMotion || AppSettings.performanceMode || !AppSettings.motionEnabled
     /// Performance mode disables all animations and fades.
-    readonly property bool performanceMode: appSettings.performanceMode
-    readonly property real zoom: appSettings.zoom
+    readonly property bool performanceMode: AppSettings.performanceMode
+    readonly property real zoom: AppSettings.zoom
 
     component Rounding: QtObject {
-        readonly property int unsharpen: Math.max(0, Math.round(2 * appSettings.roundingScale))
-        readonly property int unsharpenMore: Math.max(0, Math.round(6 * appSettings.roundingScale))
-        readonly property int verySmall: Math.max(0, Math.round(8 * appSettings.roundingScale))
-        readonly property int small: Math.max(0, Math.round(12 * appSettings.roundingScale))
-        readonly property int normal: Math.max(0, Math.round(17 * appSettings.roundingScale))
-        readonly property int large: Math.max(0, Math.round(23 * appSettings.roundingScale))
-        readonly property int veryLarge: Math.max(0, Math.round(30 * appSettings.roundingScale))
+        readonly property int unsharpen: Math.max(0, Math.round(2 * AppSettings.roundingScale))
+        readonly property int unsharpenMore: Math.max(0, Math.round(6 * AppSettings.roundingScale))
+        readonly property int verySmall: Math.max(0, Math.round(8 * AppSettings.roundingScale))
+        readonly property int small: Math.max(0, Math.round(12 * AppSettings.roundingScale))
+        readonly property int normal: Math.max(0, Math.round(17 * AppSettings.roundingScale))
+        readonly property int large: Math.max(0, Math.round(23 * AppSettings.roundingScale))
+        readonly property int veryLarge: Math.max(0, Math.round(30 * AppSettings.roundingScale))
         readonly property int full: 9999
-        readonly property int window: Math.max(0, Math.round(18 * appSettings.roundingScale))
+        readonly property int window: Math.max(0, Math.round(18 * AppSettings.roundingScale))
     }
     readonly property Rounding rounding: Rounding {}
 
@@ -63,8 +63,8 @@ QtObject {
     }
     readonly property FontSizes fontSize: FontSizes {}
 
-    readonly property string fontFamily: appSettings.customFontFamily.length > 0
-        ? appSettings.customFontFamily
+    readonly property string fontFamily: AppSettings.customFontFamily.length > 0
+        ? AppSettings.customFontFamily
         : Theme.fontFamily
     readonly property string monoFontFamily: Theme.monoFontFamily
     readonly property string iconFontFamily: "Material Symbols Rounded"
@@ -103,8 +103,8 @@ QtObject {
         readonly property real shelfGap: 16
         readonly property real cardSize: 176
         readonly property real headerArtwork: 232
-        readonly property real artworkRadius: Math.max(0, Math.round(12 * appSettings.roundingScale))
-        readonly property real smallArtworkRadius: Math.max(0, Math.round(7 * appSettings.roundingScale))
+        readonly property real artworkRadius: Math.max(0, Math.round(12 * AppSettings.roundingScale))
+        readonly property real smallArtworkRadius: Math.max(0, Math.round(7 * AppSettings.roundingScale))
         readonly property real sideSheetWidth: 320
         readonly property real topBarHeight: 64
         readonly property real playerBarClearance: 120

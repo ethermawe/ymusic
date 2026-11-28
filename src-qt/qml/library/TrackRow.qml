@@ -13,6 +13,7 @@ T.AbstractButton {
     property bool isPlaying: model?.isPlaying ?? false
     property bool queueView: false
     property bool showsNumber: true
+    readonly property string rowTrackId: root.model ? String(root.model.id || "") : ""
     readonly property bool expanded: hovered || isCurrent
 
     implicitHeight: 58
@@ -37,15 +38,15 @@ T.AbstractButton {
             const position = hasCursor
                 ? root.mapToItem(appWindow.contentItem, lx, ly)
                 : moreButton.mapToItem(appWindow.contentItem, moreButton.width, moreButton.height);
-            backend.requestTrackMenu(root.model.id, root.model.title, root.model.available, position.x, position.y);
+            Backend.requestTrackMenu(root.model.id, root.model.title, root.model.available, position.x, position.y);
         }
     }
 
     onClicked: {
         if (!root.model) return;
-        if (root.isCurrent) backend.toggle();
-        else if (root.queueView) backend.trackAction(root.model.id, 3);
-        else backend.play(root.index);
+        if (root.isCurrent) Backend.toggle();
+        else if (root.queueView) Backend.trackAction(root.model.id, 3);
+        else Backend.play(root.index);
     }
 
     background: Rectangle {
@@ -148,11 +149,11 @@ T.AbstractButton {
                     delayed: true
                 }
                 anchors.fill: parent
-                active: (root.isCurrent && appSettings.visualizersEnabled) || showing
+                active: (root.isCurrent && AppSettings.visualizersEnabled) || showing
                 sourceComponent: Rectangle {
                     id: shade
                     property bool arrived: false
-                    Reveal.shown: arrived && root.isCurrent && appSettings.visualizersEnabled
+                    Reveal.shown: arrived && root.isCurrent && AppSettings.visualizersEnabled
                     radius: 6
                     color: Qt.rgba(0, 0, 0, 0.34)
                     Component.onCompleted: Qt.callLater(() => {
@@ -182,13 +183,15 @@ T.AbstractButton {
                 width: parent.width
                 height: Math.max(trackTitleText.implicitHeight, 18)
 
-                readonly property bool showAiBadge: backend.showAiLabels && (root.model?.isAi ?? false)
+                readonly property bool showAiBadge: Backend.showAiLabels && (root.model?.isAi ?? false)
 
                 StyledText {
                     id: trackTitleText
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Math.min(implicitWidth, Math.max(0, parent.width - (aiBadge.visible ? aiBadge.width + 6 : 0)))
+                    readonly property real badgesWidth: (aiBadge.visible ? aiBadge.width + 6 : 0)
+                        + (modTrackBadges.visible ? modTrackBadges.width + 6 : 0)
+                    width: Math.min(implicitWidth, Math.max(0, parent.width - badgesWidth))
                     text: root.model?.title ?? ""
                     elide: Text.ElideRight
                     font.pixelSize: Appearance.fontSize.small
@@ -205,8 +208,8 @@ T.AbstractButton {
                         enabled: root.model?.hasAlbum ?? false
                         onClicked: {
                             if (!root.model) return;
-                            if (root.queueView) backend.trackAction(root.model.id, 6);
-                            else backend.openTrackAlbum(root.index);
+                            if (root.queueView) Backend.trackAction(root.model.id, 6);
+                            else Backend.openTrackAlbum(root.index);
                         }
                     }
                 }
@@ -217,6 +220,68 @@ T.AbstractButton {
                     anchors.left: trackTitleText.right
                     anchors.leftMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Row {
+                    id: modTrackBadges
+                    readonly property var modBadges: {
+                        const _rev = ModManager.trackBadgesRevision;
+                        const tid = root.rowTrackId;
+                        return tid.length > 0 ? ModManager.trackBadgesFor(tid) : [];
+                    }
+                    spacing: 4
+                    height: 18
+                    visible: modBadges.length > 0
+                    anchors.left: aiBadge.visible ? aiBadge.right : trackTitleText.right
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Repeater {
+                        model: modTrackBadges.modBadges
+                        delegate: Rectangle {
+                            id: badgePill
+                            required property var modelData
+                            readonly property string tone: String(modelData?.tone || "")
+                            readonly property string tipText: String(modelData?.tooltip || "")
+                            readonly property color bg: tone === "primary" ? Appearance.colors.primaryContainer
+                                : tone === "secondary" ? Appearance.colors.secondaryContainer
+                                : tone === "tertiary" ? Appearance.colors.tertiaryContainer
+                                : tone === "error" ? Appearance.colors.errorContainer
+                                : Appearance.colors.surfaceContainerHigh
+                            readonly property color fg: tone === "primary" ? Appearance.colors.onPrimaryContainer
+                                : tone === "secondary" ? Appearance.colors.onSecondaryContainer
+                                : tone === "tertiary" ? Appearance.colors.onTertiaryContainer
+                                : tone === "error" ? Appearance.colors.onErrorContainer
+                                : Appearance.colors.onSurfaceVariant
+
+                            height: 18
+                            radius: 9
+                            implicitWidth: badgeLbl.implicitWidth + 10
+                            color: bg
+                            border.width: 1
+                            border.color: Qt.alpha(fg, 0.18)
+
+                            StyledText {
+                                id: badgeLbl
+                                anchors.centerIn: parent
+                                text: String(badgePill.modelData?.text || "")
+                                font.pixelSize: 10
+                                font.weight: Font.Bold
+                                font.letterSpacing: 0.4
+                                color: badgePill.fg
+                            }
+
+                            HoverHandler {
+                                id: badgeHover
+                                enabled: badgePill.tipText.length > 0
+                            }
+
+                            StyledToolTip {
+                                visible: badgeHover.hovered && badgePill.tipText.length > 0
+                                text: badgePill.tipText
+                            }
+                        }
+                    }
                 }
             }
 
@@ -231,8 +296,8 @@ T.AbstractButton {
                 color: Appearance.colors.onSurfaceVariant
                 onFallbackActivated: {
                     if (!root.model) return;
-                    if (root.queueView) backend.trackAction(root.model.id, 5);
-                    else backend.openTrackArtist(root.index);
+                    if (root.queueView) Backend.trackAction(root.model.id, 5);
+                    else Backend.openTrackArtist(root.index);
                 }
             }
         }
@@ -323,8 +388,8 @@ T.AbstractButton {
                         UiState.burst(likeButton, "hearts");
                         if (!Appearance.performanceMode) likePop.restart();
                     }
-                    if (root.queueView) backend.trackAction(root.model.id, 4);
-                    else backend.toggleLike(root.index);
+                    if (root.queueView) Backend.trackAction(root.model.id, 4);
+                    else Backend.toggleLike(root.index);
                 }
 
                 MaterialShape {
@@ -365,17 +430,17 @@ T.AbstractButton {
                 IconButton {
                     symbol: "expand_more"; rotation: 180; size: 26; iconSize: 16
                     enabled: root.index > 0
-                    onClicked: if (root.model) backend.feature({action: "queue", operation: "up", index: root.index, id: root.model.id})
+                    onClicked: if (root.model) Backend.feature({action: "queue", operation: "up", index: root.index, id: root.model.id})
                 }
                 IconButton {
                     symbol: "expand_more"; size: 26; iconSize: 16
-                    enabled: root.index < backend.queue.count - 1
-                    onClicked: if (root.model) backend.feature({action: "queue", operation: "down", index: root.index, id: root.model.id})
+                    enabled: root.index < Backend.queue.count - 1
+                    onClicked: if (root.model) Backend.feature({action: "queue", operation: "down", index: root.index, id: root.model.id})
                 }
                 IconButton {
                     symbol: "close"; size: 26; iconSize: 16
                     enabled: !root.isCurrent
-                    onClicked: if (root.model) backend.feature({action: "queue", operation: "remove", index: root.index, id: root.model.id})
+                    onClicked: if (root.model) Backend.feature({action: "queue", operation: "remove", index: root.index, id: root.model.id})
                 }
             }
         }

@@ -34,9 +34,16 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+
+      - name: Check Rust formatting & lints
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --lib -- -D warnings
 
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
@@ -80,13 +87,18 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            .
-            packaging/windows/setup
+
+      - name: Check Rust formatting & lints
+        run: |
+          cargo fmt --check
+          cargo fmt --manifest-path packaging/windows/setup/Cargo.toml --check
+          cargo clippy --locked --lib -- -D warnings
+          cargo clippy --manifest-path packaging/windows/setup/Cargo.toml --locked -- -D warnings
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4

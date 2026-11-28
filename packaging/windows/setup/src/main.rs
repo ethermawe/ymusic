@@ -1,4 +1,7 @@
-#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
 
 use ymusic_setup::payload;
 
@@ -154,7 +157,11 @@ where
 
     on_progress(
         1.0,
-        if is_ru { "Установка завершена" } else { "Installation complete" },
+        if is_ru {
+            "Установка завершена"
+        } else {
+            "Installation complete"
+        },
     );
     Ok(())
 }
@@ -291,7 +298,8 @@ fn main() {
         return;
     }
 
-    let preview_mode = cli.preview || (embedded.is_none() && cfg!(debug_assertions) && !cli.uninstall);
+    let preview_mode =
+        cli.preview || (embedded.is_none() && cfg!(debug_assertions) && !cli.uninstall);
     let missing_payload_error = !cli.uninstall && embedded.is_none() && !preview_mode;
 
     let ui = InstallerWindow::new().expect("Failed to create installer window");
@@ -325,9 +333,16 @@ fn main() {
     });
 
     let weak_drag = ui.as_weak();
+    let native_drag_active = std::cell::Cell::new(false);
     ui.on_drag_requested(move |dx, dy| {
         if dx == 0.0 && dy == 0.0 {
-            let _ = os_impl::begin_native_drag();
+            native_drag_active.set(os_impl::begin_native_drag());
+            return;
+        }
+        // On Windows, WM_NCLBUTTONDOWN(HTCAPTION) handles the entire drag natively
+        // and consumes WM_LBUTTONUP, so Slint's TouchArea may stay `pressed` afterward.
+        // Never run the manual set_position fallback once native drag took over.
+        if native_drag_active.get() {
             return;
         }
         if let Some(u) = weak_drag.upgrade() {

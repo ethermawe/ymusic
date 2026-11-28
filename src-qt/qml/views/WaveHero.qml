@@ -10,7 +10,7 @@ FocusScope {
     focus: true
 
     property var selected: ({})
-    property bool fetching: true
+    property bool fetching: false
     property bool applying: false
     property string errorMessage: ""
     property bool settingsOpen: false
@@ -25,16 +25,16 @@ FocusScope {
             waveWheel.stopSmooth();
             waveTrackList.manualBrowsing = false;
         } else {
-            if (root.groups.length === 0 && !root.fetching && backend.loggedIn) {
+            if (root.groups.length === 0 && !root.fetching && Backend.loggedIn) {
                 root.reload();
             }
             Qt.callLater(waveTrackList.follow, false);
         }
     }
 
-    readonly property var groups: backend.waveSettings.groups || []
-    readonly property bool inWave: backend.tracks.currentIndex >= 0
-    readonly property bool wavePlaying: inWave && backend.playing
+    readonly property var groups: Backend.waveSettings.groups || []
+    readonly property bool inWave: Backend.tracks.currentIndex >= 0
+    readonly property bool wavePlaying: inWave && Backend.playing
     readonly property bool compact: width < 820
     readonly property real topInset: Appearance.sizes.topBarHeight + 8
     readonly property real bottomInset: Appearance.sizes.playerBarClearance + 8
@@ -42,9 +42,9 @@ FocusScope {
     readonly property real stageOrbDiameter: compact
         ? Math.min(350, Math.max(240, usableHeight * 0.56))
         : Math.min(540, Math.max(360, Math.min(usableHeight - 108, rightStage.width * 0.80)))
-    readonly property bool showsRing: appSettings.visualizersEnabled && appSettings.waveVisualizer && !Appearance.performanceMode
-    readonly property bool auroraActive: appSettings.waveAurora && !Appearance.performanceMode
-    readonly property bool showsOrbCover: appSettings.waveOrbArtwork && root.inWave && backend.hasCover
+    readonly property bool showsRing: AppSettings.visualizersEnabled && AppSettings.waveVisualizer && !Appearance.performanceMode
+    readonly property bool auroraActive: AppSettings.waveAurora && !Appearance.performanceMode
+    readonly property bool showsOrbCover: AppSettings.waveOrbArtwork && root.inWave && Backend.hasCover
     property real auroraIdleTime: 0
     readonly property real innerOrbSize: showsRing ? stageOrbDiameter * ring.innerRadiusRatio : stageOrbDiameter * 0.76
     readonly property real beatEnergy: root.wavePlaying && !Appearance.reduceMotion && !Appearance.performanceMode
@@ -69,7 +69,7 @@ FocusScope {
     property real orbVisualScale: coreMouse.pressed ? 0.93 : (coreHover.hovered ? 1.05 : 1.0)
     Behavior on orbVisualScale { enabled: !Appearance.performanceMode; Bounce {} }
 
-    readonly property bool changed: JSON.stringify(selected) !== JSON.stringify(backend.waveSettings.selected || {})
+    readonly property bool changed: JSON.stringify(selected) !== JSON.stringify(Backend.waveSettings.selected || {})
     readonly property int activeFilterCount: Object.keys(selected).length
 
     readonly property color accentPrimary: (inWave && PlayerStyle.palette.length > 0)
@@ -126,31 +126,51 @@ FocusScope {
         select(key, seed);
         applying = true;
         errorMessage = "";
-        backend.feature({action: "wave_apply", selected: selected});
+        Backend.feature({action: "wave_apply", selected: selected});
     }
 
     function reload() {
+        if (!Backend.loggedIn) {
+            fetching = false;
+            return;
+        }
         fetching = true;
         errorMessage = "";
-        backend.feature({action: "wave_settings"});
+        Backend.feature({action: "wave_settings"});
     }
 
     function toggleWavePlayback() {
-        if (root.inWave) backend.toggle();
-        else if (backend.tracks.count > 0) backend.play(0);
-        else backend.startWave();
+        if (root.inWave) Backend.toggle();
+        else if (Backend.tracks.count > 0) Backend.play(0);
+        else Backend.startWave();
     }
 
     Component.onCompleted: {
-        selected = Object.assign({}, backend.waveSettings.selected || {});
-        reload();
+        selected = Object.assign({}, Backend.waveSettings.selected || {});
+        if (Backend.loggedIn && root.groups.length === 0) {
+            reload();
+        }
+    }
+
+    Connections {
+        target: Backend
+        function onAuthChanged() {
+            if (Backend.loggedIn && root.groups.length === 0 && !root.fetching) {
+                root.reload();
+            }
+        }
+        function onFeaturesChanged() {
+            if (root.groups.length > 0 && root.fetching) {
+                root.fetching = false;
+            }
+        }
     }
 
     BackdropClock {
         id: clock
         running: root.wavePlaying && root.visible && !Appearance.reduceMotion && !Appearance.performanceMode
         playing: root.wavePlaying
-        reactivity: appSettings.waveReactivity
+        reactivity: AppSettings.waveReactivity
         onFrame: {
             if (!root.wavePlaying || Appearance.reduceMotion || Appearance.performanceMode) return;
             const targetMid = Math.min(1.5, clock.energy.z * 0.45 + clock.energy.w * 0.55);
@@ -177,7 +197,7 @@ FocusScope {
         id: waveBackdropSource
         width: 32
         height: 32
-        source: appSettings.coversEnabled && root.inWave && backend.hasCover ? backend.nowCover : ""
+        source: AppSettings.coversEnabled && root.inWave && Backend.hasCover ? Backend.nowCover : ""
         sourceSize: Qt.size(32, 32)
         smooth: true
         asynchronous: true
@@ -259,7 +279,7 @@ FocusScope {
         property color c1: root.paletteShade(1, Appearance.colors.tertiary)
         property color c2: root.paletteShade(2, Appearance.colors.secondary)
         property real orbSize: (coreButton.width * 0.5) * root.orbVisualScale
-        property real tintStrength: appSettings.visualizersEnabled ? 0.95 : 0.72
+        property real tintStrength: AppSettings.visualizersEnabled ? 0.95 : 0.72
         property real hasCover: root.showsOrbCover ? 1.0 : 0.0
         Behavior on hasCover {
             enabled: !Appearance.reduceMotion
@@ -388,17 +408,17 @@ FocusScope {
                         iconSize: 18
                         tooltip: "Меньше такого"
                         enabled: root.inWave
-                        onClicked: backend.dislikeNow()
+                        onClicked: Backend.dislikeNow()
                     }
                     IconButton {
-                        symbol: backend.nowLiked && root.inWave ? "favorite" : "favorite_border"
+                        symbol: Backend.nowLiked && root.inWave ? "favorite" : "favorite_border"
                         size: 34
                         iconSize: 19
-                        toggled: backend.nowLiked && root.inWave
+                        toggled: Backend.nowLiked && root.inWave
                         burst: "hearts"
                         tooltip: "Мне нравится"
                         enabled: root.inWave
-                        onClicked: backend.toggleNowLike()
+                        onClicked: Backend.toggleNowLike()
                     }
                     TransportButton {
                         symbol: "skip_next"
@@ -409,7 +429,7 @@ FocusScope {
                         hoverShape: "pill"
                         tooltip: "Следующий трек"
                         enabled: root.inWave
-                        onClicked: backend.next()
+                        onClicked: Backend.next()
                     }
                 }
 
@@ -431,7 +451,7 @@ FocusScope {
                     StyledText {
                         width: parent.width
                         text: root.inWave
-                            ? ("Сейчас: " + backend.nowTitle)
+                            ? ("Сейчас: " + Backend.nowTitle)
                             : "Очередь персональных рекомендаций"
                         font.pixelSize: Appearance.fontSize.smallest
                         color: Appearance.colors.onSurfaceVariant
@@ -461,7 +481,7 @@ FocusScope {
                     boundsBehavior: Flickable.StopAtBounds
                     maximumFlickVelocity: 5000
                     flickDeceleration: 2400
-                    model: root.visible ? backend.tracks : null
+                    model: root.visible ? Backend.tracks : null
 
                     property bool autoScrolling: false
                     property bool manualBrowsing: false
@@ -506,7 +526,7 @@ FocusScope {
                         interval: 5000
                         repeat: false
                         onTriggered: {
-                            if (!waveTrackList.manualBrowsing || !root.inWave || !root.visible || backend.tracks.count === 0) {
+                            if (!waveTrackList.manualBrowsing || !root.inWave || !root.visible || Backend.tracks.count === 0) {
                                 return;
                             }
                             if (waveTrackList.dragging || waveTrackList.moving || waveBar.pressed
@@ -520,7 +540,7 @@ FocusScope {
                     }
 
                     function scheduleAutoReturn() {
-                        if (manualBrowsing && root.inWave && root.visible && backend.tracks.count > 0 && !dragging && !waveBar.pressed) {
+                        if (manualBrowsing && root.inWave && root.visible && Backend.tracks.count > 0 && !dragging && !waveBar.pressed) {
                             waveAutoReturnTimer.restart();
                         }
                     }
@@ -532,8 +552,8 @@ FocusScope {
                     }
 
                     function updateScrolledAway() {
-                        const index = backend.tracks.currentIndex;
-                        if (!root.inWave || index < 0 || index >= backend.tracks.count) {
+                        const index = Backend.tracks.currentIndex;
+                        if (!root.inWave || index < 0 || index >= Backend.tracks.count) {
                             scrolledAway = false;
                             return;
                         }
@@ -553,8 +573,8 @@ FocusScope {
                             return;
                         }
                         waveWheel.stopSmooth();
-                        const index = backend.tracks.currentIndex;
-                        if (!root.inWave || index < 0 || index >= backend.tracks.count) {
+                        const index = Backend.tracks.currentIndex;
+                        if (!root.inWave || index < 0 || index >= Backend.tracks.count) {
                             updateScrolledAway();
                             return;
                         }
@@ -622,7 +642,7 @@ FocusScope {
                     onHeightChanged: Qt.callLater(waveTrackList.follow, false)
 
                     Connections {
-                        target: backend.tracks
+                        target: Backend.tracks
                         function onCurrentIndexChanged() {
                             if (!waveTrackList.manualBrowsing) {
                                 Qt.callLater(waveTrackList.follow, true);
@@ -670,7 +690,7 @@ FocusScope {
                     height: 28
                     radius: 14
                     width: waveJumpText.implicitWidth + 22
-                    visible: root.inWave && waveTrackList.scrolledAway && backend.tracks.count > 0
+                    visible: root.inWave && waveTrackList.scrolledAway && Backend.tracks.count > 0
                     color: waveJumpMouse.containsMouse
                         ? Appearance.colors.primary
                         : Appearance.colors.surfaceContainerHighest
@@ -703,7 +723,7 @@ FocusScope {
                 Column {
                     anchors.centerIn: parent
                     spacing: 12
-                    visible: backend.tracks.count === 0 && backend.listLoading
+                    visible: Backend.tracks.count === 0 && Backend.listLoading
                     LoadingSpinner { anchors.horizontalCenter: parent.horizontalCenter }
                     StyledText {
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -715,7 +735,7 @@ FocusScope {
                 EmptyState {
                     anchors.centerIn: parent
                     width: Math.min(320, parent.width - 24)
-                    visible: backend.tracks.count === 0 && !backend.listLoading
+                    visible: Backend.tracks.count === 0 && !Backend.listLoading
                     symbol: "my_wave"
                     title: "Поток готов к запуску"
                     description: "Нажмите на сферу справа, чтобы запустить Мою волну"
@@ -738,7 +758,7 @@ FocusScope {
             Item {
                 id: waveM3Backdrop
                 anchors.fill: parent
-                visible: !appSettings.noShapes
+                visible: !AppSettings.noShapes
 
                 readonly property var shapeSpecs: [
                     { nx: 0.12, ny: 0.16, sizeRatio: 0.19, shape: "clover4",    tone: 0, alpha: 0.22, angle: 18,  pace: 14 },
@@ -759,7 +779,7 @@ FocusScope {
                 }
 
                 Repeater {
-                    model: appSettings.noShapes ? 0 : waveM3Backdrop.shapeSpecs.length
+                    model: AppSettings.noShapes ? 0 : waveM3Backdrop.shapeSpecs.length
 
                     MaterialShape {
                         required property int index
@@ -839,7 +859,7 @@ FocusScope {
                     }
 
                     Connections {
-                        target: backend
+                        target: Backend
                         function onNowPlayingChanged() {
                             if (root.inWave && !Appearance.performanceMode) {
                                 orbPopIn.restart();
@@ -861,10 +881,10 @@ FocusScope {
                     SpectrumView {
                         id: ring
                         anchors.fill: parent
-                        Reveal.shown: root.showsRing && (root.wavePlaying || !root.auroraActive)
+                        Reveal.shown: root.showsRing && root.wavePlaying
                         kind: SpectrumView.Ring
-                        wave: appSettings.waveVisualizerShape === "wave"
-                        sensitivity: appSettings.waveVisualizerSensitivity
+                        wave: AppSettings.waveVisualizerShape === "wave"
+                        sensitivity: AppSettings.waveVisualizerSensitivity
                         active: root.visible && root.wavePlaying && root.showsRing
                         cutWaves: orbCover.showsSquiggle ? orbCover.squiggleWaves : 0
                         cutRadius: orbCover.squiggleMiddle
@@ -882,7 +902,7 @@ FocusScope {
                             id: orbCover
                             anchors.fill: parent
                             circular: true
-                            showArtwork: appSettings.waveOrbArtwork
+                            showArtwork: AppSettings.waveOrbArtwork
                             borderWidth: root.auroraActive && root.showsOrbCover ? 1.5 : 0
                             borderColor: Qt.rgba(1, 1, 1, 0.22)
                             opacity: root.showsOrbCover ? 1.0 : (root.auroraActive ? 0.0 : 1.0)
@@ -892,16 +912,16 @@ FocusScope {
                             }
                             blankTopColor: Qt.rgba(root.accentPrimary.r * 0.28 + 0.06, root.accentPrimary.g * 0.28 + 0.06, root.accentPrimary.b * 0.28 + 0.08, 1)
                             blankBottomColor: Qt.rgba(root.accentSecondary.r * 0.22 + 0.04, root.accentSecondary.g * 0.22 + 0.04, root.accentSecondary.b * 0.22 + 0.06, 1)
-                            squiggly: appSettings.waveOrbSquiggle && !root.auroraActive
+                            squiggly: AppSettings.waveOrbSquiggle && !root.auroraActive
                             squiggleFollowsPlayback: true
                             squiggleAmplitudeBoost: 1.25 + root.beatEnergy * 1.15
                             squiggleColor: root.accentPrimary
                             dim: coreHover.hovered ? 0.24 : 0.34
                             Behavior on dim { ElementMoveFast {} }
-                            loading: backend.listLoading || root.applying || !root.inWave
-                            source: appSettings.waveOrbArtwork && root.inWave && backend.hasCover ? backend.nowCover : ""
+                            loading: Backend.listLoading || root.applying
+                            source: AppSettings.waveOrbArtwork && root.inWave && Backend.hasCover ? Backend.nowCover : ""
                             placeholderSymbol: "my_wave"
-                            fallbackKey: backend.listTitle || "Моя волна"
+                            fallbackKey: Backend.listTitle || "Моя волна"
                             crossfade: true
                             revealDuration: 360
                         }
@@ -914,7 +934,7 @@ FocusScope {
                         MouseArea {
                             id: coreMouse
                             anchors.fill: parent
-                            enabled: !root.applying && !backend.listLoading
+                            enabled: !root.applying && !Backend.listLoading
                             onClicked: {
                                 if (!root.wavePlaying) UiState.burst(coreButton, "play");
                                 root.toggleWavePlayback();
@@ -938,7 +958,7 @@ FocusScope {
 
                                 MaterialSymbol {
                                     anchors.centerIn: parent
-                                    text: root.applying || backend.listLoading ? "hourglass_top"
+                                    text: root.applying || Backend.listLoading ? "hourglass_top"
                                         : (root.wavePlaying ? "pause" : "play_arrow")
                                     iconSize: root.compact ? 28 : 36
                                     fill: 1
@@ -949,7 +969,7 @@ FocusScope {
                             TitleText {
                                 width: parent.width
                                 horizontalAlignment: Text.AlignHCenter
-                                text: backend.listTitle || "Моя волна"
+                                text: Backend.listTitle || "Моя волна"
                                 font.pixelSize: root.compact ? 22 : 29
                                 font.weight: Font.Bold
                                 color: "white"
@@ -994,7 +1014,7 @@ FocusScope {
                                 implicitHeight: 36
                                 implicitWidth: activePillRow.implicitWidth + 24
                                 hoverEnabled: true
-                                enabled: !root.applying && !root.fetching
+                                enabled: !root.applying && (!root.fetching || root.groups.length > 0)
                                 scale: down ? 0.95 : (hovered ? 1.03 : 1)
                                 Behavior on scale { enabled: !Appearance.performanceMode; Bounce {} }
                                 onClicked: root.selectAndApply(modelData.key, "")
@@ -1031,7 +1051,7 @@ FocusScope {
                                 required property var modelData
                                 text: modelData.name
                                 chosen: false
-                                enabled: !root.applying && !root.fetching
+                                enabled: !root.applying && (!root.fetching || root.groups.length > 0)
                                 onClicked: root.selectAndApply(modelData.key, modelData.seed)
                             }
                         }
@@ -1210,7 +1230,7 @@ FocusScope {
                                     Chip {
                                         text: "Любой"
                                         chosen: !root.selected[group.modelData.key]
-                                        enabled: !root.applying && !root.fetching
+                                        enabled: !root.applying && (!root.fetching || root.groups.length > 0)
                                         onClicked: root.select(group.modelData.key, "")
                                     }
 
@@ -1220,7 +1240,7 @@ FocusScope {
                                             required property var modelData
                                             text: modelData.name
                                             chosen: root.selected[group.modelData.key] === modelData.seed
-                                            enabled: !root.applying && !root.fetching
+                                            enabled: !root.applying && (!root.fetching || root.groups.length > 0)
                                             onClicked: root.select(group.modelData.key, modelData.seed)
                                         }
                                     }
@@ -1271,7 +1291,7 @@ FocusScope {
                         onClicked: {
                             root.applying = true;
                             root.errorMessage = "";
-                            backend.feature({action: "wave_apply", selected: root.selected});
+                            Backend.feature({action: "wave_apply", selected: root.selected});
                         }
                     }
                 }
@@ -1287,9 +1307,9 @@ FocusScope {
     }
 
     Connections {
-        target: backend
+        target: Backend
         function onLoggedInChanged() {
-            if (backend.loggedIn && root.groups.length === 0 && !root.fetching) {
+            if (Backend.loggedIn && root.groups.length === 0 && !root.fetching) {
                 root.reload();
             }
         }

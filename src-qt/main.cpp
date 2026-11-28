@@ -251,9 +251,6 @@ int main(int argc, char *argv[]) {
 
     qmlRegisterUncreatableType<TrackModel>("ymusic.ui", 1, 0, "TrackModel", "Provided by backend");
     qmlRegisterUncreatableType<CardModel>("ymusic.ui", 1, 0, "CardModel", "Provided by backend");
-    qmlRegisterUncreatableType<YMusicBackend>("ymusic.ui", 1, 0, "YMusicBackend", "Provided by backend");
-    qmlRegisterUncreatableType<ThemeManager>("ymusic.ui", 1, 0, "ThemeManager", "Provided by context");
-    qmlRegisterUncreatableType<AppSettings>("ymusic.ui", 1, 0, "AppSettings", "Provided by context");
 
     CustomNetworkAccessManager network;
     YMusicBackend backend;
@@ -292,11 +289,19 @@ int main(int argc, char *argv[]) {
     }
 
     ymusic::WindowController windowController;
+    windowController.setTrayAvailable(trayAvailable);
     ymusic::UpdateChecker updateChecker;
     updateChecker.setAutoCheckEnabled(settings.autoUpdateEnabled());
     QObject::connect(&settings, &AppSettings::autoUpdateEnabledChanged, &updateChecker, [&]() {
         updateChecker.setAutoCheckEnabled(settings.autoUpdateEnabled());
     });
+
+    qmlRegisterSingletonInstance("ymusic.ui", 1, 0, "Backend", &backend);
+    qmlRegisterSingletonInstance("ymusic.ui", 1, 0, "ThemeManager", &ThemeManager::instance());
+    qmlRegisterSingletonInstance("ymusic.ui", 1, 0, "AppSettings", &settings);
+    qmlRegisterSingletonInstance("ymusic.ui", 1, 0, "SpinClock", ymusic::AmbientClock::spin());
+    qmlRegisterSingletonInstance("ymusic.ui", 1, 0, "WindowController", &windowController);
+    qmlRegisterSingletonInstance("ymusic.ui", 1, 0, "Updater", &updateChecker);
 
     QQmlApplicationEngine engine;
     modManager.attachEngine(&engine);
@@ -304,13 +309,6 @@ int main(int argc, char *argv[]) {
     engine.setNetworkAccessManagerFactory(new CustomNamFactory);
     engine.addImageProvider(QStringLiteral("art"), new ymusic::ArtworkImageProvider);
     engine.addImageProvider(QStringLiteral("qr"), new ymusic::QrImageProvider);
-    engine.rootContext()->setContextProperty("backend", &backend);
-    engine.rootContext()->setContextProperty("themeManager", &ThemeManager::instance());
-    engine.rootContext()->setContextProperty("appSettings", &settings);
-    engine.rootContext()->setContextProperty("spinClock", ymusic::AmbientClock::spin());
-    engine.rootContext()->setContextProperty("trayAvailable", trayAvailable);
-    engine.rootContext()->setContextProperty("windowController", &windowController);
-    engine.rootContext()->setContextProperty("updater", &updateChecker);
 
     QStringList qmlErrors;
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app, [&](const QList<QQmlError> &warnings) {

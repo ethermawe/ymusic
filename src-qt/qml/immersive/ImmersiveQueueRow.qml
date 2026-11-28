@@ -78,7 +78,7 @@ T.AbstractButton {
                 width: parent.width
                 height: Math.max(immersiveQueueTitle.implicitHeight, 18)
 
-                readonly property bool showAiBadge: backend.showAiLabels && root.isAi
+                readonly property bool showAiBadge: Backend.showAiLabels && root.isAi
 
                 ScrollingText {
                     id: immersiveQueueTitle

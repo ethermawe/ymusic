@@ -40,9 +40,12 @@ void YMusicBackend::cCallback(int32_t eventType, const char *jsonData, void *use
     auto *backend = static_cast<YMusicBackend*>(userData);
     if (!backend || !jsonData) return;
 
+    QPointer<YMusicBackend> self(backend);
     QString json = QString::fromUtf8(jsonData);
-    QMetaObject::invokeMethod(backend, [backend, eventType, json]() {
-        backend->handleEvent(eventType, json);
+    QMetaObject::invokeMethod(backend, [self, eventType, json]() {
+        if (self) {
+            self->handleEvent(eventType, json);
+        }
     }, Qt::QueuedConnection);
 }
 
@@ -169,6 +172,15 @@ void YMusicBackend::handleEvent(int eventType, const QString &jsonData) {
             if (obj.contains("has_more")) m_searchHasMore = obj["has_more"].toBool(false);
             if (obj.contains("loading_more")) m_searchLoadingMore = obj["loading_more"].toBool(false);
             if (obj.contains("history")) m_searchHistory = obj["history"].toArray().toVariantList();
+        } else if (type == "hook_request") {
+            const quint64 id = static_cast<quint64>(obj["id"].toInteger(0));
+            const QString point = obj["point"].toString();
+            const QVariant payload = obj["payload"].toVariant();
+            emit hookRequestReceived(id, point, payload);
+            break;
+        } else if (type == "mod_warning") {
+            emit modWarningReceived(obj["message"].toString());
+            break;
         } else if (type == "batch") m_batch = obj.toVariantMap();
         else if (type == "wave_settings") m_waveSettings = obj.toVariantMap();
         else if (type == "wave_applied") m_waveSettings["selected"] = obj["selected"].toObject().toVariantMap();
@@ -544,4 +556,16 @@ void YMusicBackend::sleepTimerTick() {
     m_sleepTimerTotalSecs = 0;
     m_sleepFade = ymusic::SleepFade::None;
     emit sleepTimerChanged();
+}
+
+void YMusicBackend::hookSubscribe(const QString &point, bool enabled) {
+    if (!m_core) return;
+    const QByteArray utf8 = point.toUtf8();
+    ymusic_hook_subscribe(m_core, utf8.constData(), enabled);
+}
+
+void YMusicBackend::hookResponse(quint64 id, const QString &json) {
+    if (!m_core) return;
+    const QByteArray utf8 = json.toUtf8();
+    ymusic_hook_response(m_core, static_cast<uint64_t>(id), utf8.constData());
 }

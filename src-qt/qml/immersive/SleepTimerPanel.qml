@@ -32,18 +32,18 @@ Item {
         "Громкость плавно снизится за последние 10 секунд",
         "Громкость будет плавно снижаться на протяжении всего таймера"
     ]
-    readonly property int fadeIndex: Math.max(0, fades.indexOf(appSettings.sleepTimerFade))
+    readonly property int fadeIndex: Math.max(0, fades.indexOf(AppSettings.sleepTimerFade))
 
     property int hours: 0
     property int minutes: 30
     property int seconds: 0
-    readonly property int duration: hours * 3600 + minutes * 60 + (appSettings.debuggingEnabled ? seconds : 0)
+    readonly property int duration: hours * 3600 + minutes * 60 + (AppSettings.debuggingEnabled ? seconds : 0)
 
     property int remaining: 0
 
     function refresh() {
-        const deadline = backend.sleepTimerDeadline;
-        remaining = backend.sleepTimerRunning && deadline
+        const deadline = Backend.sleepTimerDeadline;
+        remaining = Backend.sleepTimerRunning && deadline
             ? Math.max(0, Math.ceil((deadline.getTime() - Date.now()) / 1000))
             : 0;
     }
@@ -60,12 +60,12 @@ Item {
     Timer {
         interval: 1000
         repeat: true
-        running: backend.sleepTimerRunning && root.visible
+        running: Backend.sleepTimerRunning && root.visible
         triggeredOnStart: true
         onTriggered: root.refresh()
     }
     Connections {
-        target: backend
+        target: Backend
         function onSleepTimerChanged() { root.refresh() }
     }
 
@@ -147,7 +147,7 @@ Item {
 
         Item {
             width: parent.width
-            height: backend.sleepTimerRunning ? countdown.implicitHeight : pickers.implicitHeight
+            height: Backend.sleepTimerRunning ? countdown.implicitHeight : pickers.implicitHeight
 
             Behavior on height {
                 ElementMove {}
@@ -157,7 +157,7 @@ Item {
                 id: pickers
                 anchors.centerIn: parent
                 spacing: 12
-                opacity: backend.sleepTimerRunning ? 0 : 1
+                opacity: Backend.sleepTimerRunning ? 0 : 1
                 visible: opacity > 0
 
                 Behavior on opacity {
@@ -177,7 +177,7 @@ Item {
                     onStepped: (value) => root.minutes = value
                 }
                 Stepper {
-                    visible: appSettings.debuggingEnabled
+                    visible: AppSettings.debuggingEnabled
                     value: root.seconds
                     maximum: 59
                     unit: "с"
@@ -192,7 +192,7 @@ Item {
                 implicitHeight: 236
                 width: implicitWidth
                 height: implicitHeight
-                opacity: backend.sleepTimerRunning ? 1 : 0
+                opacity: Backend.sleepTimerRunning ? 1 : 0
                 visible: opacity > 0
 
                 Behavior on opacity {
@@ -206,7 +206,7 @@ Item {
                     thickness: 5
                     amplitude: 3
                     wavelength: 24
-                    progress: backend.sleepTimerTotalSecs > 0 ? Math.min(1, root.remaining / backend.sleepTimerTotalSecs) : 0
+                    progress: Backend.sleepTimerTotalSecs > 0 ? Math.min(1, root.remaining / Backend.sleepTimerTotalSecs) : 0
 
                     Behavior on progress {
                         NumberAnimation { duration: 1000 }
@@ -244,14 +244,14 @@ Item {
             contentColor: Qt.rgba(1, 1, 1, 0.8)
             selectedContentColor: "#141414"
             currentIndex: root.fadeIndex
-            enabled: !backend.sleepTimerRunning
+            enabled: !Backend.sleepTimerRunning
             opacity: enabled ? 1 : 0.38
             segments: [
                 Segment { text: "Сразу" },
                 Segment { text: "10 сек" },
                 Segment { text: "Плавно" }
             ]
-            onActivated: (index) => appSettings.sleepTimerFade = root.fades[index]
+            onActivated: (index) => AppSettings.sleepTimerFade = root.fades[index]
         }
 
         Column {
@@ -261,18 +261,18 @@ Item {
             TextButton {
                 anchors.horizontalCenter: parent.horizontalCenter
                 scheme: root.scheme
-                symbol: backend.sleepTimerRunning ? "close" : "bedtime"
-                text: backend.sleepTimerRunning ? "Отменить таймер" : "Запустить таймер"
+                symbol: Backend.sleepTimerRunning ? "close" : "bedtime"
+                text: Backend.sleepTimerRunning ? "Отменить таймер" : "Запустить таймер"
                 colBackground: Qt.rgba(1, 1, 1, 0.14)
                 colBackgroundHover: Qt.rgba(1, 1, 1, 0.2)
                 colRipple: Qt.rgba(1, 1, 1, 0.24)
-                labelColor: backend.sleepTimerRunning ? root.scheme.error : "white"
-                enabled: backend.sleepTimerRunning || root.duration > 0
+                labelColor: Backend.sleepTimerRunning ? root.scheme.error : "white"
+                enabled: Backend.sleepTimerRunning || root.duration > 0
                 onClicked: {
-                    if (backend.sleepTimerRunning) {
-                        backend.cancelSleepTimer();
+                    if (Backend.sleepTimerRunning) {
+                        Backend.cancelSleepTimer();
                     } else {
-                        backend.startSleepTimer(root.duration, appSettings.sleepTimerFade);
+                        Backend.startSleepTimer(root.duration, AppSettings.sleepTimerFade);
                     }
                 }
             }

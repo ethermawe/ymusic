@@ -28,34 +28,34 @@ import ymusic.ui
 ApplicationWindow {
     id: window
 
-    readonly property real zoom: appSettings.zoom
+    readonly property real zoom: AppSettings.zoom
     readonly property real layoutWidth: width / zoom
     readonly property real layoutHeight: height / zoom
     readonly property bool compactWindow: layoutWidth < 920
     property bool sidebarResizing: false
     property bool sidebarDragCompact: false
-    property real liveSidebarWidth: appSettings.sidebarWidth
+    property real liveSidebarWidth: AppSettings.sidebarWidth
     property bool inspectorResizing: false
-    property real liveRightPanelWidth: appSettings.rightPanelWidth
+    property real liveRightPanelWidth: AppSettings.rightPanelWidth
     readonly property real maxSidebarWidth: Math.max(160, Math.min(340, layoutWidth - 650))
-    readonly property real desiredRightPanelWidth: inspectorResizing ? liveRightPanelWidth : appSettings.rightPanelWidth
+    readonly property real desiredRightPanelWidth: inspectorResizing ? liveRightPanelWidth : AppSettings.rightPanelWidth
     readonly property real maxRightPanelWidth: Math.max(200, Math.min(520, layoutWidth - sidebar.width - 436))
     readonly property real activeRightPanelWidth: Math.max(200, Math.min(desiredRightPanelWidth, maxRightPanelWidth))
     readonly property bool rightPanelFits: layoutWidth - sidebar.width - 200 - 32 >= 404
 
     readonly property bool isModPage: UiState.activeModPageId.length > 0
-    readonly property bool isHome: !isModPage && backend.page === 0
-    readonly property bool isWavePage: !isModPage && backend.page === 1
-    readonly property bool isCardsPage: !isModPage && backend.page >= 3 && backend.page <= 5
-    readonly property bool isSearchPage: !isModPage && backend.page === 8
-    readonly property bool isTrackListPage: !isModPage && (backend.page === 2 || backend.page === 7
+    readonly property bool isHome: !isModPage && Backend.page === 0
+    readonly property bool isWavePage: !isModPage && Backend.page === 1
+    readonly property bool isCardsPage: !isModPage && Backend.page >= 3 && Backend.page <= 5
+    readonly property bool isSearchPage: !isModPage && Backend.page === 8
+    readonly property bool isTrackListPage: !isModPage && (Backend.page === 2 || Backend.page === 7
         || (!isHome && !isWavePage && !isCardsPage && !isSearchPage))
 
     readonly property bool isMacOS: Qt.platform.os === "osx"
     readonly property bool isWindows: Qt.platform.os === "windows"
-    readonly property bool inAppWindowControls: !isMacOS && (isWindows ? !appSettings.nativeTitleBar : appSettings.showWindowControls)
+    readonly property bool inAppWindowControls: !isMacOS && (isWindows ? !AppSettings.nativeTitleBar : AppSettings.showWindowControls)
     readonly property real titleBarInset: isMacOS ? 28
-        : (inAppWindowControls && !appSettings.windowControlsOnRight ? 36 : 0)
+        : (inAppWindowControls && !AppSettings.windowControlsOnRight ? 36 : 0)
 
     readonly property bool onScreen: visible && visibility !== Window.Minimized
 
@@ -64,12 +64,12 @@ ApplicationWindow {
     minimumWidth: Math.ceil(500 * zoom)
     minimumHeight: Math.ceil(420 * zoom)
     visible: true
-    title: backend.hasTrack ? (backend.nowTitle + " — Yandex Music") : "Yandex Music"
+    title: Backend.hasTrack ? (Backend.nowTitle + " — Yandex Music") : "Yandex Music"
     flags: isMacOS ? (Qt.Window | Qt.ExpandedClientAreaHint | Qt.NoTitleBarBackgroundHint)
-         : appSettings.nativeTitleBar ? (Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
+         : AppSettings.nativeTitleBar ? (Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
          : (Qt.Window | Qt.FramelessWindowHint)
     color: immersiveReveal > 0 ? PlayerStyle.darkScheme.layer0 : Appearance.colors.layer0
-    onColorChanged: windowController.updateTheme(window, window.color)
+    onColorChanged: WindowController.updateTheme(window, window.color)
 
     function closeCrowdedPanels() {
         if (!rightPanelFits) {
@@ -97,6 +97,20 @@ ApplicationWindow {
         }
         function onSettingsRequested() { window.openSettings(); }
         function onCreatePlaylistRequested() { createPlaylist.open(); }
+        function onLyricsToggleRequested() { UiState.toggleLyricsPanel(); }
+        function onQueueToggleRequested() { UiState.toggleQueuePanel(); }
+    }
+
+    Binding {
+        target: ModManager
+        property: "showingLyrics"
+        value: UiState.showingLyrics
+    }
+
+    Binding {
+        target: ModManager
+        property: "showingQueue"
+        value: UiState.showingQueue
     }
 
     function openSettings() {
@@ -114,8 +128,8 @@ ApplicationWindow {
     }
 
     onClosing: (close) => {
-        backend.saveSession();
-        if (trayAvailable && appSettings.minimizeToTray) {
+        Backend.saveSession();
+        if (WindowController.trayAvailable && AppSettings.minimizeToTray) {
             close.accepted = false;
             window.hide();
         }
@@ -124,8 +138,8 @@ ApplicationWindow {
     // Zoom handling across window content and overlay popups
     readonly property real zoomStep: 0.05
     function setZoom(value: real) {
-        appSettings.zoom = Number(Math.min(1.3, Math.max(0.8, value)).toFixed(2));
-        toast.show("Масштаб " + Math.round(appSettings.zoom * 100) + "%");
+        AppSettings.zoom = Number(Math.min(1.3, Math.max(0.8, value)).toFixed(2));
+        toast.show("Масштаб " + Math.round(AppSettings.zoom * 100) + "%");
     }
     function syncOverlayZoom() {
         const overlay = Overlay.overlay;
@@ -146,20 +160,30 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
-        windowController.attach(window, appSettings.nativeTitleBar);
+        WindowController.attach(window, AppSettings.nativeTitleBar);
         syncOverlayZoom();
         Qt.callLater(window.syncOverlayZoom);
+        Qt.callLater(() => {
+            const current = Updater.currentVersion;
+            if (!current || current.length === 0) return;
+            const seen = AppSettings.lastSeenVersion;
+            if (seen.length === 0) {
+                AppSettings.lastSeenVersion = current;
+            } else if (seen !== current && whatsNewDialog.items.length > 0) {
+                whatsNewDialog.open();
+            }
+        });
     }
 
     Connections {
-        target: appSettings
+        target: AppSettings
         function onNativeTitleBarChanged() {
-            windowController.setNativeTitleBar(window, appSettings.nativeTitleBar);
+            WindowController.setNativeTitleBar(window, AppSettings.nativeTitleBar);
         }
     }
 
     Connections {
-        target: backend
+        target: Backend
         function onTrackMenuRequested(id, title, available, x, y) {
             trackMenu.prepareFor(id, title, available);
             const s = Math.max(0.01, window.zoom);
@@ -179,7 +203,7 @@ ApplicationWindow {
     Binding {
         target: UiState
         property: "spinning"
-        value: backend.playing && window.onScreen
+        value: Backend.playing && window.onScreen
     }
 
     // Two-phase organic shape mask transition for Immersive Player
@@ -197,7 +221,7 @@ ApplicationWindow {
 
     function shapeMotion(milliseconds: int): int {
         if (immersiveFades) return 0;
-        const scaled = appSettings.fastImmersiveTransition ? Math.round(milliseconds * 0.42) : milliseconds;
+        const scaled = AppSettings.fastImmersiveTransition ? Math.round(milliseconds * 0.42) : milliseconds;
         return Appearance.motion(scaled);
     }
 
@@ -213,7 +237,7 @@ ApplicationWindow {
         target: UiState
         function onImmersiveOpenChanged() {
             if (UiState.immersiveOpen) {
-                window.revealShape = appSettings.noShapes ? "circle"
+                window.revealShape = AppSettings.noShapes ? "circle"
                     : window.revealShapes[Math.floor(Math.random() * window.revealShapes.length)];
             }
             openMotion.stop();
@@ -245,17 +269,17 @@ ApplicationWindow {
                 NumberAnimation {
                     target: window
                     property: "revealReach"
-                    to: appSettings.fastImmersiveTransition ? 1 : 0.2
-                    duration: window.shapeMotion(appSettings.fastImmersiveTransition ? 420 : 260)
-                    easing.type: appSettings.fastImmersiveTransition ? Easing.OutCubic : Easing.OutBack
+                    to: AppSettings.fastImmersiveTransition ? 1 : 0.2
+                    duration: window.shapeMotion(AppSettings.fastImmersiveTransition ? 420 : 260)
+                    easing.type: AppSettings.fastImmersiveTransition ? Easing.OutCubic : Easing.OutBack
                     easing.overshoot: 2.4
                 }
-                PauseAnimation { duration: appSettings.fastImmersiveTransition ? 0 : window.shapeMotion(60) }
+                PauseAnimation { duration: AppSettings.fastImmersiveTransition ? 0 : window.shapeMotion(60) }
                 NumberAnimation {
                     target: window
                     property: "revealReach"
                     to: 1
-                    duration: appSettings.fastImmersiveTransition ? 0 : window.shapeMotion(280)
+                    duration: AppSettings.fastImmersiveTransition ? 0 : window.shapeMotion(280)
                     easing.type: Easing.InBack
                     easing.overshoot: 1.2
                 }
@@ -376,13 +400,13 @@ ApplicationWindow {
             anchors.topMargin: 8 + window.titleBarInset
             anchors.leftMargin: 8
             anchors.bottomMargin: 8
-            compact: window.compactWindow || (window.sidebarResizing ? window.sidebarDragCompact : appSettings.sidebarCollapsed)
+            compact: window.compactWindow || (window.sidebarResizing ? window.sidebarDragCompact : AppSettings.sidebarCollapsed)
             expandedWidth: window.sidebarResizing
                 ? window.liveSidebarWidth
-                : Math.max(160, Math.min(appSettings.sidebarWidth, window.maxSidebarWidth))
+                : Math.max(160, Math.min(AppSettings.sidebarWidth, window.maxSidebarWidth))
             resizing: window.sidebarResizing
             toggleVisible: !window.compactWindow
-            onToggleCompactRequested: appSettings.sidebarCollapsed = !appSettings.sidebarCollapsed
+            onToggleCompactRequested: AppSettings.sidebarCollapsed = !AppSettings.sidebarCollapsed
             onSettingsRequested: window.openSettings()
         }
 
@@ -408,7 +432,7 @@ ApplicationWindow {
                 Column {
                     anchors.centerIn: parent
                     spacing: 14
-                    visible: !backend.authReady && backend.page !== 7
+                    visible: !Backend.authReady && Backend.page !== 7
                     LoadingSpinner { anchors.horizontalCenter: parent.horizontalCenter }
                     StyledText {
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -421,7 +445,7 @@ ApplicationWindow {
                 PageTransition {
                     id: loginPage
                     anchors.fill: parent
-                    shown: backend.authReady && !backend.loggedIn && backend.page !== 7
+                    shown: Backend.authReady && !Backend.loggedIn && Backend.page !== 7
 
                     Loader {
                         id: loginView
@@ -435,12 +459,12 @@ ApplicationWindow {
                 PageTransition {
                     id: homePage
                     anchors.fill: parent
-                    shown: backend.loggedIn && window.isHome
+                    shown: Backend.loggedIn && window.isHome
 
                     Loader {
                         id: homeView
                         anchors.fill: parent
-                        active: backend.loggedIn && homePage.everShown
+                        active: Backend.loggedIn && homePage.everShown
                         sourceComponent: HomeView {}
                     }
                 }
@@ -465,13 +489,13 @@ ApplicationWindow {
                 PageTransition {
                     id: searchPage
                     anchors.fill: parent
-                    shown: backend.loggedIn && window.isSearchPage
-                    transitionKey: backend.searchQuery
+                    shown: Backend.loggedIn && window.isSearchPage
+                    transitionKey: Backend.searchQuery
 
                     Loader {
                         id: searchView
                         anchors.fill: parent
-                        active: backend.loggedIn && searchPage.visible
+                        active: Backend.loggedIn && searchPage.visible
                         sourceComponent: SearchView {}
                     }
                 }
@@ -480,12 +504,12 @@ ApplicationWindow {
                 PageTransition {
                     id: wavePage
                     anchors.fill: parent
-                    shown: backend.loggedIn && window.isWavePage
+                    shown: Backend.loggedIn && window.isWavePage
 
                     Loader {
                         id: waveStageView
                         anchors.fill: parent
-                        active: backend.loggedIn && wavePage.visible
+                        active: Backend.loggedIn && wavePage.visible
                         sourceComponent: WaveHero {}
                     }
                 }
@@ -494,8 +518,8 @@ ApplicationWindow {
                 PageTransition {
                     id: cardsView
                     anchors.fill: parent
-                    shown: backend.loggedIn && window.isCardsPage
-                    transitionKey: String(backend.page)
+                    shown: Backend.loggedIn && window.isCardsPage
+                    transitionKey: String(Backend.page)
 
                     GridView {
                         id: cardsGrid
@@ -512,7 +536,7 @@ ApplicationWindow {
                         flickDeceleration: 2400
                         displayMarginBeginning: 200
                         displayMarginEnd: 200
-                        model: backend.cards
+                        model: Backend.cards
 
                         displaced: Transition {
                             enabled: !Appearance.performanceMode
@@ -527,6 +551,16 @@ ApplicationWindow {
                         FastWheel { target: cardsGrid }
                         ScrollBar.vertical: StyledScrollBar { topPadding: 3 + Appearance.sizes.topBarHeight }
 
+                        property real lastContentY: 0
+                        onVisibleChanged: lastContentY = contentY
+                        onContentYChanged: {
+                            const dy = contentY - lastContentY;
+                            lastContentY = contentY;
+                            if (visible && contentHeight > height + 40 && Math.abs(dy) < 400) {
+                                UiState.reportScroll(dy, contentY <= originY + 8);
+                            }
+                        }
+
                         header: Column {
                             width: cardsGrid.width
                             spacing: 10
@@ -538,17 +572,17 @@ ApplicationWindow {
 
                                 TitleText {
                                     Layout.fillWidth: true
-                                    text: backend.page === 3 ? "Плейлисты"
-                                        : (backend.page === 4 ? "Альбомы"
-                                        : (backend.page === 5 ? "Любимые артисты"
-                                        : (backend.listTitle.length > 0 ? backend.listTitle : "Обзор")))
+                                    text: Backend.page === 3 ? "Плейлисты"
+                                        : (Backend.page === 4 ? "Альбомы"
+                                        : (Backend.page === 5 ? "Любимые артисты"
+                                        : (Backend.listTitle.length > 0 ? Backend.listTitle : "Обзор")))
                                     font.pixelSize: Appearance.fontSize.huge + 2
                                     font.weight: Font.Bold
                                     elide: Text.ElideRight
                                 }
 
                                 TextButton {
-                                    visible: backend.page === 3
+                                    visible: Backend.page === 3
                                     variant: TextButton.Tonal
                                     wavy: true
                                     symbol: "add"
@@ -559,8 +593,8 @@ ApplicationWindow {
 
                             StyledText {
                                 width: parent.width
-                                visible: backend.listSubtitle.length > 0
-                                text: backend.listSubtitle
+                                visible: Backend.listSubtitle.length > 0
+                                text: Backend.listSubtitle
                                 color: Appearance.colors.onSurfaceVariant
                             }
                         }
@@ -577,7 +611,7 @@ ApplicationWindow {
                     Column {
                         anchors.centerIn: parent
                         spacing: 12
-                        visible: backend.cards.count === 0 && backend.listLoading
+                        visible: Backend.cards.count === 0 && Backend.listLoading
                         LoadingSpinner {
                             anchors.horizontalCenter: parent.horizontalCenter
                             running: visible
@@ -592,7 +626,7 @@ ApplicationWindow {
                     EmptyState {
                         anchors.centerIn: parent
                         width: Math.min(420, parent.width - 48)
-                        visible: backend.cards.count === 0 && !backend.listLoading
+                        visible: Backend.cards.count === 0 && !Backend.listLoading
                         symbol: "library_music"
                         title: "Здесь пока пусто"
                         description: "В этом разделе пока нет подборок"
@@ -603,8 +637,8 @@ ApplicationWindow {
                 PageTransition {
                     id: trackListView
                     anchors.fill: parent
-                    shown: (backend.loggedIn || backend.page === 7) && window.isTrackListPage
-                    transitionKey: String(backend.page) + ":" + backend.activePlaylistKey
+                    shown: (Backend.loggedIn || Backend.page === 7) && window.isTrackListPage
+                    transitionKey: String(Backend.page) + ":" + Backend.activePlaylistKey
 
                     ListView {
                         id: listView
@@ -619,7 +653,7 @@ ApplicationWindow {
                         flickDeceleration: 2400
                         displayMarginBeginning: 200
                         displayMarginEnd: 200
-                        model: backend.tracks
+                        model: Backend.tracks
 
                         displaced: Transition {
                             enabled: !Appearance.performanceMode
@@ -633,6 +667,16 @@ ApplicationWindow {
 
                         FastWheel { target: listView }
                         ScrollBar.vertical: StyledScrollBar { topPadding: 3 + Appearance.sizes.topBarHeight }
+
+                        property real lastContentY: 0
+                        onVisibleChanged: lastContentY = contentY
+                        onContentYChanged: {
+                            const dy = contentY - lastContentY;
+                            lastContentY = contentY;
+                            if (visible && contentHeight > height + 40 && Math.abs(dy) < 400) {
+                                UiState.reportScroll(dy, contentY <= originY + 8);
+                            }
+                        }
 
                         header: CollectionHero {
                             width: listView.width
@@ -650,7 +694,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 Layout.topMargin: 18
                                 spacing: 12
-                                visible: backend.isArtistView && backend.cards.count > 0
+                                visible: Backend.isArtistView && Backend.cards.count > 0
 
                                 SectionHeader {
                                     Layout.fillWidth: true
@@ -670,7 +714,7 @@ ApplicationWindow {
                                     spacing: 16
                                     clip: true
                                     reuseItems: true
-                                    model: trackListView.shown && backend.isArtistView ? backend.cards : null
+                                    model: trackListView.shown && Backend.isArtistView ? Backend.cards : null
                                     delegate: Item {
                                         id: artistAlbumSlot
                                         required property int index
@@ -695,20 +739,20 @@ ApplicationWindow {
                     Column {
                         anchors.centerIn: parent
                         spacing: 14
-                        visible: backend.tracks.count === 0 && backend.listLoading
+                        visible: Backend.tracks.count === 0 && Backend.listLoading
                         LoadingSpinner {
                             anchors.horizontalCenter: parent.horizontalCenter
                             running: visible
                         }
                         StyledText {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: backend.page === 1 ? "Настраиваем Мою волну…" : "Загрузка треков…"
+                            text: Backend.page === 1 ? "Настраиваем Мою волну…" : "Загрузка треков…"
                             font.pixelSize: Appearance.fontSize.large
                             font.weight: Font.DemiBold
                         }
                         StyledText {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: backend.page === 1 ? "Подбираем треки под ваше настроение" : "Секундочку…"
+                            text: Backend.page === 1 ? "Подбираем треки под ваше настроение" : "Секундочку…"
                             color: Appearance.colors.onSurfaceVariant
                         }
                     }
@@ -716,12 +760,12 @@ ApplicationWindow {
                     EmptyState {
                         anchors.centerIn: parent
                         width: Math.min(440, parent.width - 48)
-                        visible: backend.tracks.count === 0 && !backend.listLoading
-                        symbol: backend.page === 2 ? "favorite" : "music_note"
-                        title: backend.page === 7 ? "Пока ничего не загружено"
-                             : (backend.page === 2 ? "Пока нет любимых треков" : "Нет треков")
-                        description: backend.page === 7 ? "Откройте меню трека или нажмите «Скачать всё» в коллекции"
-                                   : (backend.page === 2 ? "Отмечайте треки сердцем, чтобы найти их здесь"
+                        visible: Backend.tracks.count === 0 && !Backend.listLoading
+                        symbol: Backend.page === 2 ? "favorite" : "music_note"
+                        title: Backend.page === 7 ? "Пока ничего не загружено"
+                             : (Backend.page === 2 ? "Пока нет любимых треков" : "Нет треков")
+                        description: Backend.page === 7 ? "Откройте меню трека или нажмите «Скачать всё» в коллекции"
+                                   : (Backend.page === 2 ? "Отмечайте треки сердцем, чтобы найти их здесь"
                                    : "Треки появятся здесь, когда будут доступны")
                     }
                 }
@@ -752,7 +796,7 @@ ApplicationWindow {
                 anchors.top: parent.top
                 window: window
                 backdropSource: pageContent
-                windowControlsOnRight: window.inAppWindowControls && appSettings.windowControlsOnRight
+                windowControlsOnRight: window.inAppWindowControls && AppSettings.windowControlsOnRight
                 inspectorShown: inspector.shown
             }
 
@@ -762,8 +806,8 @@ ApplicationWindow {
                 anchors.top: topBar.bottom
                 anchors.topMargin: 4
                 z: 40
-                message: backend.statusMessage
-                onDismissed: backend.clearStatus()
+                message: Backend.statusMessage
+                onDismissed: Backend.clearStatus()
             }
 
             // Auto-update ready banner (Windows)
@@ -773,7 +817,7 @@ ApplicationWindow {
                 anchors.topMargin: 8
                 width: Math.min(540, sheet.width - 40)
                 height: 68
-                Reveal.shown: updater.updateBannerVisible
+                Reveal.shown: Updater.updateBannerVisible
                 Reveal.scaleFrom: 0.92
                 Reveal.overshoot: 1.8
                 color: Appearance.colors.surfaceContainerHigh
@@ -804,15 +848,15 @@ ApplicationWindow {
                         spacing: 2
                         StyledText {
                             Layout.fillWidth: true
-                            text: updater.readyToInstall
-                                ? ("Обновление v" + updater.latestVersion + " готово")
-                                : ("Доступна версия v" + updater.latestVersion)
+                            text: Updater.readyToInstall
+                                ? ("Обновление v" + Updater.latestVersion + " готово")
+                                : ("Доступна версия v" + Updater.latestVersion)
                             font.weight: Font.DemiBold
                             elide: Text.ElideRight
                         }
                         StyledText {
                             Layout.fillWidth: true
-                            text: updater.readyToInstall
+                            text: Updater.readyToInstall
                                 ? "Нажмите, чтобы перезапустить и установить"
                                 : "Откройте страницу релиза на GitHub для обновления"
                             font.pixelSize: Appearance.fontSize.smaller
@@ -822,16 +866,16 @@ ApplicationWindow {
                     }
                     TextButton {
                         variant: TextButton.Filled
-                        symbol: updater.readyToInstall ? "restart_alt" : "open_in_new"
-                        text: updater.readyToInstall ? "Перезапустить и обновить" : "Скачать"
-                        onClicked: updater.installAndRestart()
+                        symbol: Updater.readyToInstall ? "restart_alt" : "open_in_new"
+                        text: Updater.readyToInstall ? "Перезапустить и обновить" : "Скачать"
+                        onClicked: Updater.installAndRestart()
                     }
                     IconButton {
                         Layout.alignment: Qt.AlignVCenter
                         symbol: "close"
                         size: 32
                         iconSize: 18
-                        onClicked: updater.dismissBanner()
+                        onClicked: Updater.dismissBanner()
                     }
                 }
             }
@@ -843,7 +887,7 @@ ApplicationWindow {
                 anchors.bottomMargin: 12
                 width: Math.min(540, sheet.width - 40)
                 height: 70
-                Reveal.shown: backend.batch.running === true
+                Reveal.shown: Backend.batch.running === true
                 Reveal.scaleFrom: 0.92
                 Reveal.overshoot: 1.8
                 color: Appearance.colors.surfaceContainerHigh
@@ -861,20 +905,20 @@ ApplicationWindow {
                         Layout.alignment: Qt.AlignVCenter
                         width: 24
                         height: 24
-                        running: backend.batch.running === true
+                        running: Backend.batch.running === true
                     }
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 2
                         StyledText {
                             Layout.fillWidth: true
-                            text: backend.batch.title || "Скачивание коллекции"
+                            text: Backend.batch.title || "Скачивание коллекции"
                             font.weight: Font.DemiBold
                             elide: Text.ElideRight
                         }
                         StyledText {
-                            text: (backend.batch.done || 0) + " / " + (backend.batch.total || 0)
-                                + (backend.batch.failed > 0 ? (" · ошибок: " + backend.batch.failed) : "")
+                            text: (Backend.batch.done || 0) + " / " + (Backend.batch.total || 0)
+                                + (Backend.batch.failed > 0 ? (" · ошибок: " + Backend.batch.failed) : "")
                             font.pixelSize: Appearance.fontSize.smaller
                             color: Appearance.colors.onSurfaceVariant
                         }
@@ -883,7 +927,7 @@ ApplicationWindow {
                         variant: TextButton.Tonal
                         symbol: "close"
                         text: "Отменить"
-                        onClicked: backend.feature({action: "cancel_download"})
+                        onClicked: Backend.feature({action: "cancel_download"})
                     }
                 }
             }
@@ -891,12 +935,33 @@ ApplicationWindow {
             // Floating Pill Player Bar
             FloatingPlayerBar {
                 id: playerBar
+                readonly property bool scrollHidden: UiState.playerBarHiddenByScroll
+                    && !playerBarHover.hovered
+                    && !playerBar.progressExpanded
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: window.compactWindow ? 10 : 14
                 width: Math.max(0, Math.min(760, sheet.width - (window.compactWindow ? 24 : 36)))
-                Reveal.shown: backend.loggedIn || backend.page === 7 || backend.hasTrack
+                Reveal.shown: (Backend.loggedIn || Backend.page === 7 || Backend.hasTrack) && !ModManager.playerBarHidden
                 onImmersiveRequested: UiState.openImmersive()
+
+                transform: Translate {
+                    y: playerBar.scrollHidden ? (playerBar.height + playerBar.anchors.bottomMargin + 24) : 0
+                    Behavior on y {
+                        enabled: !Appearance.performanceMode
+                        NumberAnimation {
+                            duration: Appearance.motion(playerBar.scrollHidden ? 260 : 360)
+                            easing.type: Easing.BezierSpline
+                            easing.bezierCurve: playerBar.scrollHidden
+                                ? Appearance.curves.emphasizedAccel
+                                : Appearance.curves.expressiveDefaultSpatial
+                        }
+                    }
+                }
+
+                HoverHandler {
+                    id: playerBarHover
+                }
             }
         }
 
@@ -906,11 +971,11 @@ ApplicationWindow {
             readonly property bool shown: (UiState.showingLyrics || UiState.showingQueue)
                 && !UiState.immersiveOpen
                 && window.rightPanelFits
-                && (backend.loggedIn || backend.page === 7 || backend.hasTrack)
+                && (Backend.loggedIn || Backend.page === 7 || Backend.hasTrack)
             anchors.right: parent.right
             anchors.rightMargin: shown ? 8 : 0
             anchors.top: parent.top
-            anchors.topMargin: 8 + (window.inAppWindowControls && appSettings.windowControlsOnRight ? 36 : 0)
+            anchors.topMargin: 8 + (window.inAppWindowControls && AppSettings.windowControlsOnRight ? 36 : 0)
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 8
             width: shown ? window.activeRightPanelWidth : 0
@@ -995,17 +1060,17 @@ ApplicationWindow {
                     }
                 }
                 onReleased: {
-                    appSettings.sidebarCollapsed = window.sidebarDragCompact;
+                    AppSettings.sidebarCollapsed = window.sidebarDragCompact;
                     if (!window.sidebarDragCompact) {
-                        appSettings.sidebarWidth = window.liveSidebarWidth;
+                        AppSettings.sidebarWidth = window.liveSidebarWidth;
                     }
                     window.sidebarResizing = false;
                 }
                 onCanceled: window.sidebarResizing = false
                 onDoubleClicked: {
                     window.sidebarResizing = false;
-                    appSettings.sidebarCollapsed = false;
-                    appSettings.sidebarWidth = 220;
+                    AppSettings.sidebarCollapsed = false;
+                    AppSettings.sidebarWidth = 220;
                 }
             }
         }
@@ -1058,15 +1123,27 @@ ApplicationWindow {
                     window.liveRightPanelWidth = Math.max(200, Math.min(window.maxRightPanelWidth, raw));
                 }
                 onReleased: {
-                    appSettings.rightPanelWidth = window.liveRightPanelWidth;
+                    AppSettings.rightPanelWidth = window.liveRightPanelWidth;
                     window.inspectorResizing = false;
                 }
                 onCanceled: window.inspectorResizing = false
                 onDoubleClicked: {
                     window.inspectorResizing = false;
-                    appSettings.rightPanelWidth = 320;
+                    AppSettings.rightPanelWidth = 320;
                 }
             }
+        }
+
+        ModSlotHost {
+            anchors.fill: parent
+            z: 80
+            slotName: "window.overlay"
+            slotContext: ({
+                windowWidth: window.layoutWidth,
+                windowHeight: window.layoutHeight,
+                compactWindow: window.compactWindow,
+                immersiveOpen: UiState.immersiveOpen
+            })
         }
     }
 
@@ -1110,7 +1187,7 @@ ApplicationWindow {
         id: appWindowControls
         objectName: "appWindowControls"
         z: 150
-        x: appSettings.windowControlsOnRight ? parent.width - width - 12 : 12
+        x: AppSettings.windowControlsOnRight ? parent.width - width - 12 : 12
         y: 8
         visible: window.inAppWindowControls && window.visibility !== Window.FullScreen
         compact: true
@@ -1134,7 +1211,7 @@ ApplicationWindow {
         delegate: MouseArea {
             required property var modelData
             z: 250
-            enabled: !appSettings.nativeTitleBar && !window.isMacOS && !window.isWindows
+            enabled: !AppSettings.nativeTitleBar && !window.isMacOS && !window.isWindows
                 && window.visibility === Window.Windowed
             visible: enabled
             cursorShape: modelData.cursor
@@ -1223,7 +1300,7 @@ ApplicationWindow {
                 symbol: "restart_alt"
                 onClicked: {
                     restartModsDialog.accept();
-                    backend.saveSession();
+                    Backend.saveSession();
                     ModManager.requestAppRestart();
                 }
             }
@@ -1235,33 +1312,77 @@ ApplicationWindow {
         parent: Overlay.overlay
     }
 
+    WhatsNewDialog {
+        id: whatsNewDialog
+        parent: Overlay.overlay
+    }
+
     TrackMenu {
         id: trackMenu
         parent: Overlay.overlay
     }
 
+    // Sandboxed floating desktop windows for mods with "ui:window" permission
+    Instantiator {
+        model: ModManager.floatingWindowEntries
+        delegate: Window {
+            id: modFloatWin
+            required property var modelData
+            readonly property string modId: modelData.modId || ""
+            readonly property bool openFlag: {
+                const _rev = ModManager.floatingWindowsRevision;
+                return ModManager.isFloatingWindowOpen(modId);
+            }
+
+            visible: openFlag
+            flags: Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+            color: "transparent"
+            title: modelData.title || modId
+            width: Math.max(80, Math.min(640, floatSlot.implicitWidth > 0 ? floatSlot.implicitWidth : 440))
+            height: Math.max(24, Math.min(480, floatSlot.implicitHeight > 0 ? floatSlot.implicitHeight : 230))
+            x: Screen.virtualX + Math.round((Screen.width - width) / 2)
+            y: Screen.virtualY
+
+            ModSlotItem {
+                id: floatSlot
+                anchors.fill: parent
+                modId: modFloatWin.modId
+                slotName: "window.floating"
+                sourceUrl: modFloatWin.modelData.sourceUrl || ""
+                reloadRevision: ModManager.reloadRevision
+                fillContent: true
+                fitWidth: false
+                slotContext: ({
+                    floating: true,
+                    screenWidth: Screen.width,
+                    screenHeight: Screen.height
+                })
+            }
+        }
+    }
+
     // Global keyboard shortcuts
-    Shortcut { sequence: "Space"; enabled: backend.hasTrack && !UiState.immersiveOpen; onActivated: backend.toggle() }
-    Shortcut { sequence: "Ctrl+Right"; enabled: backend.hasTrack; onActivated: backend.next() }
-    Shortcut { sequence: "Ctrl+Left"; enabled: backend.hasTrack; onActivated: backend.prev() }
+    Shortcut { sequence: "Space"; enabled: Backend.hasTrack && !UiState.immersiveOpen; onActivated: Backend.toggle() }
+    Shortcut { sequence: "Ctrl+Right"; enabled: Backend.hasTrack; onActivated: Backend.next() }
+    Shortcut { sequence: "Ctrl+Left"; enabled: Backend.hasTrack; onActivated: Backend.prev() }
     Shortcut {
         sequence: "Ctrl+Alt+Right"
-        enabled: backend.hasTrack && backend.durationSecs > 0
-        onActivated: backend.seek(Math.min(1, (backend.positionSecs + 10) / backend.durationSecs))
+        enabled: Backend.hasTrack && Backend.durationSecs > 0
+        onActivated: Backend.seek(Math.min(1, (Backend.positionSecs + 10) / Backend.durationSecs))
     }
     Shortcut {
         sequence: "Ctrl+Alt+Left"
-        enabled: backend.hasTrack && backend.durationSecs > 0
-        onActivated: backend.seek(Math.max(0, (backend.positionSecs - 10) / backend.durationSecs))
+        enabled: Backend.hasTrack && Backend.durationSecs > 0
+        onActivated: Backend.seek(Math.max(0, (Backend.positionSecs - 10) / Backend.durationSecs))
     }
-    Shortcut { sequence: "Ctrl+Up"; onActivated: backend.setVolume(Math.min(1, backend.volume + appSettings.volumeStep)) }
-    Shortcut { sequence: "Ctrl+Down"; onActivated: backend.setVolume(Math.max(0, backend.volume - appSettings.volumeStep)) }
-    Shortcut { sequence: "Ctrl+Alt+M"; onActivated: backend.toggleMute() }
-    Shortcut { sequence: "Ctrl+Alt+S"; enabled: backend.hasTrack; onActivated: backend.toggleShuffle() }
-    Shortcut { sequence: "Ctrl+Alt+R"; enabled: backend.hasTrack; onActivated: backend.toggleRepeat() }
+    Shortcut { sequence: "Ctrl+Up"; onActivated: Backend.setVolume(Math.min(1, Backend.volume + AppSettings.volumeStep)) }
+    Shortcut { sequence: "Ctrl+Down"; onActivated: Backend.setVolume(Math.max(0, Backend.volume - AppSettings.volumeStep)) }
+    Shortcut { sequence: "Ctrl+Alt+M"; onActivated: Backend.toggleMute() }
+    Shortcut { sequence: "Ctrl+Alt+S"; enabled: Backend.hasTrack; onActivated: Backend.toggleShuffle() }
+    Shortcut { sequence: "Ctrl+Alt+R"; enabled: Backend.hasTrack; onActivated: Backend.toggleRepeat() }
     Shortcut { sequence: "Ctrl+,"; onActivated: window.openSettings() }
-    Shortcut { sequences: [StandardKey.Back]; enabled: backend.canGoBack && !UiState.immersiveOpen; onActivated: backend.goBack() }
-    Shortcut { sequence: "Escape"; enabled: backend.canGoBack && !UiState.immersiveOpen; onActivated: backend.goBack() }
+    Shortcut { sequences: [StandardKey.Back]; enabled: Backend.canGoBack && !UiState.immersiveOpen; onActivated: Backend.goBack() }
+    Shortcut { sequence: "Escape"; enabled: Backend.canGoBack && !UiState.immersiveOpen; onActivated: Backend.goBack() }
     Shortcut { sequences: [StandardKey.Find, "Ctrl+K"]; enabled: !UiState.immersiveOpen; onActivated: topBar.focusSearch() }
     Shortcut { sequences: ["Ctrl++", "Ctrl+="]; onActivated: window.setZoom(window.zoom + window.zoomStep) }
     Shortcut { sequences: ["Ctrl+-"]; onActivated: window.setZoom(window.zoom - window.zoomStep) }

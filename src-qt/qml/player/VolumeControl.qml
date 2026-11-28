@@ -26,16 +26,16 @@ Item {
 
     property MaterialScheme scheme: Appearance.colors
     property bool expanded: false
-    readonly property string symbol: backend.volume <= 0.01 ? "volume_off"
-        : backend.volume <= 0.34 ? "volume_mute"
-        : backend.volume <= 0.67 ? "volume_down" : "volume_up"
+    readonly property string symbol: Backend.volume <= 0.01 ? "volume_off"
+        : Backend.volume <= 0.34 ? "volume_mute"
+        : Backend.volume <= 0.67 ? "volume_down" : "volume_up"
 
     implicitWidth: 32
     implicitHeight: 32
 
     WheelHandler {
         onWheel: (event) => {
-            backend.setVolume(Math.max(0, Math.min(1, backend.volume + event.angleDelta.y / 120 * appSettings.volumeStep)))
+            Backend.setVolume(Math.max(0, Math.min(1, Backend.volume + event.angleDelta.y / 120 * AppSettings.volumeStep)))
             event.accepted = true
         }
     }
@@ -56,7 +56,15 @@ Item {
 
         HoverHandler {
             id: pillHover
-            onHoveredChanged: if (!hovered && !slider.pressed) root.expanded = false
+            onHoveredChanged: {
+                if (hovered) {
+                    if (AppSettings.volumeExpandOnHover) {
+                        root.expanded = true
+                    }
+                } else if (!slider.pressed) {
+                    root.expanded = false
+                }
+            }
         }
 
         StyledSlider {
@@ -73,9 +81,9 @@ Item {
             handleLength: 20
             showStopIndicator: false
             showValueTip: true
-            enabled: !(backend.sleepTimerRunning && backend.sleepTimerFade === "fade")
-            value: backend.volume
-            onMoved: backend.setVolume(value)
+            enabled: !(Backend.sleepTimerRunning && Backend.sleepTimerFade === "fade")
+            value: Backend.volume
+            onMoved: Backend.setVolume(value)
             onPressedChanged: if (!pressed && !pillHover.hovered) root.expanded = false
 
             Behavior on opacity {
@@ -92,10 +100,10 @@ Item {
             scheme: root.scheme
             symbol: root.symbol
             iconColor: root.expanded ? root.scheme.primary : root.scheme.onSurfaceVariant
-            tooltip: root.expanded ? (backend.volume <= 0.01 ? qsTr("Включить звук") : qsTr("Выключить звук")) : qsTr("Громкость: ") + Math.round(backend.volume * 100) + "%"
+            tooltip: root.expanded ? (Backend.volume <= 0.01 ? qsTr("Включить звук") : qsTr("Выключить звук")) : qsTr("Громкость: ") + Math.round(Backend.volume * 100) + "%"
             onClicked: {
                 if (root.expanded) {
-                    backend.toggleMute()
+                    Backend.toggleMute()
                 } else {
                     root.expanded = true
                 }
